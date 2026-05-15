@@ -230,8 +230,6 @@ migrations/002_admin_tables.sql  # configuración, alertas, logs admin
 ### Paso 3 — Entorno Virtual y Dependencias
 
 ```bash
-python -m venv venv
-.\venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
@@ -245,7 +243,7 @@ python main.py
 
 ```
 ✓ Model loaded and ready
-✓ Lyra running on http://0.0.0.0:8010
+✓ Lyra running on http://0.0.0.0:8099
 ```
 
 > Si hay conflicto de puerto en Windows:
