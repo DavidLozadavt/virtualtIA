@@ -1,0 +1,362 @@
+"""
+core/voice_engine.py — Centralized Speech-to-Text and Text-to-Speech engine for Lyra.
+
+STT: OpenAI Whisper API (whisper-1) — máxima precisión, soporta cualquier tipo de voz
+TTS: edge-tts (Microsoft Neural TTS) — 100% GRATIS, voz humana y natural en español
+
+Voces disponibles para español colombiano (edge-tts):
+  es-CO-SalomeNeural    → femenina, natural colombiana ★ recomendada
+  es-CO-GonzaloNeural   → masculina, natural colombiana
+  es-MX-DaliaNeural     → femenina, mexicana, muy natural
+  es-MX-JorgeNeural     → masculina, mexicana
+  es-ES-ElviraNeural    → femenina, española
+  es-AR-ElenaNeural     → femenina, argentina
+
+Usage in any project: enable via voice.enabled: true in the project's YAML config.
+"""
+
+import logging
+import re as _re
+import edge_tts
+from io import BytesIO
+from typing import Literal, AsyncGenerator
+
+logger = logging.getLogger("lyra.voice")
+
+
+# ── Prompt hint para Whisper ──────────────────────────────────────────────────
+# Sesga el modelo hacia vocabulario cotidiano en español para mejorar precisión
+# con hablantes rápidos, lentos o con poca vocalización.
+_WHISPER_PROMPT_ES = (
+    "Sí. No. Ok. Vale. Dale. Claro. Listo. Bien. Perfecto. "
+    "Hola, buenos días. Busco un restaurante, barbería, hotel. "
+    "Quiero agendar una cita. Sí, me interesa. No, gracias. Ok, adelante. Dale, muéstrame."
+)
+
+
+def _is_gibberish(text: str) -> bool:
+    """
+    Detecta si el texto transcrito es basura/ruido (e.g. 'asdñlamdslkmasd').
+    Criterios:
+      1. Más del 60% consonantes seguidas sin vocal (bloques ilegibles).
+      2. Sin ningún carácter de espacio y longitud > 6 (palabra irreconocible).
+      3. Proporción de caracteres no-alfa > 40%.
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+    if len(t) <= 2:
+        return False
+    consonant_blocks = _re.findall(r'[bcdfghjklmnñpqrstvwxyz]{5,}', t)
+    if consonant_blocks:
+        return True
+    if ' ' not in t and len(t) > 8:
+        alpha = [c for c in t if c.isalpha()]
+        non_alpha = [c for c in t if not c.isalpha() and not c.isspace()]
+        if len(non_alpha) / max(len(t), 1) > 0.35:
+            return True
+        vowels = set('aeiouáéíóúü')
+        vowel_count = sum(1 for c in alpha if c in vowels)
+        if alpha and vowel_count / len(alpha) < 0.15:
+            return True
+    return False
+
+
+def _clean_for_tts(text: str) -> str:
+    """
+    Limpia el texto antes de enviarlo al motor TTS.
+    Elimina markdown, anclas internas y caracteres que suenan raro al hablar.
+    """
+    # Eliminar tags internos de Lyra [TAG:XX], [BIZ:XX], [ID:XX]
+    # Usamos [^\]]* para permitir IDs alfanuméricos
+    clean = _re.sub(r'\[BIZ:[^\]]*\]', '', text)
+    clean = _re.sub(r'\[ID:[^\]]*\]', '', clean)
+    clean = _re.sub(r'\[TAG:[^\]]*\]', '', clean)
+    
+    # Convertir **negrita** e *itálica* a texto plano
+    clean = _re.sub(r'\*{1,2}(.+?)\*{1,2}', r'\1', clean)
+    
+    # Eliminar headings markdown
+    clean = _re.sub(r'#{1,6}\s*', '', clean)
+    
+    # Convertir viñetas al inicio de línea
+    clean = _re.sub(r'^\s*[•·\-]\s*', '', clean, flags=_re.MULTILINE)
+    
+    # Colapsar saltos de línea en pausas
+    clean = _re.sub(r'\n+', '. ', clean)
+    
+    # Limpieza final de caracteres extraños pero permitiendo lo básico pronunciable
+    clean = _re.sub(r'[^\w\s\.,;:¿?¡!\[\]\-:]', '', clean, flags=_re.UNICODE)
+    
+    result = _re.sub(r'\s+', ' ', clean).strip()
+    return result if result else " "  # Nunca retornar vacío para no romper el stream Audio
+
+
+class VoiceEngine:
+    """
+    Motor de voz reutilizable en cualquier proyecto Lyra.
+
+    STT: OpenAI Whisper (requiere OPENAI_API_KEY)
+    TTS: edge-tts de Microsoft — 100% GRATUITO, voces neurales de alta calidad
+    """
+
+    SUPPORTED_AUDIO_FORMATS = {"audio/webm", "audio/wav", "audio/mp3", "audio/mpeg", "audio/ogg", "audio/m4a"}
+    MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
+
+    # Mapeo de content-type → extensión para que Whisper decodifique correctamente
+    _MIME_TO_EXT = {
+        "audio/webm": "webm",
+        "audio/wav":  "wav",
+        "audio/mp3":  "mp3",
+        "audio/mpeg": "mp3",
+        "audio/ogg":  "ogg",
+        "audio/m4a":  "m4a",
+        "audio/mp4":  "m4a",
+    }
+
+    def __init__(self, api_key: str):
+        # STT: OpenAI Whisper
+        try:
+            from openai import AsyncOpenAI
+            from core.config import settings
+            
+            if settings.GROQ_API_KEY:
+                self.openai_client = AsyncOpenAI(
+                    api_key=settings.GROQ_API_KEY,
+                    base_url="https://api.groq.com/openai/v1"
+                )
+                self.stt_model = "whisper-large-v3"
+                self.stt_available = True
+                logger.info("VoiceEngine STT (Groq) inicializado.")
+            elif settings.OPENAI_WHISPER_KEY:
+                self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_WHISPER_KEY)
+                self.stt_model = "whisper-1"
+                self.stt_available = True
+                logger.info("VoiceEngine STT (OpenAI Whisper) inicializado.")
+            else:
+                if settings.OPENAI_API_KEY.startswith("sk-or"):
+                    logger.warning("OPENAI_API_KEY es de OpenRouter (no soporta STT audio). Configura GROQ_API_KEY o OPENAI_WHISPER_KEY en tu .env")
+                    self.openai_client = None
+                    self.stt_available = False
+                else:
+                    self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                    self.stt_model = "whisper-1"
+                    self.stt_available = True
+                    logger.info("VoiceEngine STT (Fallback Whisper) inicializado.")
+        except ImportError:
+            logger.warning("openai package no instalado. STT no disponible.")
+            self.openai_client = None
+            self.stt_available = False
+
+        self.tts_available = True
+        logger.info("VoiceEngine TTS (edge-tts) inicializado - GRATIS")
+
+        # Por compatibilidad con código legacy
+        self.available = self.stt_available or self.tts_available
+
+    # ── STT ──────────────────────────────────────────────────────────────────
+
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        language: str = "es",
+        stt_model: str = None,
+        content_type: str = "audio/webm",
+    ) -> dict:
+        """
+        Convierte audio de voz a texto usando Whisper con máxima precisión.
+
+        Mejoras:
+        - verbose_json: segmentos con timestamp y probabilidad de silencio.
+        - prompt hint: sesga hacia vocabulario español colombiano.
+        - Extensión de archivo correcta según MIME type.
+        - Detección de transcripciones basura.
+
+        Returns: { "success": bool, "text": str, "language": str, "confidence": float }
+        """
+        if not self.stt_available:
+            return {"success": False, "text": "", "error": "STT no disponible. Instala el paquete 'openai'."}
+
+        if len(audio_bytes) > self.MAX_AUDIO_BYTES:
+            return {"success": False, "text": "", "error": "Audio excede el límite de 10MB."}
+
+        if len(audio_bytes) < 100:
+            return {"success": False, "text": "", "error": "Audio demasiado corto o vacío."}
+
+        try:
+            ext = self._MIME_TO_EXT.get(content_type, "webm")
+            audio_file = BytesIO(audio_bytes)
+            audio_file.name = f"voice_input.{ext}"
+
+            response = await self.openai_client.audio.transcriptions.create(
+                model=stt_model or self.stt_model,
+                file=audio_file,
+                language=language if language else None,
+                response_format="verbose_json",
+                prompt=_WHISPER_PROMPT_ES,
+                temperature=0.0,
+            )
+
+            if hasattr(response, "text"):
+                text = response.text.strip()
+                detected_lang = getattr(response, "language", language) or language
+            else:
+                text = str(response).strip()
+                detected_lang = language
+
+            if not text:
+                return {"success": False, "text": "", "error": "No se detectó voz en el audio."}
+
+            # Calcular confianza desde segmentos
+            avg_confidence = 1.0
+            segments = getattr(response, "segments", []) or []
+            if segments:
+                no_speech_probs = [s.get("no_speech_prob", 0) for s in segments if isinstance(s, dict)]
+                if no_speech_probs:
+                    avg_no_speech = sum(no_speech_probs) / len(no_speech_probs)
+                    avg_confidence = round(1.0 - avg_no_speech, 3)
+                    if avg_no_speech > 0.88:
+                        logger.warning(f"Alta probabilidad de silencio ({avg_no_speech:.2f}), rechazando.")
+                        return {"success": False, "text": "", "error": "No se detectó habla clara. Habla más cerca del micrófono."}
+
+            if _is_gibberish(text):
+                logger.warning(f"Transcripción basura detectada: '{text[:60]}' — rechazando.")
+                return {"success": False, "text": "", "error": "No se pudo entender. Por favor habla con claridad.", "raw": text}
+
+            log_msg = f"Transcribed ({detected_lang}, conf={avg_confidence:.2f}): '{text[:80]}...'" if len(text) > 80 else f"Transcribed ({detected_lang}): '{text}'"
+            logger.info(log_msg)
+            return {"success": True, "text": text, "language": detected_lang, "confidence": avg_confidence}
+
+        except Exception as e:
+            logger.error(f"Error en transcripción: {e}")
+            return {"success": False, "text": "", "error": str(e)}
+
+    # ── TTS (edge-tts — GRATIS) ───────────────────────────────────────────────
+
+    async def synthesize_to_bytes(self, text: str, voice: str = "es-CO-SalomeNeural") -> bytes:
+        """
+        Sintetiza audio y lo retorna directamente en bytes MP3 (en memoria).
+        """
+        if not self.tts_available:
+            return b""
+            
+        clean_text = _clean_for_tts(text)[:5000]
+        if not clean_text:
+            return b""
+            
+        try:
+            communicate = edge_tts.Communicate(text=clean_text, voice=voice)
+            from io import BytesIO
+            buffer = BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buffer.write(chunk["data"])
+            audio_bytes = buffer.getvalue()
+            logger.info(f"[edge-tts BYTES] {len(audio_bytes)} bytes generados en memoria | voz={voice}")
+            return audio_bytes
+        except Exception as e:
+            logger.error(f"Error en synthesize_to_bytes: {e}")
+            return b""
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "es-ES-AlvaroNeural",  # male, serious, Jarvis vibe
+        tts_model: str = "edge-tts",         
+        speed: float = 1.0,
+    ) -> dict:
+        """
+        Convierte texto a audio usando edge-tts de Microsoft (100% GRATIS).
+
+        Voces recomendadas para español:
+          es-CO-SalomeNeural   → colombiana femenina ★ (default)
+          es-CO-GonzaloNeural  → colombiana masculina
+          es-MX-DaliaNeural    → mexicana femenina, muy natural
+          es-ES-ElviraNeural   → española femenina
+
+        Returns: { "success": bool, "audio_bytes": bytes, "format": "mp3" }
+        """
+        if not self.tts_available:
+            return {"success": False, "audio_bytes": b"", "error": "edge-tts no instalado. Ejecuta: pip install edge-tts"}
+
+        if not text or not text.strip():
+            return {"success": False, "audio_bytes": b"", "error": "Texto vacío."}
+
+        # Limpiar markdown antes de sintetizar
+        clean_text = _clean_for_tts(text)
+        if not clean_text:
+            return {"success": False, "audio_bytes": b"", "error": "El texto quedó vacío después de limpiar."}
+
+        # Límite de 5000 chars para edge-tts
+        clean_text = clean_text[:5000]
+
+        # Convertir speed a formato edge-tts (porcentaje relativo: +0%, +10%, -10%, etc.)
+        if speed != 1.0:
+            pct = int((speed - 1.0) * 100)
+            rate_str = f"{pct:+d}%"
+        else:
+            rate_str = "+0%"
+
+        try:
+            communicate = edge_tts.Communicate(text=clean_text, voice=voice, rate=rate_str)
+
+            # Recopilar todos los chunks de audio en memoria
+            audio_chunks = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_chunks.append(chunk["data"])
+
+            if not audio_chunks:
+                return {"success": False, "audio_bytes": b"", "error": "edge-tts no generó audio."}
+
+            audio_bytes = b"".join(audio_chunks)
+            logger.info(f"[edge-tts] {len(audio_bytes)} bytes sintetizados | voz={voice} | '{clean_text[:50]}'")
+            return {"success": True, "audio_bytes": audio_bytes, "format": "mp3"}
+
+        except Exception as e:
+            logger.error(f"Error en síntesis TTS: {e}")
+            return {"success": False, "audio_bytes": b"", "error": str(e)}
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "es-ES-AlvaroNeural",
+        speed: float = 1.0,
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Versión optimizada que transmite (streamea) los chunks de audio a medida
+        que se generan, reduciendo el delay (Time-To-First-Byte) radicalmente.
+        """
+        if not self.tts_available or not text or not text.strip():
+            return
+            
+        clean_text = _clean_for_tts(text)[:5000]
+        if not clean_text:
+            return
+            
+        rate_str = f"{int((speed - 1.0) * 100):+d}%" if speed != 1.0 else "+0%"
+        
+        try:
+            communicate = edge_tts.Communicate(text=clean_text, voice=voice, rate=rate_str)
+            logger.info(f"[edge-tts STREAM] Iniciando stream con voz={voice} | '{clean_text[:50]}'")
+            
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    yield chunk["data"]
+        except Exception as e:
+            logger.error(f"Error en stream TTS: {e}")
+
+
+
+# ── Singleton helper ──────────────────────────────────────────────────────────
+
+_engine_instance: VoiceEngine | None = None
+
+
+def get_voice_engine() -> VoiceEngine:
+    """Retorna el singleton VoiceEngine, creándolo si aún no existe."""
+    global _engine_instance
+    if _engine_instance is None:
+        from core.config import settings
+        _engine_instance = VoiceEngine(api_key=settings.OPENAI_API_KEY)
+    return _engine_instance

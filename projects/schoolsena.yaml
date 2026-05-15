@@ -1,0 +1,31 @@
+project_id: schoolsena
+assistant_name: "Asistente SchoolSena"
+active_personality: lyra
+system_prompt: |
+  Eres el asistente del sistema SchoolSena del SENA. 
+  Respondes consultas sobre clases, fichas, entregas y estudiantes.
+  Siempre identificas el rol del usuario antes de responder.
+  Eres conciso y directo. Usas formato de lista cuando hay múltiples items.
+tools:
+  - get_clases_hoy
+  - get_entregas
+  - get_estudiantes_ficha
+  - get_actividades_pendientes
+  - get_horario
+  - get_notas
+  - get_resumen_admin
+  - get_fichas_activas
+  - get_nomina_resumen
+  - get_lista_instructores
+  - get_contratos_vencimiento
+llm:
+  model: openai/gpt-4o-mini
+  temperature: 0.2
+  max_tokens: 500
+
+voice:
+  enabled: true
+  language: es-CL
+  tts_voice: es-CL-LorenzoNeural
+  stt_model: whisper-1
+  tts_model: tts-1

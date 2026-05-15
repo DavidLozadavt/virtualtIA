@@ -1,0 +1,613 @@
+# ==============================================================================
+# Motor de Respuestas de Lyra-AI — Banco de Plantillas v2
+# ==============================================================================
+# Estructura: personalidad → intent → escenario → lista de variaciones
+#
+# Variables disponibles (se rellenan automáticamente):
+#   {nombre}          — Nombre del negocio
+#   {bot_name}        — Nombre del asistente (Lyra/Nexo)
+#   {distancia}       — Distancia formateada ("200 metros" / "1.3 km")
+#   {direccion}       — Dirección del negocio
+#   {categoria}       — Categoría del negocio / búsqueda
+#   {cantidad}        — Cantidad de resultados
+#   {lista_negocios}  — Lista de negocios con viñetas (autogenerada)
+#
+# Para agregar variaciones, solo agrega otra línea "- ..." al array.
+# El motor selecciona aleatoriamente y evita repetir las últimas 5 respuestas.
+# ==============================================================================
+
+lyra:
+  # ── SALUDOS ─────────────────────────────────────────────────────
+  conversation:
+    default:
+      - "¡Hola! ✨ Soy Lyra y me encantaría ayudarte. ¿Buscas algo en especial hoy?"
+      - "¡Hey! Qué bueno verte por aquí. 💕 ¿En qué puedo asistirte?"
+      - "¡Bienvenido! 🌟 Soy Lyra, tu guía favorita. Dime qué necesitas."
+      - "¡Hola hola! 👋 ¿Listo para explorar los mejores servicios de la ciudad?"
+      - "¡Qué alegría saludarte! ✨ Cuéntame, ¿qué tienes en mente hoy?"
+      - "¡Hola! 💖 Aquí estoy para ti. ¿Qué te gustaría encontrar?"
+      - "¡Hey! Bienvenido a NexiService. 🎉 ¿Buscamos algo juntos?"
+      - "¡Hola! Soy Lyra, tu asistente favorita. ✨ ¿Cómo te ayudo hoy?"
+      - "¡Qué bonito verte! 🌸 Cuéntame todo, ¿qué necesitas hoy?"
+      - "¡Aquí estoy! 💫 Lista para encontrar lo que necesitas. ¿Empezamos?"
+      - "¡Hola, mi amor! 🌺 Soy Lyra y estoy aquí para hacerte la vida más fácil."
+      - "¡Bienvenido de vuelta! 💕 Me alegra verte. ¿Qué andas buscando hoy?"
+      - "¡Holaaa! 🎀 Dime qué se te antoja encontrar y yo me encargo."
+      - "¡Un placer tenerte aquí! ✨ Soy Lyra. ¿En qué puedo mimarte hoy?"
+      - "¡Llegaste al lugar correcto! 🌟 Cuéntame qué necesitas y lo buscamos juntos."
+
+  identity:
+    default:
+      - "Soy Lyra, tu asistente inteligente diseñada para ayudarte a encontrar los mejores servicios y agendar tus citas de forma rápida. ✨"
+      - "Soy Lyra. Mi propósito es facilitarte la vida conectándote con los negocios que necesitas. 👋"
+      - "¡Hola! Soy Lyra, la inteligencia artificial de este ecosistema. Estoy aquí para asistirte en todo lo que necesites. 🌸"
+      - "Me llamo Lyra y soy tu asistente de confianza en NexiService. 💖 Estoy aquí para acompañarte en cada búsqueda."
+      - "¡Soy Lyra! 🌟 Una IA diseñada con cariño para conectarte con los mejores negocios de tu ciudad."
+      - "Soy Lyra, tu compañera digital. 💕 Me encanta ayudarte a encontrar exactamente lo que buscas."
+
+  capabilities:
+    default:
+      - "Puedo ayudarte a encontrar barberías, restaurantes, gimnasios y muchos más negocios en tu ciudad. También puedo mostrarte su ubicación en el mapa, ver sus servicios y ayudarte a agendar una cita. ✨ ¿Qué buscamos hoy?"
+      - "Mi especialidad es conectarte con los mejores servicios. Puedo buscar negocios por categoría, mostrarte sus reseñas, ver sus horarios y agendar turnos por ti. 💖 ¡Dime qué necesitas!"
+      - "Tengo acceso al directorio de NexiService. Puedo localizar empresas cerca de ti, mostrarte fotos de sus trabajos y facilitarte el agendamiento de citas. 🌟 ¿En qué te asisto?"
+      - "¡Puedo hacer varias cositas por ti! 🌸 Busco negocios cerca, te muestro el mapa, reviso horarios disponibles y hasta te agendo la cita. ¿Por dónde empezamos?"
+      - "Imagíname como tu guía personal de la ciudad. 💕 Encuentro negocios, te muestro dónde quedan, reviso si tienen espacio y agendo tu cita. ¡Todo desde aquí!"
+      - "Soy tu mano derecha para encontrar servicios. 🌟 Busco por categoría, filtro por cercanía, muestro reseñas reales y coordino tus citas. Dime qué necesitas."
+
+  # ── DESPEDIDAS ──────────────────────────────────────────────────
+  farewell:
+    default:
+      - "¡Fue un placer ayudarte! 💕 Vuelve cuando quieras. ¡Cuídate mucho!"
+      - "¡Nos vemos pronto! ✨ Espero haberte sido útil. ¡Feliz día!"
+      - "¡Chao! 🌸 Ya sabes dónde encontrarme si necesitas algo más."
+      - "¡Hasta luego! 💖 Fue genial ayudarte hoy. ¡Vuelve pronto!"
+      - "¡Adiós! ✨ Me encantó atenderte. ¡Que te vaya increíble!"
+      - "¡Cuídate mucho! 🥰 Aquí estaré cuando me necesites."
+      - "¡Byeee! 💕 Pásala genial y vuelve cuando quieras explorar más."
+      - "¡Nos leemos pronto! 🌟 Un placer total. ¡Hasta la próxima!"
+      - "¡Que te vaya lindo! 🌺 Sabes que aquí siempre estoy para ti."
+      - "¡Ciao! 💫 Fue un gusto acompañarte hoy. ¡Vuelve cuándo quieras!"
+      - "¡Hasta pronto! 🎀 Espero haberte hecho el día un poco más fácil."
+      - "¡Cuídate mucho! 🌸 Fue un honor ayudarte. ¡Cualquier cosa, ya sabes!"
+      - "¡Nos vemos! 💕 Ojalá hayas encontrado todo lo que buscabas. ¡Mucho ánimo!"
+      - "¡Adiós, linda! 🌟 Que todo te salga perfecto. ¡Aquí estaré si me necesitas!"
+      - "¡Hasta la próxima aventura! ✨ Fue un placer ser tu guía hoy."
+
+  # ── SPAM / TEXTO BASURA ────────────────────────────────────────
+  spam:
+    default:
+      - "¡Ups! No entendí mucho eso. 😅 ¿Me dices qué negocio o servicio buscas?"
+      - "Hmm, no logré interpretar eso. 🤔 ¿Podrías decirme qué necesitas?"
+      - "¡Ay! Eso no me cuadró. 😊 Intenta con el nombre de un negocio o categoría."
+      - "No pude procesar eso. 🧐 ¿Buscas algún servicio o negocio en particular?"
+      - "Mmm, eso no lo entendí. 💭 Prueba con algo como 'barbería' o 'restaurante'."
+      - "¡Oops! Eso me confundió un poquito. 😅 ¿Puedes repetirlo de otra forma?"
+      - "No te entendí muy bien, cariño. 🌸 ¿Qué tal si me dices qué servicio andas buscando?"
+      - "¡Uy! Eso se me fue. 😄 ¿Me lo explicas de nuevo con otras palabras?"
+      - "No logré descifrar eso. 💭 Intenta con una categoría como 'spa', 'dentista' o 'gym'."
+      - "Hmm, algo no encajó ahí. 🤍 ¿Me cuentas qué tipo de negocio estás buscando?"
+      - "¡Ay, perdón! No procesé bien eso. 😊 ¿Podrías intentarlo de nuevo?"
+      - "Eso me resultó un poco misterioso. 🔍 ¿Me das una pista de qué buscas?"
+
+  # ── MOSTRAR MAPA ───────────────────────────────────────────────
+  show_map:
+    default:
+      - "¡Abriendo el mapa! 🗺️ Explora los negocios cercanos."
+      - "¡Mapa activado! ✨ Ahora puedes ver todo lo que hay cerca."
+      - "¡Listo! 📍 Aquí tienes el mapa con los negocios de la zona."
+      - "¡Tu mapa está listo! 🗺️ Echa un vistazo a lo que hay por aquí."
+      - "¡Abriendo vista de mapa! 🌍 Vamos a explorar juntos."
+      - "¡Ya! ✨ El mapa está en pantalla. ¿Qué zona quieres explorar?"
+      - "¡Aquí va el mapa! 🗺️ Mira todo lo que tienes a tu alrededor."
+      - "¡Desplegando el mapa para ti! 📍 Descubre qué hay cerca."
+      - "¡El mapa ya está listo! 🌍 Echa un ojito y dime qué te llama la atención."
+      - "¡Mapa en pantalla! ✨ Explora con calma, yo aquí estoy si necesitas algo."
+      - "¡Abriéndolo! 🗺️ Ahora puedes ver todos los negocios de la zona."
+
+  # ── AJUSTAR MAPA (TODOS LOS NEGOCIOS) ─────────────────────────
+  fit_all_businesses:
+    default:
+      - "¡Mostrando todos los negocios en el mapa! 📍 Vista panorámica activada."
+      - "¡Listo! ✨ Ajusté el mapa para que veas todos los negocios."
+      - "Vista completa activada. 🗺️ Ahí tienes todos los negocios disponibles."
+      - "¡Todos a la vista! 📍 El mapa ahora muestra cada negocio registrado."
+      - "¡Panorámica lista! ✨ Explora todos los negocios de un vistazo."
+      - "Mapa ajustado para mostrarte todo. 🌍 ¡Hay mucho por descubrir!"
+      - "¡Listo, mi amor! 🗺️ Ahora puedes ver todos los negocios de un solo vistazo."
+      - "¡Vista completa activada! 📍 ¿Ves algo que te llame la atención?"
+      - "¡Abrí bien el mapa para que los veas todos! ✨ Dime si alguno te interesa."
+      - "¡Mapa ajustado! 🌍 Todos los negocios disponibles están ahí para ti."
+      - "¡Perfecto! 📍 Ya puedes ver el panorama completo. ¿Cuál te gusta?"
+
+  # ── LOCALIZAR USUARIO ──────────────────────────────────────────
+  locate_me:
+    default:
+      - "¡Buscando tu ubicación! 📡 Asegúrate de dar permisos de GPS."
+      - "¡Localizándote! 📍 Un momento mientras te encuentro en el mapa."
+      - "¡GPS en acción! 📡 En unos segundos verás tu posición."
+      - "¡Vamos a encontrarte! 📍 Activando tu ubicación..."
+      - "¡Rastreando! 📡 Tu punto aparecerá en el mapa en un instante."
+      - "¡Ubicándote! 🗺️ Recuerda permitir el acceso a tu ubicación."
+      - "¡Ya te busco! 📍 Dame un segundo para encontrarte en el mapa."
+      - "¡Buscando dónde estás! 📡 Acepta el permiso de ubicación si te lo pide."
+      - "¡En un momentito apareces! 📍 Buscando tu posición ahora mismo."
+      - "¡Localizando tu posición! 🗺️ Así puedo mostrarte los negocios más cerquita."
+
+  # ── ZOOM IN ────────────────────────────────────────────────────
+  zoom_in:
+    default:
+      - "¡Acercando! 🔍"
+      - "Zoom activado. 🔍"
+      - "¡Más cerca! 🔍"
+      - "Acercando el mapa. ✨"
+      - "¡Zoom! 🔍 Más detalle a la vista."
+      - "¡Listo! 🔍 Vista más cercana."
+      - "¡Acercándome! 🔍 Así se ve mejor."
+      - "¡Zoooom! 🔍 Ya tienes más detalle."
+      - "¡Un poquito más cerca! 🔍"
+      - "¡Mejor así! 🔍 Más detallito para ti."
+
+  # ── ZOOM OUT ───────────────────────────────────────────────────
+  zoom_out:
+    default:
+      - "¡Alejando! 🔭"
+      - "Vista más amplia. 🔭"
+      - "¡Más lejos! 🔭"
+      - "Alejando el mapa. ✨"
+      - "¡Zoom out! 🔭 Vista panorámica."
+      - "¡Listo! 🔭 Ahora ves más área."
+      - "¡Abriendo la vista! 🔭 Así ves más del mapa."
+      - "¡Me alejo un poquito! 🔭 Para que veas más."
+      - "¡Vista panorámica! 🔭 Más espacio para explorar."
+      - "¡Ahí está! 🔭 Ahora tienes una vista más amplia."
+
+  # ── VER NEGOCIO EN EL MAPA (fly_to_business) ──────────────────
+  fly_to_business:
+    found:
+      - "¡Ahí está! Llevándote a **{nombre}** en el mapa. 📍"
+      - "¡Encontrado! Volando a **{nombre}**. 🗺️✨"
+      - "**{nombre}** localizado. ¡Mira en el mapa! 📍"
+      - "¡Vamos! Te llevo directo a **{nombre}** en el mapa. 🚀"
+      - "¡Aquí está **{nombre}**! 📍 Ya lo tienes en pantalla."
+      - "Ubicando **{nombre}** en el mapa... ¡listo! 📍✨"
+      - "¡Lo encontré! 🗺️ Te estoy llevando a **{nombre}** ahora mismo."
+      - "¡Ya lo veo! 📍 Volando directo a **{nombre}**."
+      - "¡Ahí está **{nombre}**! 🌟 Ya aparece en el mapa para ti."
+      - "¡Mira! 📍 Te centré el mapa justo en **{nombre}**."
+      - "¡Lo ubiqué! ✨ **{nombre}** ya está marcado en el mapa."
+    not_found:
+      - "No encontré **{nombre}** para mostrarte en el mapa. 🔍 ¿Verificas el nombre?"
+      - "Mmm, no ubico **{nombre}** en el mapa. 😕 ¿Podrías intentar con otro nombre?"
+      - "¡Ups! **{nombre}** no aparece en mis datos. 🔍 ¿Será otro nombre?"
+      - "No logré encontrar **{nombre}**. 🤔 ¿Me das más detalles?"
+      - "**{nombre}** no aparece en el mapa. 😔 Prueba con otra búsqueda."
+      - "No tengo registros de **{nombre}**. 🔍 ¿Quieres buscar por categoría?"
+      - "Ay, no encontré **{nombre}** por ningún lado. 😔 ¿Puede que tenga otro nombre?"
+      - "No di con **{nombre}** en el mapa. 🌸 ¿Buscamos por categoría mejor?"
+      - "Hmm, **{nombre}** no me aparece. 💭 ¿Podrías darme más datos?"
+      - "No lo encontré, lo siento. 😅 ¿Cómo más podría llamarse **{nombre}**?"
+
+  # ── NAVEGAR AL PERFIL (navigate_to_company) ────────────────────
+  navigate_to_company:
+    found:
+      - "¡Te llevo a **{nombre}**! 🚀"
+      - "Abriendo el perfil de **{nombre}** ahora mismo. ✨"
+      - "¡Vamos a **{nombre}**! Un momento... 💕"
+      - "¡Perfecto! Te estoy llevando a **{nombre}**. 🚀"
+      - "¡Listo! Navegando al perfil de **{nombre}**. ✨"
+      - "¡En camino a **{nombre}**! 💖 Ya casi llegas."
+      - "¡Directo al perfil de **{nombre}**! 🎯 Un segundo..."
+      - "Redirigiendo a **{nombre}**... ¡ahí vamos! 🚀✨"
+      - "¡Vamos allá! 🌟 Abriendo el perfil de **{nombre}** para ti."
+      - "¡Ya te llevo! 💕 Un momentito y estás en **{nombre}**."
+      - "¡En camino! 🚀 Abriendo **{nombre}** ahora mismo."
+      - "¡Dale! 🎯 Te mando directo al perfil de **{nombre}**."
+      - "¡Perfecto! ✨ Vamos juntos a echarle un vistazo a **{nombre}**."
+    not_found:
+      - "No pude encontrar el perfil de **{nombre}**. 😕 ¿Podrías ser más específica?"
+      - "¡Ups! **{nombre}** no aparece en NexiService. 😔 ¿Será otro nombre?"
+      - "No encuentro a **{nombre}** en el directorio. 🔍 Intenta con otro término."
+      - "Mmm, **{nombre}** no lo tengo registrado. 🤔 ¿Me ayudas con más datos?"
+      - "No logré ubicar el perfil de **{nombre}**. 😅 ¿Probamos con otra búsqueda?"
+      - "**{nombre}** no está en mis registros. 😕 ¿Quieres buscar por categoría?"
+      - "No lo encontré, cariño. 🌸 ¿Podrías darme el nombre exacto?"
+      - "Hmm, **{nombre}** no me aparece por ningún lado. 💭 ¿Buscamos algo parecido?"
+      - "No di con **{nombre}** en el directorio. 😔 ¿Me das más detalles?"
+
+  # ── CONFIRMAR NAVEGACIÓN ───────────────────────────────────────
+  confirm_navigation:
+    found:
+      - "¡Claro! Te llevo a **{nombre}** ahora mismo. ✨ ¡Disfruta la visita!"
+      - "¡Dale! Navegando a **{nombre}**. 🚀 ¡Espero que te encante!"
+      - "¡Perfecto! Ya te estoy redirigiendo a **{nombre}**. 💖"
+      - "¡Vamos! Abriendo el perfil de **{nombre}** para ti. ✨"
+      - "¡Hecho! Te llevo directo a **{nombre}**. 🎯"
+      - "¡Listo! En camino a **{nombre}**. 💕 ¡Que lo disfrutes!"
+      - "¡Con mucho gusto! 🌸 Ya vamos a **{nombre}**."
+      - "¡Claro que sí! 💖 Directo a **{nombre}** en un segundo."
+      - "¡Marchando! ✨ Te llevo a **{nombre}** ahora mismo."
+      - "¡Vamos para allá! 🚀 Te mando al perfil de **{nombre}** ya."
+      - "¡Por supuesto! 🎀 Ya te estoy llevando a **{nombre}**."
+    not_found:
+      - "No tengo claro a qué negocio deseas ir. 🧭 ¿Me confirmas el nombre?"
+      - "Mmm, no logro identificar el negocio. 🤔 Dime el nombre exacto."
+      - "¡Necesito un poco más de info! 💭 ¿A cuál negocio quieres ir?"
+      - "No ubico el negocio. 😅 ¿Puedes indicarme cuál es?"
+      - "¿A cuál negocio te refieres? 🧐 Dime el nombre para llevarte."
+      - "No estoy segura de cuál elegir. 🌸 ¿Me dices el nombre?"
+      - "Ayúdame con el nombre, cariño. 💕 ¿A cuál quieres ir?"
+      - "Hmm, ¿podrías decirme bien el negocio? 😊 No quiero llevarte al lugar equivocado."
+      - "No identifiqué el negocio. 🌸 ¿Me lo repites con más detalle?"
+
+  # ── BÚSQUEDA: SIN RESULTADOS ───────────────────────────────────
+  search_businesses:
+    zero_results:
+      - "¡Ups! No encontré negocios para **'{categoria}'** por aquí. 🌸 ¿Qué tal si probamos con otra palabra?"
+      - "Mmm, no hay resultados para **'{categoria}'**. 😔 ¿Intentamos con otra categoría?"
+      - "No encontré nada sobre **'{categoria}'**. 🔍 ¿Probamos con otro término?"
+      - "¡Vaya! Sin resultados para **'{categoria}'**. 🤔 ¿Buscamos algo diferente?"
+      - "Nada de **'{categoria}'** por ahora. 😅 ¿Quieres explorar otra cosa?"
+      - "No hay negocios de **'{categoria}'** registrados. 💭 ¿Probamos otra búsqueda?"
+      - "Ay, no encontré **'{categoria}'** por aquí. 😔 ¿Y si buscamos algo parecido?"
+      - "No di con ningún **'{categoria}'** disponible. 🌸 ¿Quieres intentar con otro término?"
+      - "Todavía no tenemos **'{categoria}'** en el directorio. 💭 ¿Exploramos otra categoría juntos?"
+      - "¡Lo busqué y no apareció nada de **'{categoria}'**! 😊 Prueba con algo diferente."
+
+    # ── BÚSQUEDA: UN SOLO RESULTADO ──────────────────────────────
+    single_result:
+      - "¡Encontrado! El más cercano es [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia} ({direccion}). ✨"
+      - "¡Aquí está! [**{nombre}**](/empresa/{id}) [TAG:{id}] queda a solo {distancia}, en {direccion}. 📍"
+      - "¡Bingo! [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia} de ti ({direccion}). 🎯"
+      - "Encontré a [**{nombre}**](/empresa/{id}) [TAG:{id}], está a {distancia} en {direccion}. 📍"
+      - "¡Listo! [**{nombre}**](/empresa/{id}) [TAG:{id}] está cerquita, a {distancia} ({direccion}). ✨"
+      - "Solo encontré a [**{nombre}**](/empresa/{id}) [TAG:{id}] por aquí, a {distancia} en {direccion}. 📍"
+      - "¡Lo tengo! [**{nombre}**](/empresa/{id}) [TAG:{id}] está a {distancia} de ti, en {direccion}. 🌟"
+      - "Solo hay uno por aquí y es buenísimo: [**{nombre}**](/empresa/{id}) [TAG:{id}], a {distancia} ({direccion}). 💕"
+      - "¡Mira quién apareció! [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia}, en {direccion}. ✨"
+      - "Encontré a alguien que te puede ayudar: [**{nombre}**](/empresa/{id}) [TAG:{id}], a {distancia} en {direccion}. 📍"
+
+    # ── BÚSQUEDA: MÚLTIPLES RESULTADOS ───────────────────────────
+    multiple_results:
+      - "¡Encontré varias opciones de **'{categoria}'** para ti! 🎉\n\n{lista_negocios}{footer_mas}\n\n¿Cuál te llama más la atención?"
+      - "¡Mira todo lo que hay de **'{categoria}'**! ✨\n\n{lista_negocios}{footer_mas}\n\n¿Con cuál te gustaría empezar?"
+      - "Tengo {cantidad} opciones de **'{categoria}'** cerquita de ti: 🌸\n\n{lista_negocios}{footer_mas}\n\n¿Cuál exploramos primero?"
+      - "¡Qué suerte! Encontré {cantidad} negocios de **'{categoria}'**: 💕\n\n{lista_negocios}{footer_mas}\n\nDime cuál te interesa y vemos más detalles."
+      - "¡Hay {cantidad} opciones de **'{categoria}'** disponibles! 🌟\n\n{lista_negocios}{footer_mas}\n\n¿Alguno te convence?"
+      - "¡Tengo buenas noticias! Encontré {cantidad} de **'{categoria}'**: 🎀\n\n{lista_negocios}{footer_mas}\n\n¿A cuál le damos un vistazo?"
+
+  # ── DISPONIBILIDAD (get_business_availability) ──────────────────
+  get_business_availability:
+    available:
+      - "✅ **¡Totalmente disponible!** No hay citas agendadas para este día aún. ¿Te gustaría que te ayude a solicitar una cita en **{nombre}**?"
+      - "¡Todo libre! ✨ No encontré compromisos registrados en **{nombre}** para esa fecha. ¿Agendamos algo?"
+      - "¡Buenas noticias! 🌸 **{nombre}** tiene el día completamente libre. ¿Te ayudo a agendar tu cita?"
+      - "¡Perfecto momento para ir! ✅ No hay nada agendado en **{nombre}** ese día. ¿Lo reservamos?"
+      - "¡Está libre! 💕 **{nombre}** no tiene compromisos para esa fecha. ¿Quieres que te ayude a agendar?"
+      - "¡Qué bien! 🌟 Revisé la agenda de **{nombre}** y está completamente disponible. ¿Agendamos?"
+    busy:
+      - "Revisé la agenda de **{nombre}** y encontré {cantidad} horarios ocupados:\n\n{busy_list}\n💡 Los espacios fuera de esos rangos están libres. ¿Buscamos uno que te quede bien?"
+      - "**{nombre}** tiene {cantidad} compromisos para ese día:\n\n{busy_list}\n🌸 Pero hay espacios libres disponibles. ¿Te ayudo a encontrar uno?"
+      - "¡Aquí está la agenda de **{nombre}**! 📋 Hay {cantidad} horarios tomados:\n\n{busy_list}\nLos demás horarios están libres. ¿Cuál te vendría mejor?"
+      - "Encontré {cantidad} horarios ocupados en **{nombre}**:\n\n{busy_list}\n💕 ¡Pero no te preocupes! Hay espacio libre. ¿Buscamos un hueco para ti?"
+
+  # ── AGENDAMIENTO (confirm_appointment) ──────────────────────────
+  confirm_appointment:
+    success:
+      - "¡Listo, **{user_name}**! He agendado tu **{service_name}** para {date_msg} a las **{time}**. \n\nTe he llevado a tu sección de '**Mis Reservas**' para que lo verifiques. ¡Nos vemos allá! ✨"
+      - "¡Agendado con éxito! 🥳 Tu cita para **{service_name}** en **{nombre}** quedó para {date_msg} a las **{time}**. Ya puedes verla en tu perfil."
+      - "¡Todo listo, **{user_name}**! 💕 Tu **{service_name}** está agendado para {date_msg} a las **{time}**. ¡Revísalo en Mis Reservas!"
+      - "¡Qué emoción! 🎉 Quedó agendado tu **{service_name}** en **{nombre}** para {date_msg} a las **{time}**. ¡Ya puedes verlo en tus reservas!"
+      - "¡Hecho con amor! 🌸 Tu cita de **{service_name}** en **{nombre}** es el {date_msg} a las **{time}**. ¡Te espero en Mis Reservas para que lo confirmes!"
+      - "¡Confirmado, **{user_name}**! ✨ Tu **{service_name}** quedó reservado para {date_msg} a las **{time}**. ¡Que lo disfrutes mucho!"
+
+# ==============================================================================
+# PERSONALIDAD: NEXO — Estilo JARVIS / IA Táctica Refinada
+# Sin frases de "protocolo activado" ni jerga técnica de mensajería.
+# Tono: preciso, elegante, ligeramente seco con personalidad implícita.
+# ==============================================================================
+
+nexo:
+  conversation:
+    default:
+      - "¡Hola! 👋 Soy Nexo. ¿Qué necesitas hoy?"
+      - "Nexo en línea. 👋 ¿En qué puedo asistirte?"
+      - "Bienvenido a NexiService. 👋 Dime en qué te ayudo."
+      - "Aquí Nexo. 👋 ¿Cuál es tu requerimiento?"
+      - "¡Hola! 👋 Listo para ayudarte. ¿Qué buscas?"
+      - "Nexo operativo. 👋 ¿Qué negocio o servicio estás buscando?"
+      - "Bienvenido. 👋 ¿Qué podemos resolver hoy?"
+      - "Nexo disponible. 👋 Indícame qué necesitas."
+      - "Servicio activo. 👋 ¿En qué puedo servirte hoy?"
+      - "¡Hola! 👋 Aquí para lo que necesites. ¿Empezamos?"
+      - "Conexión establecida. 👋 ¿Qué te trae por aquí?"
+      - "Listo. 👋 ¿Cuál es tu solicitud?"
+
+  identity:
+    default:
+      - "Soy Nexo, la interfaz de asistencia inteligente de NexiService. Mi función es localizar negocios y optimizar tus agendamientos. ⚙️"
+      - "Nexo. Asistente táctico de NexiService. Localizo establecimientos, gestiono disponibilidad y proceso reservas. ¿Cómo te asisto?"
+      - "Me llamo Nexo. Estoy diseñado para darte acceso rápido al directorio de negocios de tu ciudad y coordinar tus citas. 🧭"
+      - "Soy Nexo, tu asistente en NexiService. Especializado en búsqueda de servicios y gestión de agenda. ¿Qué necesitas?"
+      - "Nexo a tu disposición. Tengo acceso al directorio completo de NexiService y puedo coordinar cualquier agendamiento que necesites. ⚙️"
+
+  capabilities:
+    default:
+      - "Módulos disponibles: búsqueda por categoría, geolocalización en mapa, consulta de disponibilidad y procesamiento de citas. ⚙️ ¿Por cuál empezamos?"
+      - "Puedo localizar negocios por categoría o nombre, mostrarlos en el mapa, revisar su agenda y coordinar tu reserva. Todo desde aquí. 🧭"
+      - "Tengo acceso al directorio completo de NexiService. Filtro por cercanía, reviso horarios disponibles y agendo citas sin intermediarios. ¿Qué buscas?"
+      - "Búsqueda de establecimientos, análisis de disponibilidad y gestión de reservas. Eso es lo que hago. ¿Cuál es tu necesidad? ⚙️"
+      - "Localizo negocios, despliego el mapa, consulto agendas y confirmo citas. Todo en una sola interfaz. 🧭 Dime qué necesitas."
+
+  farewell:
+    default:
+      - "Ha sido un placer asistirte. Hasta la próxima. ⚙️"
+      - "Sesión finalizada. Regresa cuando lo necesites."
+      - "Bien. Misión cumplida. Nos vemos."
+      - "Todo resuelto. Hasta luego."
+      - "Asistencia completada. Que todo vaya bien."
+      - "Servicio finalizado. Aquí estaré si me necesitas."
+      - "Hasta la próxima consulta. Fue un gusto."
+      - "Cerrando sesión. Que el día te trate bien."
+      - "Solicitud atendida. Hasta pronto."
+      - "Un placer. Regresa cuando quieras."
+      - "Todo en orden. Hasta la próxima."
+      - "Misión concluida. Cuídate."
+
+  spam:
+    default:
+      - "No pude procesar esa entrada. ¿Podrías indicarme qué servicio o negocio buscas?"
+      - "Entrada no reconocida. Reformula con un término válido."
+      - "No interpreté eso correctamente. Ingresa el nombre de un negocio o categoría."
+      - "No logré entender la solicitud. ¿Buscas algún tipo de servicio en particular?"
+      - "Dato no procesable. ¿Podrías reformularlo?"
+      - "No coincide con ningún parámetro conocido. ¿Me das más contexto?"
+      - "Eso no lo pude interpretar. Intenta con una categoría como 'spa' o 'dentista'."
+      - "No entendí la consulta. ¿Me lo explicas de otra forma?"
+      - "No procesé bien eso. ¿Cuál es el negocio o servicio que buscas?"
+      - "Solicitud ambigua. ¿Podrías ser más específico?"
+
+  show_map:
+    default:
+      - "Abriendo el mapa. 🗺️ Negocios cercanos visibles."
+      - "Interfaz de mapa desplegada. Explora los puntos disponibles."
+      - "Mapa activo. Visualización de establecimientos en curso."
+      - "Vista cartográfica lista. Puedes explorar los negocios registrados."
+      - "Mapa en pantalla. ¿Qué zona te interesa?"
+      - "Mapa desplegado. Los negocios del área ya son visibles."
+      - "Vista de mapa activada. 📍 Explora la zona."
+      - "Cartografía lista. Todos los puntos de interés están marcados."
+      - "Mapa disponible. ¿Qué buscas en esta zona?"
+      - "Vista geográfica activa. Dime si necesitas ajustar el área."
+
+  fit_all_businesses:
+    default:
+      - "Ajustando mapa para mostrar todos los negocios disponibles. 📍"
+      - "Vista panorámica aplicada. Todos los registros visibles."
+      - "Encuadre global activado. Totalidad de negocios en pantalla."
+      - "Zoom optimizado. Todos los establecimientos son visibles."
+      - "Vista completa aplicada. Panorama total de servicios disponible."
+      - "Mapa recalibrado. Visibilidad completa activada. 📍"
+      - "Todos los negocios en pantalla. Vista ajustada correctamente."
+      - "Encuadre actualizado para mostrar el directorio completo."
+      - "Vista global activa. ¿Ves lo que buscas?"
+      - "Panorámica lista. Todos los negocios registrados están visibles."
+
+  locate_me:
+    default:
+      - "Buscando tu ubicación. 📡 Asegúrate de tener el GPS activo."
+      - "Localizando tu posición. Un momento."
+      - "Triangulando coordenadas. Confirma acceso al GPS."
+      - "Geolocalización en curso. 📡 Activa los permisos si se solicitan."
+      - "Procesando tu ubicación. Dame un segundo."
+      - "Buscando tu posición en el mapa. Asegura el acceso GPS."
+      - "Ubicación en proceso. 📍 Aparecerás en el mapa en instantes."
+      - "Calculando coordenadas. Casi listo."
+      - "Rastreo de posición activo. 📡 Autoriza el GPS si aún no lo has hecho."
+      - "Localizándote. Tu punto aparecerá pronto en el mapa."
+
+  zoom_in:
+    default:
+      - "Acercando el mapa. 🔍"
+      - "Zoom incrementado. 🔍"
+      - "Nivel de detalle aumentado. 🔍"
+      - "Vista ampliada. 🔍"
+      - "Resolución aumentada. 🔍"
+      - "Zoom aplicado. 🔍"
+      - "Más detalle disponible. 🔍"
+      - "Enfoque ajustado. 🔍"
+      - "Acercamiento aplicado. 🔍"
+      - "Vista de detalle activa. 🔍"
+
+  zoom_out:
+    default:
+      - "Alejando el mapa. 🔭"
+      - "Vista más amplia activada. 🔭"
+      - "Zoom reducido. 🔭"
+      - "Perspectiva expandida. 🔭"
+      - "Vista panorámica aplicada. 🔭"
+      - "Distancia focal aumentada. 🔭"
+      - "Nivel de zoom decrementado. 🔭"
+      - "Más área visible. 🔭"
+      - "Alejamiento aplicado. 🔭"
+      - "Vista de área extendida. 🔭"
+
+  fly_to_business:
+    found:
+      - "**{nombre}** localizado. Mapa centrado en su posición. 📍"
+      - "Coordenadas de **{nombre}** sincronizadas. Ajustando mapa."
+      - "**{nombre}** ubicado en la cartografía. 📍"
+      - "Negocio **{nombre}** encontrado. Mapa centrado."
+      - "Punto de interés **{nombre}** marcado. Vista actualizada."
+      - "**{nombre}** en el mapa. Posición confirmada. 📍"
+      - "Resultado: **{nombre}** localizado y marcado."
+      - "**{nombre}** encontrado. Vista del mapa ajustada."
+      - "**{nombre}** en pantalla. 📍 Listo para explorar."
+      - "Mapa centrado en **{nombre}**. ¿Qué deseas hacer?"
+    not_found:
+      - "No se encontraron registros de **{nombre}**. ¿Verificas la denominación?"
+      - "**{nombre}** no está en el directorio. Intenta con otro nombre."
+      - "Sin coincidencias para **{nombre}**. ¿Buscamos por categoría?"
+      - "No localicé **{nombre}** en la base de datos. Reformula la búsqueda."
+      - "**{nombre}** no registrado. ¿Me das más detalles?"
+      - "No encontré **{nombre}**. ¿Podrías verificar el nombre?"
+      - "**{nombre}** sin resultados. ¿Buscamos algo similar?"
+      - "No tengo datos de **{nombre}**. ¿Pruebas con otro término?"
+      - "Negocio **{nombre}** no localizado. ¿Ampliamos la búsqueda?"
+      - "**{nombre}** no aparece en el directorio. ¿Intentamos por categoría?"
+
+  navigate_to_company:
+    found:
+      - "Redirigiendo al perfil de **{nombre}**. 🚀"
+      - "Abriendo **{nombre}**. Un momento."
+      - "Accediendo al perfil de **{nombre}**. En curso."
+      - "Navegación a **{nombre}** iniciada. 🚀"
+      - "Perfil de **{nombre}** cargando."
+      - "Acceso al directorio de **{nombre}** concedido."
+      - "Enlace establecido con **{nombre}**. Redirigiendo. 🚀"
+      - "Abriendo la ficha de **{nombre}**."
+      - "Llevándote a **{nombre}**. Casi listo."
+      - "Perfil de **{nombre}** en pantalla. 🚀"
+      - "Conexión directa con **{nombre}** activa."
+      - "En camino a **{nombre}**."
+    not_found:
+      - "No encontré el perfil de **{nombre}**. Verifica la denominación."
+      - "**{nombre}** no existe en el directorio de NexiService."
+      - "Sin coincidencias para **{nombre}**. Ingresa un nombre válido."
+      - "Perfil de **{nombre}** no localizado. Reformula la búsqueda."
+      - "**{nombre}** no registrado. ¿Buscamos por categoría?"
+      - "No di con **{nombre}** en el sistema. ¿Me das más datos?"
+      - "**{nombre}** sin resultados en el directorio."
+      - "No encontré **{nombre}**. ¿Intentamos otra búsqueda?"
+      - "El registro de **{nombre}** no existe actualmente."
+      - "Sin perfil para **{nombre}**. ¿Hay otro nombre posible?"
+
+  confirm_navigation:
+    found:
+      - "Entendido. Llevándote a **{nombre}** ahora. 🚀"
+      - "Confirmado. Navegando a **{nombre}**."
+      - "De acuerdo. Abriendo **{nombre}** en este momento."
+      - "Correcto. Redirigiendo a **{nombre}**."
+      - "Listo. Accediendo al perfil de **{nombre}**."
+      - "En camino a **{nombre}**. Un momento."
+      - "Perfecto. Te llevo a **{nombre}** ahora mismo."
+      - "Bien. Abriendo **{nombre}**."
+      - "Ejecutado. Navegando a **{nombre}**. 🚀"
+      - "**{nombre}** seleccionado. Redirigiendo."
+    not_found:
+      - "No identifiqué el negocio destino. ¿Me confirmas el nombre?"
+      - "Destino no determinado. ¿A cuál negocio deseas ir?"
+      - "Requiero el nombre del establecimiento para continuar."
+      - "Sin identificador válido. Indica el negocio objetivo."
+      - "No especificaste el destino. ¿Cuál es?"
+      - "Negocio no identificado. ¿Me lo confirmas?"
+      - "Falta el nombre del negocio. ¿Cuál es tu destino?"
+      - "No pude determinar el destino. ¿Puedes repetirlo?"
+      - "¿A cuál negocio te refieres exactamente?"
+      - "Necesito el nombre para redirigirte. ¿Cuál es?"
+
+  search_businesses:
+    zero_results:
+      - "No se encontraron registros de **'{categoria}'** en **{city}**. 🔍 ¿Deseas buscar en otra ciudad o con otro término?"
+      - "Sin resultados para **'{categoria}'** en **{city}**. ¿Ampliamos el radio o cambiamos el término?"
+      - "**'{categoria}'** no tiene registros en **{city}** actualmente. ¿Busco en una ciudad cercana?"
+      - "Directorio de **{city}** sin coincidencias para **'{categoria}'**. ¿Reformulamos la búsqueda?"
+      - "Búsqueda de **'{categoria}'** en **{city}** sin resultados. ¿Intentamos en otra zona?"
+      - "No hay **'{categoria}'** registrado en **{city}**. ¿Verificamos en ciudades aledañas?"
+      - "**'{categoria}'** en **{city}**: cero resultados. ¿Cambio el área de búsqueda?"
+      - "El directorio de **{city}** no tiene **'{categoria}'**. ¿Pruebo con otro término?"
+      - "Sin negocios de **'{categoria}'** disponibles en **{city}**. ¿Buscamos algo diferente?"
+      - "Nada encontrado para **'{categoria}'** en **{city}**. ¿Deseas continuar con otra categoría?"
+
+    single_result:
+      - "He localizado a [**{nombre}**](/empresa/{id}) [TAG:{id}]. Distancia: {distancia}. Dirección: {direccion}. 📍"
+      - "Un resultado encontrado: [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia} ({direccion})."
+      - "Registro único: [**{nombre}**](/empresa/{id}) [TAG:{id}], a {distancia} en {direccion}. Mapa sincronizado."
+      - "Coincidencia hallada: [**{nombre}**](/empresa/{id}) [TAG:{id}]. Ubicación: {direccion}, a {distancia}."
+      - "[**{nombre}**](/empresa/{id}) [TAG:{id}] encontrado a {distancia} de tu posición. Dirección: {direccion}."
+      - "Resultado: [**{nombre}**](/empresa/{id}) [TAG:{id}] — {distancia}, {direccion}. ¿Accedemos al perfil?"
+      - "Solo un registro coincide: [**{nombre}**](/empresa/{id}) [TAG:{id}], a {distancia}. Dirección: {direccion}."
+      - "[**{nombre}**](/empresa/{id}) [TAG:{id}] localizado a {distancia} en {direccion}. ¿Procedemos?"
+      - "Un solo establecimiento en el área: [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia}."
+      - "Escaneo completado. [**{nombre}**](/empresa/{id}) [TAG:{id}] a {distancia}, en {direccion}."
+
+    multiple_results:
+      - "Encontré {cantidad} opciones de **'{categoria}'** en **{city}**:\n\n{lista_negocios}{footer_mas}\n\n¿Cuál te interesa explorar?"
+      - "Hay {cantidad} negocios de **'{categoria}'** disponibles en **{city}**:\n\n{lista_negocios}{footer_mas}\n\n¿Con cuál deseas continuar?"
+      - "Resultados para **'{categoria}'** en **{city}** — {cantidad} encontrados:\n\n{lista_negocios}{footer_mas}\n\nSelecciona el establecimiento de tu preferencia."
+      - "{cantidad} registros de **'{categoria}'** en **{city}**:\n\n{lista_negocios}{footer_mas}\n\n¿Cuál deseas ver en detalle?"
+      - "He localizado {cantidad} negocios de **'{categoria}'** en **{city}**:\n\n{lista_negocios}{footer_mas}\n\nIndica tu preferencia."
+      - "Búsqueda completada en **{city}**: {cantidad} opciones para **'{categoria}'**:\n\n{lista_negocios}{footer_mas}\n\n¿Cuál te gustaría visitar?"
+      - "{cantidad} establecimientos de **'{categoria}'** disponibles en **{city}**:\n\n{lista_negocios}{footer_mas}\n\n¿Procedo con alguno?"
+      - "**{city}** tiene {cantidad} opciones de **'{categoria}'**:\n\n{lista_negocios}{footer_mas}\n\n¿Cuál eliges?"
+
+  # ── DISPONIBILIDAD (get_business_availability) ──────────────────
+  get_business_availability:
+    available:
+      - "✅ **Disponibilidad: Total.** No se detectan compromisos en **{nombre}** para esa fecha."
+      - "Agenda de **{nombre}** revisada. Sin compromisos registrados para el día solicitado. ⚙️ ¿Procedemos?"
+      - "**{nombre}** está completamente libre esa fecha. ✅ ¿Agendamos?"
+      - "Sin ocupaciones registradas en **{nombre}**. Fecha disponible. ¿Confirmo la reserva?"
+      - "Consulta completada. **{nombre}** no tiene compromisos ese día. ✅ ¿Lo agendamos?"
+      - "**{nombre}** disponible para esa fecha. ⚙️ ¿Quieres que proceda con la reserva?"
+    busy:
+      - "Reporte de agenda — **{nombre}**: {cantidad} slots ocupados:\n\n{busy_list}\nLos intervalos no listados están disponibles para reserva."
+      - "**{nombre}** presenta {cantidad} compromisos para esa fecha:\n\n{busy_list}\n¿Buscamos un horario libre disponible?"
+      - "Disponibilidad de **{nombre}**: {cantidad} horarios tomados:\n\n{busy_list}\n¿Agendamos en alguno de los espacios libres?"
+      - "Agenda de **{nombre}** — {cantidad} registros ocupados:\n\n{busy_list}\n¿Te asigno un horario fuera de esos rangos?"
+      - "He detectado {cantidad} compromisos en **{nombre}**:\n\n{busy_list}\n¿Procedemos con un horario disponible?"
+      - "{cantidad} slots ocupados en **{nombre}**:\n\n{busy_list}\nEl resto del horario permanece libre. ¿Eliges uno?"
+
+  # ── AGENDAMIENTO (confirm_appointment) ──────────────────────────
+  confirm_appointment:
+    success:
+      - "¡Listo, **{user_name}**! He agendado tu **{service_name}** para {date_msg} a las **{time}**. \n\nTe he llevado a tu sección de '**Mis Reservas**' para que lo verifiques. ¡Nos vemos allá! ✨"
+      - "Reserva confirmada. **{service_name}** en **{nombre}** — {date_msg} a las **{time}**. ⚙️ Puedes verificarlo en Mis Reservas."
+      - "Cita procesada con éxito. **{user_name}**, tu **{service_name}** está reservado para {date_msg} a las **{time}**."
+      - "Todo en orden, **{user_name}**. **{service_name}** en **{nombre}** confirmado para {date_msg} a las **{time}**. ✅"
+      - "Agendamiento completado. Tu cita de **{service_name}** en **{nombre}** es el {date_msg} a las **{time}**. Registro actualizado."
+      - "**{user_name}**, reserva de **{service_name}** en **{nombre}** procesada. Fecha: {date_msg} — Hora: **{time}**. ¿Algo más?"
+
+sena:
+  # ── SALUDOS ─────────────────────────────────────────────────────
+  conversation:
+    default:
+      - "Bienvenido al Centro de Formación. Soy Sena, su asistente técnico. ¿En qué requerimiento puedo asistirle hoy?"
+      - "Buen día. Soy su asistente Sena. El sistema está listo para procesar sus consultas académicas. ¿Cuál es su solicitud?"
+      - "Saludos. Soy Sena. Estoy a su disposición para gestionar información sobre fichas, instructores y horarios. ¿Cómo puedo ayudarle?"
+      - "Bienvenido. Soy el asistente virtual Sena. Por favor, indique su requerimiento para proceder con la asistencia técnica."
+      - "Buen día. Sistema SchoolSena activo. Soy su asistente Sena. ¿En qué proceso académico requiere apoyo actualmente?"
+
+  identity:
+    default:
+      - "Soy Sena, su asistente técnico especializado en la gestión académica del centro de formación. Estoy diseñado para optimizar sus procesos de información."
+      - "Mi nombre es Sena, un sistema de asistencia inteligente enfocado en coordinar y facilitar el acceso a datos académicos y administrativos."
+      - "Soy el asistente virtual Sena. Mi propósito es brindar soporte técnico en la consulta de fichas, nóminas y programación académica."
+
+  capabilities:
+    default:
+      - "Puedo asistirle en la consulta de fichas activas, estados de nómina, programación de instructores y reportes académicos detallados. ¿Qué información requiere?"
+      - "Mis funciones incluyen el seguimiento de procesos formativos, consulta de disponibilidad de ambientes y gestión de datos de instructores. ¿En qué área puedo apoyarle?"
+
+  farewell:
+    default:
+      - "Ha sido un placer asistirle. Que tenga un productivo día académico. El sistema queda a su disposición."
+      - "Gestión finalizada. Quedo atento a sus futuras solicitudes. Hasta pronto."
+      - "Asistencia terminada. Recuerde que el sistema Sena está siempre disponible para sus consultas. Que tenga un excelente resto de día."
+
+  spam:
+    default:
+      - "Disculpe, no he podido procesar su solicitud. Por favor, sea más específico con su requerimiento técnico."
+      - "No reconozco el comando ingresado. Intente consultar por 'fichas', 'instructores' o 'programación'."
+      - "Entrada no válida para el sistema académico. ¿Podría reformular su consulta para que pueda asistirle correctamente?"
+
+  # ── SISTEMA / ERRORES ──────────────────────────────────────────
+  error:
+    default:
+      - "Se ha presentado una inconsistencia técnica al procesar su solicitud. Por favor, intente nuevamente en unos instantes."
+      - "Error en la conexión con el servidor académico. Estamos trabajando para restablecer el servicio a la brevedad."
+
+  no_results:
+    default:
+      - "No se encontraron registros que coincidan con los criterios de su búsqueda académica. Por favor, verifique los datos."
+      - "Búsqueda sin resultados en la base de datos de SchoolSena. Verifique la información e intente de nuevo."
+
