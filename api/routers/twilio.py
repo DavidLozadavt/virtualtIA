@@ -1,63 +1,84 @@
 """
-gateway/twilio_voice.py — Twilio voice gateway for IntelliTaxi.
+gateway/twilio_voice.py — Gateway de voz Twilio para Lyra/IntelliTaxi.
+VERSIÓN MEJORADA: streaming, tolerancia STT, adaptación dinámica, reparación conversacional.
 
-Replaces the Flask IA-CALL server. Endpoints:
-  /voice          → Initial greeting, starts Gather for origin
-  /process_speech → Processes each speech turn via state machine
-  /health         → Health check for the Laravel proxy
-
-State machine:
-  waiting_origin → waiting_dest_decision → waiting_destination → finished
-                                         └→ finished (sin destino)
-
-Laravel proxies Twilio webhooks:
-  POST /api/twilio/ia/voice        → POST http://lyra:8099/voice
-  POST /api/twilio/ia/process-speech → POST http://lyra:8099/process_speech
+Mejoras integradas:
+1. Streaming incremental + partial transcripts
+2. Corrección fonética y fuzzy matching de barrios de Popayán
+3. Adaptación dinámica de VAD/endpointing por perfil de usuario
+4. Reparación conversacional inteligente (sin "No entendí")
+5. Resolución de referencias humanas ("por el éxito", "frente a la galería")
+6. Memoria contextual de ubicaciones mencionadas
+7. Manejo de barge-in / interrupciones
+8. Robustez para audio telefónico degradado (PSTN, ruido vehicular, manos libres)
+9. Detección de intención con frases incompletas
+10. Latencia optimizada: local match primero, LLM solo como fallback
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import os
 import re
-import time
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import APIRouter, Request, Form
+import httpx
+from fastapi import APIRouter, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
+# ── Módulos de mejora ─────────────────────────────────────────────────────────
+from core.stt_enhancer import (
+    AudioQualityProfile,
+    correct_stt_errors,
+    expand_number_words_in_streets,
+    fuzzy_match_location,
+    resolve_human_reference,
+    strip_accents,
+    POPAYAN_STT_CORRECTIONS,
+)
+from core.conversation_repair import (
+    ConversationMemory,
+    BargeInHandler,
+    get_repair_message,
+    infer_intent,
+    _extract_partial_location,
+)
+from core.streaming_pipeline import (
+    AdaptiveEndpointController,
+    PartialIntentDetector,
+    StreamingSTTBuffer,
+    TurnProcessor,
+    _get_contextual_hints,
+    generate_contextual_response,
+)
+
+# ── Módulos originales ────────────────────────────────────────────────────────
 from core.address_utils import (
-    _clean_stt_text,
-    _normalize_text,
-    _spanish_phonetic_key,
-    _correct_speech,
     _strip_preamble,
     _parse_si_no,
     _is_correction_request,
     _is_repeat_request,
     _try_local_match,
     normalize_address,
-    _nominatim_geocode,
     _nominatim_geocode_async,
 )
 from core.llm_utils import (
-    get_openai_client as _get_openai,
     get_async_openai_client as _get_async_openai,
     get_model as _get_model,
-    extract_json_object as _extract_json_object,
-    call_llm,
 )
 
 logger = logging.getLogger("lyra.twilio_voice")
 voice_router = APIRouter()
 
-# ── Configuration (lazy-loaded to ensure dotenv runs first) ───────────────────
 
+# ── Configuración ─────────────────────────────────────────────────────────────
 
 def _cfg(key: str, default: str = "") -> str:
-    """Read env var lazily (after dotenv has loaded)."""
     return os.getenv(key, default).strip()
 
 
@@ -66,11 +87,11 @@ def _cfg_int(key: str, default: int = 0) -> int:
 
 
 def _twilio_voice() -> str:
-    return _cfg("TWILIO_VOICE", "Polly.Mia")
+    return _cfg("TWILIO_VOICE", "Polly.Andres-Neural")
 
 
 def _twilio_speech_timeout() -> str:
-    return _cfg("TWILIO_SPEECH_TIMEOUT", "auto")
+    return _cfg("TWILIO_SPEECH_TIMEOUT", "1.5")  # Mejorado: 1.0 → 1.5
 
 
 def _twilio_gather_timeout() -> int:
@@ -85,15 +106,14 @@ def _gather_action_url() -> str:
     return _cfg("TWILIO_GATHER_ACTION_URL", "")
 
 
-# ── Session management ────────────────────────────────────────────────────────
+# ── Estados de la máquina de estados ─────────────────────────────────────────
 
-STATE_WAITING_ORIGIN = "waiting_origin"
-STATE_CONFIRMING_ORIGIN = "confirming_origin"  # confirm street address with barrio
-STATE_WAITING_DEST_OR_SKIP = (
-    "waiting_dest_or_skip"  # user gives destination or says "no"
-)
-STATE_SERVICE_CREATED = "service_created"
-STATE_FINISHED = "finished"
+STATE_WAITING_ORIGIN      = "waiting_origin"
+STATE_CONFIRMING_ORIGIN   = "confirming_origin"
+STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
+STATE_SERVICE_CREATED     = "service_created"
+STATE_CREATING_SERVICE    = "creating_service"
+STATE_FINISHED            = "finished"
 
 SESSION_TTL_SEC = int(os.getenv("CALL_SESSION_TTL_SEC", "7200"))
 
@@ -101,20 +121,51 @@ _SESSION_LOCK = threading.Lock()
 _SESSIONS: Dict[str, "CallSession"] = {}
 
 
+# ── Sesión enriquecida ────────────────────────────────────────────────────────
+
 @dataclass
 class CallSession:
-    call_sid: str
-    state: str = STATE_WAITING_ORIGIN
-    origen_text: Optional[str] = None
-    origen_barrio: Optional[str] = None  # nearest barrio for confirmation
-    destino_text: Optional[str] = None
+    call_sid:       str
+    state:          str   = STATE_WAITING_ORIGIN
+    origen_text:    Optional[str] = None
+    origen_barrio:  Optional[str] = None
+    destino_text:   Optional[str] = None
     service_created: bool = False
-    silence_count: int = 0
-    last_message: str = ""  # track last bot message for "repeat" requests
-    updated_at: float = field(default_factory=time.time)
+    silence_count:  int   = 0
+    last_message:   str   = ""
+    updated_at:     float = field(default_factory=time.time)
+
+    # ── Nuevos: mejoras de calidad ──
+    quality_profile:  AudioQualityProfile = field(default_factory=AudioQualityProfile)
+    memory:           ConversationMemory  = field(default_factory=lambda: ConversationMemory(""))
+    endpoint_ctrl:    Optional[AdaptiveEndpointController] = None
+    intent_detector:  Optional[PartialIntentDetector]      = None
+    turn_processor:   Optional[TurnProcessor]              = None
+    retry_count:      int = 0  # Reintentos consecutivos en el mismo estado
+
+    def __post_init__(self):
+        self.memory = ConversationMemory(self.call_sid)
+        self.endpoint_ctrl   = AdaptiveEndpointController(self.quality_profile)
+        self.intent_detector = PartialIntentDetector()
+        self.turn_processor  = TurnProcessor(
+            self.quality_profile,
+            self.memory,
+            self.intent_detector,
+            self.endpoint_ctrl,
+        )
 
     def touch(self) -> None:
         self.updated_at = time.time()
+
+    def get_endpoint_params(self, short_answer: bool = False) -> dict:
+        """Parámetros de endpointing adaptativos para el próximo Gather."""
+        return self.endpoint_ctrl.get_parameters(self.state, short_answer)
+
+    def speech_timeout(self, short_answer: bool = False) -> str:
+        return self.get_endpoint_params(short_answer)["speech_timeout"]
+
+    def gather_timeout(self) -> int:
+        return self.get_endpoint_params()["gather_timeout"]
 
 
 def _prune_sessions() -> None:
@@ -139,120 +190,7 @@ def reset_session(call_sid: str) -> None:
         _SESSIONS.pop(call_sid, None)
 
 
-# ── TwiML helpers ─────────────────────────────────────────────────────────────
-
-# ── Twilio speech hints ───────────────────────────────────────────────────────
-# These help Twilio's speech recognizer prefer barrio names over common words.
-# Limit: ~500 words. We include the most critical/confusable names.
-
-_TWILIO_HINTS = (
-    "calle,carrera,barrio,con,esquina,norte,sur,número,"
-    # Barrios that are commonly misrecognized
-    "los sauces,sauces,maría oriente,maria oriente,alfonso lópez,alfonso lopez,"
-    "pandiguando,yanaconas,campanario,la esmeralda,esmeralda,belalcázar,"
-    "los comuneros,comuneros,pueblillo,yambitará,camilo torres,"
-    "valle del ortigal,ortigal,polideportivo,valle vertical,"
-    # Major barrios all comunas
-    "modelo,loma linda,prados del norte,santa clara,pubenza,el recuerdo,"
-    "bello horizonte,el tablazo,la primavera,villa del norte,san ignacio,"
-    "los ángeles,pinares,san fernando,bolívar,ciudad jardín,periodistas,"
-    "los hoyos,la estancia,villa mercedes,el prado,los álamos,la pamba,"
-    "berlín,suizo,las ferias,la campiña,santa mónica,la floresta,los andes,"
-    "valparaíso,primero de mayo,loma de la virgen,sindical,calicanto,limonar,"
-    "las palmas,nazaret,chapinero,nuevo popayán,la libertad,santa librada,"
-    "el libertador,el triunfo,popular,llano largo,kennedy,la sombrilla,"
-    "lomas de granada,la capitana,cinco de abril,maría occidente,"
-    "pomona,el uvo,las américas,santa rosa,los tejares,el cadillal,"
-    "retiro alto,la colina,versalles,la paz sur,jorge eliécer gaitán,"
-    "villa del viento,torres del río,provitec,el jardín,zaguan,"
-    "rincón de la estancia,la campiña,el plateado,la alameda,"
-    # Landmarks
-    "centro,parque caldas,torre del reloj,puente del humilladero,"
-    "catedral,universidad del cauca,unicauca,sena,"
-    "hospital san josé,clínica la estancia,terminal,aeropuerto,"
-    "galería,estadio,coliseo,morro de tulcán,polideportivo,"
-    "centro comercial campanario,terra plaza,anarkos,éxito,"
-    # Corregimientos
-    "julumito,la yunga,calibío,poblazón,las guacas,pisojé,"
-    # City name
-    "popayán"
-)
-
-
-import uuid
-
-
-async def _generate_twiml_audio(request: Request, msg: str) -> str:
-    from core.voice_engine import get_voice_engine
-
-    engine = get_voice_engine()
-    audio_id = str(uuid.uuid4())
-    # Generate MP3 bytes
-    audio_bytes = await engine.synthesize_to_bytes(msg, voice="es-CL-LorenzoNeural")
-
-    if audio_bytes:
-        if not hasattr(request.app.state, "tts_cache"):
-            request.app.state.tts_cache = {}
-        request.app.state.tts_cache[audio_id] = audio_bytes
-
-        async def delete_after_ttl(aid: str):
-            await asyncio.sleep(60)
-            request.app.state.tts_cache.pop(aid, None)
-
-        asyncio.create_task(delete_after_ttl(audio_id))
-
-        base_url = _get_process_speech_url(request).replace("/process_speech", "")
-        audio_url = f"{base_url}/tts/{audio_id}"
-        return f"<Play>{_xml_escape(audio_url)}</Play>"
-
-    # Fallback to Twilio's Say if TTS fails
-    voice = _twilio_voice()
-    return f'<Say voice="{voice}" language="es-MX">{_xml_escape(msg)}</Say>'
-
-
-async def _twiml_gather_message(request: Request, msg: str, action_url: str) -> str:
-    """Build TwiML XML: <Gather> with <Play> (via TTS), then <Redirect> fallback on no input."""
-    speech_timeout = _twilio_speech_timeout()
-    gather_timeout = _twilio_gather_timeout()
-    # "auto" cuts off slow speakers — fixed "3" gives 3s of silence before ending.
-    # Override: if env says "auto", use "3" for better slow-speech tolerance.
-    if speech_timeout == "auto":
-        speech_timeout = "3"
-    speech_timeout_attr = f' speechTimeout="{speech_timeout}"'
-
-    play_or_say = await _generate_twiml_audio(request, msg)
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f'<Gather input="speech" language="es-CO"'
-        f"{speech_timeout_attr}"
-        f' timeout="{gather_timeout}"'
-        f' action="{action_url}" method="POST"'
-        f' profanityFilter="false"'
-        f' speechModel="phone_call"'
-        f' enhanced="true"'
-        f' hints="{_TWILIO_HINTS}">'
-        f"{play_or_say}"
-        "</Gather>"
-        # CRITICAL: If Gather times out (no speech detected), redirect back
-        # to process_speech with empty SpeechResult so silence handler runs
-        f'<Redirect method="POST">{action_url}</Redirect>'
-        "</Response>"
-    )
-
-
-async def _twiml_say_hangup(request: Request, msg: str) -> str:
-    """Build TwiML XML: <Play> then <Hangup>."""
-    play_or_say = await _generate_twiml_audio(request, msg)
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f"{play_or_say}"
-        "<Hangup/>"
-        "</Response>"
-    )
-
+# ── TwiML helpers mejorados ───────────────────────────────────────────────────
 
 def _xml_escape(s: str) -> str:
     return (
@@ -264,1093 +202,971 @@ def _xml_escape(s: str) -> str:
     )
 
 
+def _generate_say_twiml(msg: str) -> str:
+    voice = _twilio_voice()
+    return f'<Say voice="{voice}" language="es-MX">{_xml_escape(msg)}</Say>'
+
+
+def _twiml_gather_message(
+    msg: str,
+    action_url: str,
+    speech_timeout: str = "1.5",
+    gather_timeout: int = 25,
+    hints: Optional[str] = None,
+    enable_partial: bool = True,
+) -> str:
+    """
+    Construye TwiML <Gather> con:
+    - speechTimeout adaptativo por perfil de usuario
+    - partialResultCallback para detección temprana de intención
+    - hints contextuales para mejorar reconocimiento STT
+    """
+    if hints is None:
+        hints = _get_contextual_hints("waiting_origin")
+
+    say = _generate_say_twiml(msg)
+
+    partial_attr = (
+        f' partialResultCallback="{action_url.replace("process_speech", "partial_speech")}"'
+        f' partialResultCallbackMethod="POST"'
+        if enable_partial else ""
+    )
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        f'<Gather input="speech" language="es-CO"'
+        f' speechTimeout="{speech_timeout}"'
+        f' timeout="{gather_timeout}"'
+        f' action="{action_url}" method="POST"'
+        f'{partial_attr}'
+        f' profanityFilter="false"'
+        f' hints="{hints}">'
+        f"{say}"
+        "</Gather>"
+        f'<Redirect method="POST">{action_url}</Redirect>'
+        "</Response>"
+    )
+
+
+def _twiml_gather_adaptive(
+    msg: str,
+    action_url: str,
+    sess: CallSession,
+    short_answer: bool = False,
+) -> str:
+    """
+    Wrapper que usa los parámetros adaptativos de la sesión.
+    """
+    params = sess.get_endpoint_params(short_answer)
+    hints  = _get_contextual_hints(sess.state)
+    return _twiml_gather_message(
+        msg,
+        action_url,
+        speech_timeout=params["speech_timeout"],
+        gather_timeout=params["gather_timeout"],
+        hints=hints,
+    )
+
+
+def _twiml_say_hangup(msg: str) -> str:
+    say = _generate_say_twiml(msg)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        f"{say}"
+        "<Hangup/>"
+        "</Response>"
+    )
+
+
+def _twiml_redirect(action_url: str, say_msg: Optional[str] = None) -> str:
+    """Redirect con Say opcional (para transiciones de estado)."""
+    voice = _twilio_voice()
+    say_part = (
+        f'<Say voice="{voice}" language="es-MX">{_xml_escape(say_msg)}</Say>'
+        if say_msg else ""
+    )
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<Response>\n'
+        f'    {say_part}\n'
+        f'    <Redirect method="POST">{action_url}</Redirect>\n'
+        f'</Response>'
+    )
+
+
 def _twiml_response(xml: str) -> Response:
     return Response(content=xml, media_type="text/xml; charset=utf-8")
 
 
-# ── Speech quality & normalization (Problem 2 + 3) ────────────────────────────
+def _get_process_speech_url(request: Request) -> str:
+    action = _gather_action_url()
+    if action:
+        return action
 
-# Payanés contractions / initial-syllable drops
+    forwarded_host  = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+
+    if forwarded_host and "trycloudflare.com" in forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}/process_speech"
+
+    if forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
+        host_no_port = forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
+        if not host_no_port.replace(".", "").isdigit():
+            return f"{forwarded_proto}://{forwarded_host}/process_speech"
+
+    base = str(request.base_url).rstrip("/")
+    if base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base + "/process_speech"
+
+
+# ── Procesamiento de texto STT ────────────────────────────────────────────────
+
+# Contracciones payanesas
 _PAYANES_CONTRACTIONS = {
-    "tá": "está",
-    "toy": "estoy",
-    "tamos": "estamos",
-    "taba": "estaba",
-    "pa": "para",
-    "pal": "para el",
-    "pa'l": "para el",
-    "onde": "donde",
-    "ónde": "donde",
-    "nonces": "entonces",
-    "tonces": "entonces",
-    "'tonces": "entonces",
-    "l centro": "el centro",
-    "'l centro": "el centro",
-    "quiar": "aquiar",
+    "tá": "está", "toy": "estoy", "tamos": "estamos", "taba": "estaba",
+    "pa": "para", "pal": "para el", "pa'l": "para el", "p'alla": "para allá",
+    "pa'lla": "para allá", "palla": "para allá", "pa'ca": "para acá",
+    "paca": "para acá", "onde": "donde", "ónde": "donde", "d'onde": "de donde",
+    "nonces": "entonces", "tonces": "entonces", "'tonces": "entonces", "tons": "entonces",
+    "l centro": "el centro", "'l centro": "el centro", "vea": "mire",
+    "hágale": "sí", "de una": "sí", "cójame": "recoja", "recojame": "recoja",
+    "mandame": "envíe",
 }
 
-# Barge-in: NexiService greeting fragments that Twilio may capture at start of user speech
+# Fragmentos de barge-in de Lyra que Twilio puede capturar
 _BARGEIN_FRAGMENTS = [
     r"^hola\s+soy\s+nexo[,.]?\s*",
     r"^soy\s+nexo[,.]?\s*",
     r"^tu\s+asistente\s+de\s+taxi[,.]?\s*",
     r"^cu[eé]ntame[,.]?\s*",
+    r"^listo[,.]?\s+te\s+recojo\s+en\s*",
+    r"^procesando\s+tu\s+solicitud[,.]?\s*",
 ]
 
-# Number words to digits mapping for mixed-number normalization
-_NUM_WORDS = {
-    "uno": "1",
-    "una": "1",
-    "dos": "2",
-    "tres": "3",
-    "cuatro": "4",
-    "cinco": "5",
-    "seis": "6",
-    "siete": "7",
-    "ocho": "8",
-    "nueve": "9",
-    "diez": "10",
-    "once": "11",
-    "doce": "12",
-    "trece": "13",
-    "catorce": "14",
-    "quince": "15",
-    "dieciséis": "16",
-    "dieciseis": "16",
-    "diecisiete": "17",
-    "dieciocho": "18",
-    "diecinueve": "19",
-    "veinte": "20",
-    "veintiuno": "21",
-    "veintidós": "22",
-    "veintidos": "22",
-    "veintitrés": "23",
-    "veintitres": "23",
-    "veinticuatro": "24",
-    "veinticinco": "25",
-    "veintiséis": "26",
-    "veintiseis": "26",
-    "veintisiete": "27",
-    "veintiocho": "28",
-    "veintinueve": "29",
-    "treinta": "30",
-    "cuarenta": "40",
-    "cincuenta": "50",
-    "sesenta": "60",
-    "setenta": "70",
-    "ochenta": "80",
-    "noventa": "90",
-    "cien": "100",
-}
-
-# Pre-compiled fused-word pattern: "calle/carrera/barrio" glued to number/name
 _FUSED_STREET_RE = re.compile(
-    r"\b(calle|carrera|barrio|con)(\d+|[a-záéíóúñ]{3,})",
+    r"\b(calle|carrera|barrio)(\d+|[a-záéíóúñ]{3,})",
     re.IGNORECASE,
 )
 
+_NUM_WORDS_STREET = {
+    "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+    "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "once": 11,
+    "doce": 12, "trece": 13, "catorce": 14, "quince": 15, "dieciséis": 16,
+    "dieciseis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19,
+    "veinte": 20, "veintiuno": 21, "veintidós": 22, "veintidos": 22,
+    "veintitrés": 23, "veintitres": 23, "veinticuatro": 24, "veinticinco": 25,
+    "treinta": 30, "cuarenta": 40, "cincuenta": 50,
+}
 
-def normalize_raw_stt(text: str, confidence: float = 1.0) -> str:
-    """Pre-process raw STT text BEFORE regex or LLM matching.
 
-    Handles:
-      a) Fused words from fast speech  ("callequince" → "calle quince")
-      b) Payanés contractions          ("tá en el centro" → "está en el centro")
-      c) Mixed number-word combos      ("calle 1cinco" → "calle 15")
-      d) Barge-in artifacts            (strips Mía's greeting if echoed)
+def preprocess_stt(text: str, confidence: float = 1.0) -> str:
+    """
+    Pipeline completo de pre-procesamiento STT.
+    
+    Pasos (en orden):
+    1. Eliminar fragmentos de barge-in de Lyra
+    2. Expandir contracciones payanesas
+    3. Separar palabras fusionadas (habla rápida)
+    4. Convertir números-palabra en contexto de calles
+    5. Corregir errores fonéticos específicos de Popayán
+    6. Normalizar espacios
     """
     if not text or len(text) < 2:
         return text
 
     t = text.strip()
 
-    # d) Barge-in cleanup — remove Mía's greeting echoed into user speech
+    # 1. Barge-in cleanup
     for pat in _BARGEIN_FRAGMENTS:
         t = re.sub(pat, "", t, flags=re.IGNORECASE).strip()
 
-    # b) Payanés contractions — expand before splitting
-    t_lower = t.lower()
+    if not t:
+        return text.strip()
+
+    # 2. Contracciones payanesas
     for contraction, expansion in _PAYANES_CONTRACTIONS.items():
         pat = r"\b" + re.escape(contraction) + r"\b"
         t = re.sub(pat, expansion, t, flags=re.IGNORECASE)
 
-    # a) Fused-word splitting: "callequince" → "calle quince"
+    # 3. Palabras fusionadas: "callequince" → "calle quince"
     t = _FUSED_STREET_RE.sub(r"\1 \2", t)
 
-    # c) Mixed number normalization: "calle 1cinco" → "calle 15"
-    #    Handle digit+word: "1cinco" → "15"
-    def _expand_mixed_num(m):
-        digit_part = m.group(1)
-        word_part = m.group(2).lower()
-        if word_part in _NUM_WORDS:
-            return (
-                str(int(digit_part) * 10 + int(_NUM_WORDS[word_part]))
-                if int(digit_part) < 10
-                else digit_part + _NUM_WORDS[word_part]
-            )
-        return m.group(0)
+    # 4. Números-palabra en contexto de calle: "calle quince" → "calle 15"
+    t = expand_number_words_in_streets(t)
 
-    t = re.sub(
-        r"(\d)(uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)",
-        _expand_mixed_num,
-        t,
-        flags=re.IGNORECASE,
-    )
+    # 5. Correcciones STT específicas de Popayán
+    t = correct_stt_errors(t)
 
-    # Normalize whitespace
+    # 6. Normalizar espacios
     t = re.sub(r"\s+", " ", t).strip()
+
     return t
 
 
-def classify_speech_quality(text: str, confidence: float) -> str:
-    """Classify speech input quality using Twilio confidence + text length.
-
-    Returns: "high", "medium", "low", or "empty".
-    """
+def classify_speech_quality(text: str, confidence: float, profile: AudioQualityProfile) -> str:
+    """Clasifica calidad teniendo en cuenta el perfil de audio de la llamada."""
     t = (text or "").strip()
+
     if not t or len(t) < 2:
         return "empty"
 
     word_count = len(t.split())
+    t_clean    = re.sub(r"[^\w\s]", "", t.lower()).strip()
 
-    # High: good confidence OR long enough text (user spoke clearly with many words)
-    if confidence >= 0.65 or word_count >= 6:
+    # Respuestas cortas explícitas: siempre high
+    if t_clean in {
+        "no", "si", "sí", "sip", "nop", "ok", "vale", "dale", "listo",
+        "bueno", "ya", "claro", "exacto", "correcto", "afirmativo", "negativo",
+    }:
         return "high"
 
-    # Medium: moderate confidence with some words
-    if 0.35 <= confidence < 0.65 and 3 <= word_count <= 5:
-        return "medium"
+    # Si la llamada es consistentemente ruidosa, ser más tolerante
+    if profile.is_noisy_call:
+        if confidence >= 0.30 or word_count >= 4:
+            return "medium"
+        return "low"
 
-    # Low: poor confidence AND short text
+    # Normal
+    if confidence >= 0.65 or word_count >= 6:
+        return "high"
+    if 0.35 <= confidence < 0.65 and word_count >= 3:
+        return "medium"
     if confidence < 0.35 and word_count < 4:
         return "low"
 
-    # Edge cases: default to medium (e.g., confidence 0.35-0.64 with word_count > 5)
     return "medium"
 
 
-def _adaptive_retry_message(text: str, confidence: float, state: str) -> str:
-    """Generate a context-aware retry message based on detected failure pattern.
-
-    Guides the user differently depending on WHY the recognition failed.
-    """
-    t = (text or "").strip()
-    words = t.split()
-    word_count = len(words)
-    t_lower = t.lower()
-
-    # Pattern: has numbers but no street type keyword
-    has_number = bool(re.search(r"\d+", t))
-    has_street_kw = bool(
-        re.search(r"\b(calle|carrera|cl|cra|kr|kra|barrio)\b", t_lower)
-    )
-    if has_number and not has_street_kw:
-        return (
-            "¿Me dices si es calle o carrera? "
-            "Por ejemplo, calle quince o carrera seis."
-        )
-
-    # Pattern: very short + low confidence → acoustic issue
-    if word_count < 3 and confidence < 0.4:
-        return (
-            "No te escuché bien. "
-            "¿Puedes repetirlo un poquito más despacio o más fuerte?"
-        )
-
-    # Pattern: long text but no address extracted → too much info
-    if word_count > 5 and not has_street_kw:
-        return (
-            "Te escuché pero no pillé la dirección. "
-            "Solo dime el barrio o la calle principal."
-        )
-
-    # Pattern: text ends with preposition/article → cut-off speech
-    cut_markers = {"en", "de", "del", "la", "el", "las", "los", "con", "por", "al", "a"}
-    if words and words[-1].lower().rstrip(".,;") in cut_markers:
-        return "Parece que se cortó. " "¿Me repites desde la calle o el barrio?"
-
-    # Default retry per state
-    if state == STATE_WAITING_ORIGIN:
-        return (
-            "No te pillé bien. "
-            "¿Me dices otra vez dónde te recojo? Un barrio, calle o sitio conocido."
-        )
-    elif state == STATE_WAITING_DEST_OR_SKIP:
-        return (
-            "No te pillé bien. ¿A dónde vas? "
-            "Dime un barrio, calle o lugar. O si prefieres, dime no."
-        )
-    return "No te escuché. ¿Me lo repites, por favor?"
-
-
-def _get_process_speech_url(request: Request) -> str:
-    """Determine the action URL for <Gather>.
-
-    Priority:
-    1. TWILIO_GATHER_ACTION_URL env var (manual override)
-    2. Auto-detect from request headers (Host + X-Forwarded-Proto)
-       Cloudflare tunnel sets these automatically.
-    3. Fallback: build from request base URL with HTTPS
-    """
-    # 1. Manual override
-    action = _gather_action_url()
-    if action:
-        return action
-
-    # 2. Auto-detect from Cloudflare/proxy headers
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get(
-        "host", ""
-    )
-    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
-
-    if forwarded_host and "trycloudflare.com" in forwarded_host:
-        return f"{forwarded_proto}://{forwarded_host}/process_speech"
-
-    # Also check for any forwarded host (ngrok, other tunnels)
-    if forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
-        # Strip port if present for public URLs
-        host_no_port = (
-            forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
-        )
-        if not host_no_port.replace(".", "").isdigit():  # Not a raw IP
-            return f"{forwarded_proto}://{forwarded_host}/process_speech"
-
-    base = str(request.base_url).rstrip("/")
-    if base.startswith("http://"):
-        base = "https://" + base[len("http://") :]
-    return base + "/process_speech"
-
-
-# (Using utilities from core.address_utils)
-
-
-def _extract_json_object(raw: str) -> dict:
-    raw = (raw or "").strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{[\s\S]*\}", raw)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {}
-
+# ── Extracción de direcciones ─────────────────────────────────────────────────
 
 async def extract_pickup_address(user_text: str) -> Tuple[Optional[str], str]:
-    """Extract pickup address from spoken text.
-    Strips conversational preamble, then tries local match, then async LLM."""
-    # 0. Strip conversational preamble ("hola amiga, me encuentro en...")
+    """
+    Extrae dirección de recogida.
+    Pipeline: preamble strip → local match → referencia humana → LLM
+    """
+    # 1. Strip preamble
     cleaned = _strip_preamble(user_text)
-    if cleaned != user_text:
-        logger.info(f"[EXTRACT] Stripped preamble: {user_text!r} → {cleaned!r}")
 
-    # 1. Fast local match on cleaned text (no API call)
-    local = _try_local_match(cleaned)
-    if local:
-        logger.info(f"[EXTRACT] Local match for origin: {local!r}")
-        return local, ""
+    # 2. Referencia humana ("por el éxito", "frente a la galería")
+    human_ref = resolve_human_reference(cleaned) or resolve_human_reference(user_text)
+    if human_ref and human_ref.get("canonical"):
+        logger.info(f"[EXTRACT] Human ref: {user_text!r} → {human_ref['canonical']!r}")
+        return human_ref["canonical"], ""
 
-    # 1b. Try with original text if cleaned didn't match
-    if cleaned != user_text:
-        local = _try_local_match(user_text)
+    # 3. Local match (barrios/calles conocidas)
+    for candidate in (cleaned, user_text):
+        local = _try_local_match(candidate)
         if local:
-            logger.info(f"[EXTRACT] Local match (original) for origin: {local!r}")
+            logger.info(f"[EXTRACT] Local match origin: {local!r}")
             return local, ""
 
-    # 2. Async LLM extraction (non-blocking)
+    # 4. LLM (solo si no hay match local)
     client = _get_async_openai()
     if not client:
-        t = (user_text or "").strip()
-        return (
-            t if len(t) > 3 else None,
-            "Por favor dime con más detalle dónde te recogemos en Popayán.",
-        )
+        fb = user_text.strip()
+        return (fb if len(fb) > 3 else None), "¿Dónde te recogemos en Popayán?"
 
     model = _get_model()
-    prompt = f"""Eres un asistente para taxi en Popayán, Cauca, Colombia.
-El usuario habla por teléfono. Extrae SOLO el punto de RECOGIDA (origen).
-Si dice "de X a Y", "desde X hasta Y" o "de X hacia Y", el origen es X (no Y).
-Prioriza direcciones por calle y/o carrera: cruces (calle 5 con carrera 9),
-nomenclatura con placa (carrera 6 # 12-34), una sola vía (calle 15).
-Abreviaturas: cl, cra, kr, k. Barrios y lugares conocidos solo si no hay calle/carrera clara.
-Responde SOLO JSON: {{"origen": "texto normalizado o null", "nota": "breve"}}
-Si no hay ninguna ubicación clara, origen=null.
-Texto del usuario:
-{user_text}
-"""
+    prompt = (
+        "Eres asistente de taxi en Popayán, Cauca, Colombia. El usuario habla por teléfono.\n"
+        "Extrae SOLO el punto de RECOGIDA (origen). Si dice 'de X a Y', el origen es X.\n"
+        "Prioriza: cruces (calle 5 con carrera 9), nomenclatura (carrera 6 # 12-34), "
+        "una vía (calle 15), barrio o lugar conocido de Popayán.\n"
+        'Responde SOLO JSON: {"origen": "texto normalizado o null", "nota": "breve"}\n'
+        f"Texto: {user_text}"
+    )
+
     try:
         result = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            timeout=8.0,
+            timeout=4.0,
         )
-        data = _extract_json_object(result.choices[0].message.content or "")
-        o = data.get("origen")
-        if o is None or str(o).strip().lower() in ("null", "none", ""):
-            fb = (user_text or "").strip()
-            if len(fb) >= 4:
-                return fb, ""
-            return None, (
-                "No alcanzamos a entender bien el punto de recogida. ¿Nos lo repites, por favor? "
-                "Intenta decir una calle, carrera, barrio o lugar conocido en Popayán."
-            )
-        return str(o).strip(), ""
-    except Exception as exc:
-        logger.error(f"extract_pickup_address error: {exc}")
-        fb = (user_text or "").strip()
-        if len(fb) >= 4:
-            return fb, ""
-        return (
-            None,
-            "Hubo un problema técnico. Intenta decir de nuevo tu punto de recogida.",
-        )
+        data   = json.loads(result.choices[0].message.content or "{}")
+        origen = data.get("origen")
+
+        if not origen or str(origen).strip().lower() in ("null", "none", ""):
+            fb = user_text.strip()
+            return (fb if len(fb) >= 4 else None), "¿Dónde te recogemos? Dime el barrio o la calle."
+
+        return str(origen).strip(), ""
+
+    except Exception as e:
+        logger.error(f"extract_pickup_address error: {e}")
+        fb = user_text.strip()
+        return (fb if len(fb) >= 4 else None), "Hubo un problema técnico. Repite tu punto de recogida."
 
 
 async def extract_destination_address(user_text: str) -> Tuple[Optional[str], str]:
-    """Extract destination address from spoken text. Tries local match first, then async LLM."""
-    # 0. Strip conversational preamble
+    """Extrae dirección de destino. Mismo pipeline que origen."""
     cleaned = _strip_preamble(user_text)
 
-    # 1. Fast local match
-    local = _try_local_match(cleaned)
-    if local:
-        logger.info(f"[EXTRACT] Local match for destination: {local!r}")
-        return local, ""
+    human_ref = resolve_human_reference(cleaned) or resolve_human_reference(user_text)
+    if human_ref and human_ref.get("canonical"):
+        return human_ref["canonical"], ""
 
-    # 1b. Try original text
-    if cleaned != user_text:
-        local = _try_local_match(user_text)
+    for candidate in (cleaned, user_text):
+        local = _try_local_match(candidate)
         if local:
-            logger.info(f"[EXTRACT] Local match (original) for destination: {local!r}")
+            logger.info(f"[EXTRACT] Local match dest: {local!r}")
             return local, ""
 
-    # 2. Async LLM extraction (non-blocking)
     client = _get_async_openai()
     if not client:
-        t = (user_text or "").strip()
-        return (t if len(t) > 2 else None, "Indica tu destino en Popayán, por favor.")
+        fb = user_text.strip()
+        return (fb if len(fb) > 2 else None), "¿A dónde vas en Popayán?"
 
-    model = _get_model()
-    prompt = f"""Popayán, Cauca, Colombia. Extrae SOLO la dirección o lugar de DESTINO del viaje.
-Prioriza calle y carrera: cruces (calle 5 con carrera 9),
-placas (carrera 6 # 12-34), una vía (calle 15 norte). Abreviaturas: cl, cra, kr, k.
-Si no hay nomenclatura de vías, acepta lugar conocido o barrio.
-Responde SOLO JSON: {{"destino": "texto o null", "nota": "breve"}}
-Texto:
-{user_text}
-"""
+    model  = _get_model()
+    prompt = (
+        "Popayán, Cauca, Colombia. Extrae SOLO el DESTINO del viaje.\n"
+        "Prioriza: cruces, nomenclatura, una vía, barrio o lugar conocido.\n"
+        'Responde SOLO JSON: {"destino": "texto o null", "nota": "breve"}\n'
+        f"Texto: {user_text}"
+    )
+
     try:
         result = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            timeout=8.0,
+            timeout=4.0,
         )
-        data = _extract_json_object(result.choices[0].message.content or "")
-        d = data.get("destino")
-        if d is None or str(d).strip().lower() in ("null", "none", ""):
-            fb = (user_text or "").strip()
-            if len(fb) >= 3:
-                return fb, ""
-            return (
-                None,
-                "¿Cuál es tu destino? Puedes decir calle, carrera, barrio o un lugar conocido en Popayán.",
-            )
-        return str(d).strip(), ""
-    except Exception as exc:
-        logger.error(f"extract_destination_address error: {exc}")
-        fb = (user_text or "").strip()
-        if len(fb) >= 3:
-            return fb, ""
-        return None, "Repite el destino, por favor."
+        data  = json.loads(result.choices[0].message.content or "{}")
+        dest  = data.get("destino")
+
+        if not dest or str(dest).strip().lower() in ("null", "none", ""):
+            fb = user_text.strip()
+            return (fb if len(fb) >= 3 else None), "¿Cuál es tu destino? Calle, barrio o lugar conocido."
+
+        return str(dest).strip(), ""
+
+    except Exception as e:
+        logger.error(f"extract_destination_address error: {e}")
+        fb = user_text.strip()
+        return (fb if len(fb) >= 3 else None), "Repite el destino, por favor."
 
 
-def _parse_si_no(texto: str) -> Optional[bool]:
-    """Parse affirmative/negative response. True=sí, False=no, None=unclear.
-    Uses only regex — no LLM call (speed critical)."""
-    t = (texto or "").lower().strip()
-    if not t:
-        return None
-
-    t_clean = re.sub(r"[^\w\s]", "", t)
-
-    no_patterns = (
-        r"^no$",
-        r"\bno gracias\b",
-        r"\bnop\b",
-        r"\bmejor no\b",
-        r"\bno quiero\b",
-        r"\bal conductor\b",
-        r"\bno deseo\b",
-        r"\bnegativo\b",
-        r"\bprefiero no\b",
-        r"\bno por ahora\b",
-    )
-    si_patterns = (
-        r"^s[ií]$",
-        r"^si$",
-        r"\bclaro\b",
-        r"\bpor supuesto\b",
-        r"\bdale\b",
-        r"\bok\b",
-        r"\bvale\b",
-        r"\blisto\b",
-        r"\bafirmativo\b",
-        r"\bquiero indicar\b",
-        r"\bs[ií] quiero\b",
-        r"\bsi quiero\b",
-        r"\bdesde luego\b",
-        r"\bclaro que s[ií]\b",
-        r"\bs[ií] s[ií]\b",
-        r"\bsi si\b",
-        r"\bbueno\b",
-        r"\bcorrecto\b",
-    )
-    for p in no_patterns:
-        if re.search(p, t_clean):
-            return False
-    for p in si_patterns:
-        if re.search(p, t_clean):
-            return True
-
-    # Fuzzy: sí/si anywhere = yes, no anywhere = no
-    if re.search(r"\bs[ií]\b", t_clean):
-        return True
-    if re.search(r"\bno\b", t_clean):
-        return False
-
-    return None
-
-
-def _is_repeat_request(texto: str) -> bool:
-    """Detect if the user is asking Lyra to repeat her last message."""
-    t = _normalize_text(texto)
-    if len(t) < 3:
-        return False
-
-    repeat_patterns = [
-        r"\brepite\b",
-        r"\brepetir\b",
-        r"\brepiteme\b",
-        r"\brepíteme\b",
-        r"\bme puede repetir\b",
-        r"\bme puedes repetir\b",
-        r"\bme repite\b",
-        r"\bme repites\b",
-        r"\bque dijiste\b",
-        r"\bqué dijiste\b",
-        r"\bque dijo\b",
-        r"\bqué dijo\b",
-        r"\bno te escuche\b",
-        r"\bno te escuché\b",
-        r"\bno escuche\b",
-        r"\bno entendi\b",
-        r"\bno entendí\b",
-        r"\bno le entendi\b",
-        r"\bcomo asi\b",
-        r"\bcómo así\b",
-        r"\bperdon\b.*\bescuche\b",
-        r"\bperdón\b.*\bescuché\b",
-        r"\bme puede recordar\b",
-        r"\bme puedes recordar\b",
-        r"\bque me dijo\b",
-        r"\bqué me dijo\b",
-        r"\bque me dijiste\b",
-        r"\bqué me dijiste\b",
-        r"\botra vez\b",
-        r"\bde nuevo\b",
-        r"\bno oi\b",
-        r"\bno oí\b",
-    ]
-    for p in repeat_patterns:
-        if re.search(p, t):
-            return True
-    return False
-
-
-# ── Backend communication ─────────────────────────────────────────────────────
-
-import httpx
-
+# ── Backend ───────────────────────────────────────────────────────────────────
 
 async def _create_service(
-    celular: Optional[str],
-    origen: str,
-    destino: Optional[str],
+    celular:     Optional[str],
+    origen:      str,
+    destino:     Optional[str],
     http_client: Optional[httpx.AsyncClient] = None,
 ) -> Tuple[bool, str]:
-    """Geocode and post taxi request to Laravel backend.
-
-    Uses async geocoding and parallel origin+destination resolution when both are present.
-    Accepts an optional shared httpx.AsyncClient to avoid per-call TCP setup.
-    """
+    """Geocodifica y crea el servicio de taxi en el backend Laravel."""
     origen_norm = normalize_address(origen)
 
     if destino:
-        # Parallel geocoding: origin and destination at the same time
         dest_norm = normalize_address(destino)
-        g_o_task = _nominatim_geocode_async(origen_norm)
-        g_d_task = _nominatim_geocode_async(dest_norm)
-        g_o, g_d = await asyncio.gather(g_o_task, g_d_task)
-
-        # Fallback attempts (still async, but sequential since primary failed)
+        g_o, g_d  = await asyncio.gather(
+            _nominatim_geocode_async(origen_norm),
+            _nominatim_geocode_async(dest_norm),
+        )
         if not g_o:
             g_o = await _nominatim_geocode_async(origen)
         if not g_d:
             g_d = await _nominatim_geocode_async(destino)
     else:
-        # Origin only
-        g_o = await _nominatim_geocode_async(origen_norm)
-        if not g_o:
-            g_o = await _nominatim_geocode_async(origen)
+        g_o = await _nominatim_geocode_async(origen_norm) or await _nominatim_geocode_async(origen)
         g_d = None
 
     if not g_o:
         return False, (
-            "Ay, no me aparece esa ubicación en Popayán. "
-            "¿Me la dices de otra forma? Prueba con un barrio cercano o una calle."
+            "No me aparece esa ubicación en Popayán. "
+            "¿Me la dices de otra forma? Prueba con un barrio o una calle."
         )
 
     olat, olng, geo_o = g_o
-    logger.info(f"Geocode origin OK: {geo_o[:100]}")
+    logger.info(f"Geocode origin OK: {geo_o[:80]}")
 
-    dlat, dlng = 0.0, 0.0
-    if destino:
-        if g_d:
-            dlat, dlng, geo_d = g_d
-            logger.info(f"Geocode dest OK: {geo_d[:100]}")
-        else:
-            return False, (
-                "Hmm, ese destino no me aparece en Popayán. "
-                "¿Me lo dices de otra forma? Una calle, barrio o sitio conocido."
-            )
+    dlat = dlng = 0.0
+    if destino and g_d:
+        dlat, dlng, geo_d = g_d
+        logger.info(f"Geocode dest OK: {geo_d[:80]}")
+    elif destino and not g_d:
+        return False, (
+            "El destino no me aparece en Popayán. "
+            "¿Me lo dices de otra forma?"
+        )
 
     payload = {
-        "pasajero_id": 1,
-        "celular": celular,
-        "pasajero_nombre": "Usuario Telefónico",
-        "origen": origen,
-        "origen_lat": float(olat),
-        "origen_lng": float(olng),
-        "clase_vehiculo": "TAXI",
-        "precio_estimado": 0.0,
+        "pasajero_id":      1,
+        "celular":          celular,
+        "pasajero_nombre":  "Usuario Telefónico",
+        "origen":           origen,
+        "origen_lat":       float(olat),
+        "origen_lng":       float(olng),
+        "clase_vehiculo":   "TAXI",
+        "precio_estimado":  0.0,
+        "destino":          (destino or "").strip(),
+        "destino_lat":      float(dlat),
+        "destino_lng":      float(dlng),
     }
-    if destino and destino.strip():
-        payload["destino"] = destino.strip()
-        payload["destino_lat"] = float(dlat)
-        payload["destino_lng"] = float(dlng)
-    else:
-        payload["destino"] = ""
-        payload["destino_lat"] = 0.0
-        payload["destino_lng"] = 0.0
-
-    logger.info(f"Backend POST payload: {json.dumps(payload, ensure_ascii=False)}")
 
     try:
         from core.config import settings
 
-        backend_url = settings.INTELLITAXI_API_BASE
-
-        # Use shared client if provided, otherwise create a one-off
-        client = http_client or httpx.AsyncClient(timeout=60.0)
+        client = http_client or httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=2.0, read=8.0, write=5.0, pool=5.0)
+        )
         try:
             resp = await client.post(
-                f"{backend_url}/taxi/solicitud-telefonica",
+                f"{settings.INTELLITAXI_API_BASE}/taxi/solicitud-telefonica",
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
         finally:
             if not http_client:
                 await client.aclose()
 
-        logger.info(f"Backend response: {resp.status_code} {resp.text[:500]}")
-
         if resp.status_code >= 400:
-            return False, (
-                "Uy, tuvimos un problema registrando tu servicio. "
-                "Dale, inténtalo de nuevo en unos segunditos o pídelo por la app."
-            )
+            logger.error(f"Backend {resp.status_code}: {resp.text[:300]}")
+            return False, "Tuvimos un problema registrando tu servicio. Inténtalo de nuevo."
+
         return True, (
             "¡Listo! Ya te estamos buscando un carro. "
-            "En un momentico se comunica contigo el conductor. "
-            "¡Que tengas un excelente viaje! Chao."
+            "En un momentico se comunica el conductor. ¡Buen viaje! Fue un gusto atenderte."
         )
+
     except httpx.TimeoutException:
-        return False, "Se nos demoró un poquito el servidor. Inténtalo de nuevo, porfa."
+        return False, "Se demoró el servidor. Inténtalo de nuevo, porfa."
     except Exception as e:
         logger.error(f"Backend POST error: {e}")
-        return False, (
-            "Tuvimos un problemita técnico. "
-            "Intenta de nuevo o pide el taxi por la aplicación."
-        )
+        return False, "Problemita técnico. Intenta de nuevo o pide el taxi por la app."
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
+# ── Rutas ─────────────────────────────────────────────────────────────────────
 
 @voice_router.api_route("/voice", methods=["GET", "POST"])
 async def voice(request: Request):
     """
-    Initial Twilio webhook when a call comes in.
-    Greets the user and starts listening for the pickup address.
+    Webhook inicial de Twilio. Saluda y comienza a escuchar.
     """
-    form = await request.form()
-    call_sid = form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
-    sess = get_session(str(call_sid))
+    form     = await request.form()
+    call_sid = str(form.get("CallSid") or request.query_params.get("CallSid") or "unknown")
+    sess     = get_session(call_sid)
     sess.state = STATE_WAITING_ORIGIN
 
-    logger.info(f"[VOICE] New call CallSid={call_sid}")
-
-    # Debug: log headers from Cloudflare tunnel for URL auto-detection
-    host_h = request.headers.get("host", "?")
-    xfh = request.headers.get("x-forwarded-host", "?")
-    xfp = request.headers.get("x-forwarded-proto", "?")
-    cf_ray = request.headers.get("cf-ray", "?")
+    # Log headers para debugging de tunnel/proxy
     logger.info(
-        f"[VOICE] Headers: host={host_h} x-fwd-host={xfh} x-fwd-proto={xfp} cf-ray={cf_ray}"
+        f"[VOICE] CallSid={call_sid} "
+        f"host={request.headers.get('host','?')} "
+        f"x-fwd-host={request.headers.get('x-forwarded-host','?')} "
+        f"x-fwd-proto={request.headers.get('x-forwarded-proto','?')}"
     )
 
-    saludo = (
-        "¡Hola! Soy Nexo, tu asistente de taxi. "
-        "Cuéntame, ¿en qué parte de Popayán te recogemos?"
-    )
+    saludo = "Hola, soy Nexo, tu asistente de taxi. ¿Dónde te recogemos?"
     sess.last_message = saludo
 
     action_url = _get_process_speech_url(request)
     logger.info(f"[VOICE] action_url={action_url}")
-    xml = await _twiml_gather_message(request, saludo, action_url)
+
+    xml = _twiml_gather_adaptive(saludo, action_url, sess, short_answer=False)
     return _twiml_response(xml)
 
 
 @voice_router.api_route("/process_speech", methods=["GET", "POST"])
 async def process_speech(request: Request):
     """
-    Twilio webhook for each speech turn after <Gather>.
-    Processes audio transcription through the state machine.
+    Webhook principal. Procesa cada turno de la conversación.
+    Integra todos los módulos de mejora.
     """
-    form = await request.form()
-    call_sid = str(
-        form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
-    )
+    form      = await request.form()
+    call_sid  = str(form.get("CallSid") or request.query_params.get("CallSid") or "unknown")
     caller_id = str(form.get("From") or "").replace("whatsapp:", "")
 
-    # Twilio sends speech result under different keys
+    # ── Extraer resultado STT de Twilio ──
     texto_usuario = ""
-    confidence = 0.0
     for key in ("SpeechResult", "StableSpeechResult", "UnstableSpeechResult"):
         v = str(form.get(key) or "").strip()
         if v:
             texto_usuario = v
             break
 
-    # Get Twilio confidence score (0.0 - 1.0)
     try:
         confidence = float(form.get("Confidence") or 0.0)
     except (ValueError, TypeError):
         confidence = 0.0
 
-    # Log raw speech + confidence for debugging
     if texto_usuario:
-        logger.info(f"[SPEECH_RAW] confidence={confidence:.2f} text={texto_usuario!r}")
+        logger.info(f"[RAW_STT] conf={confidence:.2f} text={texto_usuario!r}")
 
-    # ── Normalize raw STT (fused words, contractions, barge-in) ──
-    if texto_usuario:
-        texto_normalizado = normalize_raw_stt(texto_usuario, confidence)
-        if texto_normalizado != texto_usuario:
-            logger.info(
-                f"[SPEECH] Normalized: {texto_usuario!r} → {texto_normalizado!r}"
-            )
-            texto_usuario = texto_normalizado
-
-    # Apply speech corrections for common Twilio misrecognitions
-    if texto_usuario:
-        texto_corregido = _correct_speech(texto_usuario)
-        if texto_corregido != texto_usuario:
-            logger.info(f"[SPEECH] Corrected: {texto_usuario!r} → {texto_corregido!r}")
-            texto_usuario = texto_corregido
-
-    # Strip conversational preamble EARLY (before state machine)
-    # "Hola amiga, me encuentro aquí en el Valle del Ortigal" → "el Valle del Ortigal"
-    if texto_usuario:
-        texto_limpio = _strip_preamble(texto_usuario)
-        if texto_limpio != texto_usuario:
-            logger.info(
-                f"[SPEECH] Preamble stripped: {texto_usuario!r} → {texto_limpio!r}"
-            )
-            texto_usuario = texto_limpio
-
-    # ── Classify speech quality (Problem 2 + 3: confidence integration) ──
-    speech_quality = classify_speech_quality(texto_usuario, confidence)
-    if texto_usuario:
-        logger.info(f"[SPEECH] quality={speech_quality} confidence={confidence:.2f}")
-
-    sess = get_session(call_sid)
+    sess       = get_session(call_sid)
     action_url = _get_process_speech_url(request)
+
+    # ── Pipeline de pre-procesamiento STT ──
+    texto_original = texto_usuario
+    if texto_usuario:
+        texto_usuario = preprocess_stt(texto_usuario, confidence)
+        if texto_usuario != texto_original:
+            logger.info(f"[STT] Preprocessed: {texto_original!r} → {texto_usuario!r}")
+
+    # ── Actualizar perfil de calidad de audio ──
+    sess.quality_profile.update(confidence, texto_usuario)
+
+    # ── Clasificar calidad con perfil adaptativo ──
+    speech_quality = classify_speech_quality(texto_usuario, confidence, sess.quality_profile)
+    if texto_usuario:
+        logger.info(
+            f"[QUALITY] {speech_quality} conf={confidence:.2f} "
+            f"noisy={sess.quality_profile.is_noisy_call} "
+            f"fast={sess.quality_profile.is_fast_speaker}"
+        )
+
+    # ── Detección de saludo sin dirección ──
+    _GREETING_WORDS = {"hola", "buenas", "buenos", "qhubo", "alo", "aló", "bueno", "diga", "dígame"}
+    texto_para_greeting_check = texto_original if texto_original else ""
+    if not texto_usuario and texto_para_greeting_check:
+        orig_words = set(texto_para_greeting_check.lower().strip().rstrip(".,!?").split())
+        if orig_words & _GREETING_WORDS:
+            texto_usuario = "__GREETING__"
 
     logger.info(
         f"[SPEECH] CallSid={call_sid} state={sess.state} "
-        f"text_len={len(texto_usuario)} preview={texto_usuario[:120]!r}"
+        f"quality={speech_quality} text={texto_usuario[:100]!r}"
     )
 
-    # ── Already finished ──
-    if sess.state == STATE_FINISHED or (
-        sess.service_created and sess.state == STATE_SERVICE_CREATED
-    ):
-        return _twiml_response(
-            await _twiml_say_hangup(
-                request, "¡Gracias por llamarnos! Que te vaya bien, chao."
-            )
+    # ── Estados terminales ──
+    if sess.state == STATE_FINISHED or (sess.service_created and sess.state == STATE_SERVICE_CREATED):
+        return _twiml_response(_twiml_say_hangup("¡Gracias por llamarnos! Que te vaya bien. Fue un gusto atenderte."))
+
+    http_client = getattr(request.app.state, "http_client", None)
+
+    # ── Creación de servicio (estado de transición) ──
+    if sess.state == STATE_CREATING_SERVICE:
+        ok, closing = await _create_service(
+            caller_id, sess.origen_text or "", sess.destino_text, http_client=http_client
         )
+        if not ok:
+            sess.state        = STATE_WAITING_DEST_OR_SKIP
+            sess.last_message = closing
+            return _twiml_response(_twiml_gather_adaptive(closing, action_url, sess, short_answer=True))
 
-    # ── Repeat request detection ──
+        sess.service_created = True
+        sess.state           = STATE_FINISHED
+        reset_session(call_sid)
+        return _twiml_response(_twiml_say_hangup(closing))
+
+    # ── Detección de "repite" ──
     if texto_usuario and _is_repeat_request(texto_usuario):
-        logger.info(f"[SPEECH] Repeat requested. Replaying last message.")
-        replay = sess.last_message or "Cuéntame, ¿en qué parte de Popayán te recogemos?"
-        return _twiml_response(await _twiml_gather_message(request, replay, action_url))
+        logger.info("[SPEECH] Repeat request detected.")
+        replay = sess.last_message or "¿En qué parte de Popayán te recogemos?"
+        return _twiml_response(_twiml_gather_adaptive(replay, action_url, sess))
 
-    # ── Silence handling ──
+    # ── Saludo sin dirección ──
+    if texto_usuario == "__GREETING__":
+        texto_usuario = ""
+        msgs = {
+            STATE_WAITING_ORIGIN:       "¡Hola! ¿Dónde te recogemos?",
+            STATE_WAITING_DEST_OR_SKIP: "¡Hola! ¿A dónde vas? O dime no.",
+        }
+        msg               = msgs.get(sess.state, "¡Hola! ¿En qué te ayudo?")
+        sess.last_message = msg
+        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
+
+    # ── Silencio ──
     if not texto_usuario:
-        sess.silence_count += 1
-        logger.info(f"[SPEECH] Silence #{sess.silence_count} state={sess.state}")
+        sess.silence_count     += 1
+        sess.quality_profile.silence_count += 1
+        logger.info(f"[SILENCE] #{sess.silence_count} state={sess.state}")
 
         if sess.silence_count >= _max_silence():
             reset_session(call_sid)
             return _twiml_response(
-                await _twiml_say_hangup(
-                    request,
-                    "Parece que no puedes hablar en este momento, no hay problema. "
-                    "Llámanos cuando lo necesites. ¡Que te vaya bien!",
-                )
+                _twiml_say_hangup("Parece que no puedes hablar ahora. Llámanos cuando quieras. ¡Fue un gusto atenderte!")
             )
 
-        if sess.state == STATE_WAITING_ORIGIN:
-            if sess.silence_count == 1:
-                msg = (
-                    "¿Sigues por ahí? No te alcancé a escuchar. "
-                    "Solo dime dónde te recojo, un barrio, una calle, lo que sea."
-                )
-            else:
-                msg = (
-                    "Seguimos aquí, tranqui. Si necesitas el taxi dime dónde estás. "
-                    "Si no, no pasa nada, cerramos la llamada en un momentico."
-                )
-        elif sess.state == STATE_WAITING_DEST_OR_SKIP:
-            if sess.silence_count == 1:
-                msg = (
-                    "No te escuché. Dime a dónde vas, "
-                    "o si prefieres le cuentas directo al conductor, solo dime no."
-                )
-            else:
-                msg = (
-                    "Cuéntame el destino cuando puedas. "
-                    "O dime no y te mando el carro de una vez."
-                )
-        elif sess.state == STATE_CONFIRMING_ORIGIN:
-            msg = (
-                f"¿Confirmas que estás por {sess.origen_barrio or 'esa zona'}? "
-                "Solo dime sí, o dime tu barrio."
-            )
-        else:
-            msg = "¿Me escuchas? Estoy aquí para ayudarte, solo háblame."
+        silence_msgs = {
+            (STATE_WAITING_ORIGIN, 1):       "¿Sigues ahí? Dime dónde te recojo.",
+            (STATE_WAITING_ORIGIN, 2):       "¿Dónde estás en Popayán?",
+            (STATE_WAITING_DEST_OR_SKIP, 1): "No te escuché. ¿A dónde vas? O dime no.",
+            (STATE_WAITING_DEST_OR_SKIP, 2): "Dime el destino o dime no.",
+            (STATE_CONFIRMING_ORIGIN, 1):    f"¿Confirmas {sess.origen_barrio or 'esa zona'}? Di sí o no.",
+        }
 
+        msg = silence_msgs.get(
+            (sess.state, min(sess.silence_count, 2)),
+            "¿Me escuchas? Háblame."
+        )
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_message(request, msg, action_url))
+        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
 
-    # ── Reset silence counter ──
+    # ── Reset contador de silencio ──
     sess.silence_count = 0
 
-    # ── Low quality gate: skip LLM, ask user to reformulate ──
-    if speech_quality == "low" and sess.state in (
-        STATE_WAITING_ORIGIN,
-        STATE_WAITING_DEST_OR_SKIP,
-    ):
-        msg = _adaptive_retry_message(texto_usuario, confidence, sess.state)
-        logger.info(f"[SPEECH] Low quality gate — skipping LLM. Retry msg sent.")
-        sess.last_message = msg
-        return _twiml_response(await _twiml_gather_message(request, msg, action_url))
+    # ── Gate de baja calidad: reparación inteligente ──
+    if speech_quality == "low" and sess.state in (STATE_WAITING_ORIGIN, STATE_WAITING_DEST_OR_SKIP):
+        sess.retry_count += 1
+        sess.endpoint_ctrl.on_retry()
 
-    # ── Medium quality: aggressive normalize + retry local match before LLM ──
-    if speech_quality == "medium" and sess.state in (
-        STATE_WAITING_ORIGIN,
-        STATE_WAITING_DEST_OR_SKIP,
-    ):
-        local_match = _try_local_match(texto_usuario)
-        if not local_match:
-            # Try aggressive re-normalization
-            re_normalized = normalize_raw_stt(texto_usuario, confidence)
-            local_match = _try_local_match(re_normalized)
-        if local_match:
-            logger.info(
-                f"[SPEECH] Medium quality resolved via local match: {local_match!r}"
-            )
-            texto_usuario = local_match  # Use the matched canonical name
-
-    # Get shared httpx client for backend calls
-    http_client = getattr(request.app.state, "http_client", None)
-
-    # ── STATE: waiting_origin ──
-    if sess.state == STATE_WAITING_ORIGIN:
-        origen_llm, hint = await extract_pickup_address(texto_usuario)
-        origen = (origen_llm or texto_usuario or "").strip()
-
-        # Normalize through our address normalizer
-        if origen:
-            normalized = normalize_address(origen)
-            if normalized and len(normalized) > len(origen) * 0.5:
-                origen = normalized
-
-        sess.origen_text = origen
-        logger.info(f"[STATE] waiting_origin extracted origen={origen!r}")
-
-        if not origen or len(origen) < 2:
-            msg = hint or (
-                "Mmm, no te pillé bien. "
-                "¿Me dices otra vez dónde te recojo? Un barrio, calle o sitio conocido de Popayán."
-            )
-            sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
-
-        # Check if this is a street address (not a named barrio/landmark)
-        # If it contains street patterns (calle/carrera + numbers), ask for barrio confirmation
-        is_street_address = bool(
-            re.search(r"(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+", origen.lower())
+        msg = get_repair_message(
+            texto_usuario, confidence, sess.state, sess.memory
         )
 
-        if is_street_address:
-            # Find nearest barrio for confirmation
+        # En el 3er reintento, cambiar estrategia: pedir solo barrio
+        if sess.retry_count >= 3:
+            if sess.state == STATE_WAITING_ORIGIN:
+                msg = "¿Solo dime el barrio donde estás?"
+            else:
+                msg = "¿Solo dime el barrio de destino?"
+
+        logger.info(f"[LOW_QUALITY] Retry #{sess.retry_count}: {msg!r}")
+        sess.last_message = msg
+        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
+
+    # ── Calidad media: intentar match local agresivo antes de LLM ──
+    if speech_quality == "medium" and sess.state in (STATE_WAITING_ORIGIN, STATE_WAITING_DEST_OR_SKIP):
+        local_try = _try_local_match(texto_usuario)
+        if not local_try:
+            local_try = _try_local_match(preprocess_stt(texto_usuario, confidence))
+        if local_try:
+            logger.info(f"[MEDIUM_QUALITY] Resolved via local match: {local_try!r}")
+            texto_usuario = local_try
+
+    sess.retry_count = 0
+    sess.endpoint_ctrl.on_successful_response()
+
+    # ═══════════════════════════════════════════════════════════════
+    #  MÁQUINA DE ESTADOS
+    # ═══════════════════════════════════════════════════════════════
+
+    # ── ESTADO: waiting_origin ────────────────────────────────────
+    if sess.state == STATE_WAITING_ORIGIN:
+
+        # 1. Referencia humana ("por el éxito", "frente a la galería")
+        human_ref = resolve_human_reference(texto_usuario)
+        if human_ref and human_ref.get("canonical"):
+            origen = human_ref["canonical"]
+            logger.info(f"[ORIGIN] Human ref: {origen!r}")
+        else:
+            # 2. Local match directo
+            local = _try_local_match(texto_usuario)
+            if local:
+                origen = local
+                logger.info(f"[ORIGIN] Local match: {origen!r}")
+            else:
+                # 3. LLM extraction
+                origen_llm, hint = await extract_pickup_address(texto_usuario)
+                origen = (origen_llm or texto_usuario or "").strip()
+
+        # Normalizar
+        if origen:
+            norm = normalize_address(origen)
+            if norm and len(norm) > len(origen) * 0.4:
+                origen = norm
+
+        sess.origen_text = origen
+        sess.memory.add_location_mention(origen)
+        logger.info(f"[ORIGIN] Extracted: {origen!r}")
+
+        if not origen or len(origen) < 2:
+            msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
+            sess.last_message = msg
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
+
+        # Determinar si es dirección de calle (requiere confirmación de barrio)
+        is_street = bool(re.search(r"(?:calle|carrera|cl|cra|kr|kra)\s*\d+", origen.lower()))
+
+        if is_street:
+            # Buscar barrio más cercano para confirmar
             try:
-                from tools.popayan_geodata import (
-                    geocode_local,
-                    get_nearby_barrios,
-                    ALL_BARRIOS,
-                    _haversine,
-                )
+                from tools.popayan_geodata import geocode_local, get_nearby_barrios, ALL_BARRIOS, _haversine
 
                 geo = geocode_local(origen)
                 if geo:
-                    # Use 5km radius (street estimations can be imprecise)
                     nearby = get_nearby_barrios(geo[0], geo[1], radius_km=5.0)
                     if not nearby:
-                        # Fallback: find absolute closest barrio
                         closest = min(
                             ALL_BARRIOS.items(),
                             key=lambda x: _haversine(geo[0], geo[1], x[1][0], x[1][1]),
                         )
-                        nearby = [
-                            {
-                                "name": closest[0],
-                                "distance_km": _haversine(
-                                    geo[0], geo[1], closest[1][0], closest[1][1]
-                                ),
-                            }
-                        ]
+                        nearby = [{"name": closest[0], "distance_km": 0.0}]
+
                     if nearby:
-                        barrio_name = nearby[0]["name"]
-                        dist_km = nearby[0]["distance_km"]
+                        barrio_name    = nearby[0]["name"]
                         sess.origen_barrio = barrio_name
-                        sess.state = STATE_CONFIRMING_ORIGIN
-                        msg = (
-                            f"Ok, {origen}. "
-                            f"Eso queda por el barrio {barrio_name}. "
-                            "¿Es correcto? Di sí, o dime cuál es tu barrio "
-                            "para tener una ubicación más exacta."
-                        )
+                        sess.state     = STATE_CONFIRMING_ORIGIN
+                        msg = f"Ok, {origen}, barrio {barrio_name}. ¿Correcto?"
                         sess.last_message = msg
-                        logger.info(
-                            f"[STATE] Confirming origin: {origen!r} near barrio {barrio_name!r} ({dist_km:.1f}km)"
-                        )
-                        return _twiml_response(
-                            await _twiml_gather_message(request, msg, action_url)
-                        )
+                        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+
             except Exception as exc:
-                logger.warning(f"[STATE] Barrio confirmation lookup failed: {exc}")
+                logger.warning(f"[ORIGIN] Barrio lookup failed: {exc}")
 
-            # Even if geocoding/lookup failed, STILL ask for barrio confirmation
-            sess.state = STATE_CONFIRMING_ORIGIN
-            msg = (
-                f"Ok, {origen}. "
-                "¿En qué barrio de Popayán queda eso? "
-                "Dime el nombre del barrio para tener una ubicación más exacta."
-            )
+            # Sin barrio encontrado: preguntar directamente
+            sess.state    = STATE_CONFIRMING_ORIGIN
+            msg           = f"Ok, {origen}. ¿En qué barrio queda?"
             sess.last_message = msg
-            logger.info(f"[STATE] Asking barrio for street address: {origen!r}")
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
 
-        # Named place or confirmation lookup failed → proceed directly
-        sess.state = STATE_WAITING_DEST_OR_SKIP
-        msg = (
-            f"Listo, te recogemos en {origen}. "
-            "¿A dónde te diriges? Dime el destino, "
-            "o si prefieres le cuentas al conductor, solo dime no."
-        )
+        # Lugar nombrado: ir directo a destino
+        sess.state    = STATE_WAITING_DEST_OR_SKIP
+        msg           = f"Listo, te recojo en {origen}. ¿Tienes destino o le dices al conductor?"
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_message(request, msg, action_url))
+        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
-    # ── STATE: confirming_origin ──
-    #    User confirms barrio or provides a different barrio
+    # ── ESTADO: confirming_origin ─────────────────────────────────
     if sess.state == STATE_CONFIRMING_ORIGIN:
         is_yes = _parse_si_no(texto_usuario)
 
         if is_yes is True:
-            # User confirmed → proceed with the original address
-            logger.info(f"[STATE] Origin confirmed: {sess.origen_text!r}")
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = (
-                f"Perfecto, te recogemos en {sess.origen_text}. "
-                "¿A dónde te diriges? Dime el destino, "
-                "o si prefieres le cuentas al conductor, solo dime no."
-            )
+            sess.memory.last_confirmed_origin = sess.origen_text
+            sess.state    = STATE_WAITING_DEST_OR_SKIP
+            msg           = f"Perfecto, en {sess.origen_text}. ¿Tienes destino o le dices al conductor?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
         if is_yes is False:
-            # User said "no" → ask for the barrio
-            msg = (
-                "Sin problema. ¿En qué barrio estás entonces? "
-                "Dime el nombre del barrio para ubicarte mejor."
-            )
-            sess.state = STATE_WAITING_ORIGIN
-            sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            # Extraer corrección inline ("no, en el ortigal")
+            rest = re.sub(
+                r"^(?:no|nones|negativo|nop)[,\s]*", "", texto_usuario, flags=re.IGNORECASE
+            ).strip()
+            if len(rest) > 4:
+                texto_usuario = rest
+                # Caemos al match local/LLM abajo
+            else:
+                sess.state    = STATE_WAITING_ORIGIN
+                msg           = "Ok. ¿En qué barrio estás?"
+                sess.last_message = msg
+                return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
 
-        # User gave a different barrio or location → use that as origin
+        # Intentar match local con la respuesta del usuario
         local = _try_local_match(texto_usuario)
         if local:
             sess.origen_text = local
-            logger.info(f"[STATE] Origin updated from confirmation: {local!r}")
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = (
-                f"Listo, te recogemos en {local}. "
-                "¿A dónde te diriges? Dime el destino, "
-                "o si prefieres le cuentas al conductor, solo dime no."
-            )
+            sess.memory.add_location_mention(local)
+            sess.memory.last_confirmed_origin = local
+            sess.state    = STATE_WAITING_DEST_OR_SKIP
+            msg           = f"Listo, en {local}. ¿Tienes destino o le dices al conductor?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
-        # Couldn't parse response → ask again
-        msg = (
-            f"No te pillé. ¿Confirmas que estás por {sess.origen_barrio or 'esa zona'}? "
-            "Di sí, o dime tu barrio."
-        )
+        # No se pudo parsear: reparación contextual
+        msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
+        if sess.origen_barrio:
+            msg = f"No te pillé. ¿Confirmas {sess.origen_barrio}? Di sí, o dime tu barrio."
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_message(request, msg, action_url))
+        return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
-    # ── STATE: waiting_dest_or_skip ──
-    #    User says "no" → service without destination
-    #    User says correction phrase → go back to waiting_origin
-    #    User says anything else → treat as destination
+    # ── ESTADO: waiting_dest_or_skip ─────────────────────────────
     if sess.state == STATE_WAITING_DEST_OR_SKIP:
-        # Check if user wants to correct the origin
+
+        # Corrección de origen
         if _is_correction_request(texto_usuario):
-            logger.info(f"[STATE] User wants to correct origin: {texto_usuario!r}")
-            sess.state = STATE_WAITING_ORIGIN
+            sess.state      = STATE_WAITING_ORIGIN
             sess.origen_text = None
             sess.origen_barrio = None
-            msg = (
-                "Sin problema, vamos a corregir la ubicación. "
-                "Dime de nuevo, ¿dónde te recogemos?"
-            )
+            msg             = "Ok, corregimos. ¿Dónde te recogemos?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess))
 
-        # Check if user is declining destination
+        # Declinar destino
         is_no = _parse_si_no(texto_usuario)
+        t_lower = texto_usuario.lower()
+        indirect_decline = any(p in t_lower for p in [
+            "no tengo", "no sé", "no se", "sin destino", "al conductor", "el conductor",
+            "le digo al", "le digo el", "ya le digo", "donde sea", "no importa",
+            "allá le digo", "alla le digo", "después le digo",
+        ])
 
-        if is_no is False:
-            # Create service WITHOUT destination
-            logger.info(
-                f"[STATE] User declined destination. Creating service without dest."
-            )
-            ok, closing = await _create_service(
-                caller_id, sess.origen_text or "", None, http_client=http_client
-            )
-            if not ok:
-                sess.last_message = closing
-                return _twiml_response(
-                    await _twiml_gather_message(request, closing, action_url)
-                )
+        if is_no is False or indirect_decline:
+            sess.state = STATE_CREATING_SERVICE
+            return _twiml_response(_twiml_redirect(action_url, "Procesando tu solicitud..."))
 
-            sess.service_created = True
-            sess.state = STATE_FINISHED
-            reset_session(call_sid)
-            return _twiml_response(await _twiml_say_hangup(request, closing))
+        # Tratar como destino
+        dest_preambles = [
+            r'^(?:me\s+dirijo\s+(?:hacia|a|al|para))\s+',
+            r'^(?:voy\s+(?:para|hacia|a|al|pa))\s+',
+            r'^(?:llévame\s+(?:a|al|hacia|para|pa))\s+',
+            r'^(?:hacia|para|al|a)\s+',
+            r'^(?:mi\s+destino\s+es)\s+',
+            r'^(?:deja(me)?\s+(?:en|por))\s+',
+        ]
+        dest_text = texto_usuario
+        for pat in dest_preambles:
+            dest_text = re.sub(pat, "", dest_text, flags=re.IGNORECASE).strip()
 
-        # Everything else is treated as a destination
-        dest_llm, hint = await extract_destination_address(texto_usuario)
-        dest = (dest_llm or texto_usuario or "").strip()
+        # Referencia humana en destino
+        human_ref = resolve_human_reference(dest_text)
+        if human_ref and human_ref.get("canonical"):
+            dest = human_ref["canonical"]
+            logger.info(f"[DEST] Human ref: {dest!r}")
+        else:
+            # Local match
+            local_dest = _try_local_match(dest_text)
+            if local_dest:
+                dest = local_dest
+                logger.info(f"[DEST] Local match: {dest!r}")
+            else:
+                dest_llm, _ = await extract_destination_address(dest_text)
+                dest = (dest_llm or dest_text or "").strip()
 
         if dest:
-            normalized = normalize_address(dest)
-            if normalized and len(normalized) > len(dest) * 0.5:
-                dest = normalized
+            norm = normalize_address(dest)
+            if norm and len(norm) > len(dest) * 0.4:
+                dest = norm
 
         sess.destino_text = dest
-        logger.info(f"[STATE] waiting_dest_or_skip extracted dest={dest!r}")
+        sess.memory.add_location_mention(dest)
+        logger.info(f"[DEST] Extracted: {dest!r}")
 
         if not dest or len(dest) < 2:
-            msg = hint or (
-                "No te pillé bien. ¿A dónde vas? "
-                "Dime un barrio, calle o lugar. O si prefieres, dime no."
-            )
+            msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_message(request, msg, action_url)
-            )
+            return _twiml_response(_twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
-        # Create service WITH destination
-        ok, closing = await _create_service(
-            caller_id, sess.origen_text or "", dest, http_client=http_client
+        sess.state = STATE_CREATING_SERVICE
+        return _twiml_response(_twiml_redirect(action_url, "Procesando tu solicitud..."))
+
+    # ── Fallback ──────────────────────────────────────────────────
+    return _twiml_response(_twiml_say_hangup("¡Gracias por llamarnos! Que te vaya bien. Fue un gusto atenderte."))
+
+
+# ── Partial speech endpoint ───────────────────────────────────────────────────
+
+@voice_router.post("/partial_speech")
+async def partial_speech(
+    request:             Request,
+    CallSid:             str = Form(""),
+    UnstableSpeechResult: str = Form(""),
+    SequenceNumber:      str = Form(""),
+):
+    """
+    Procesa resultados parciales de STT de Twilio (partialResultCallback).
+    
+    Permite:
+    - Detección temprana de cancelaciones ("no gracias")
+    - Detección temprana de correcciones
+    - Slot filling incremental de ubicaciones
+    - Preparar hipótesis antes de que el usuario termine de hablar
+    
+    Nota: Este endpoint debe retornar 200 vacío rápidamente.
+    Las acciones reales (ej: cancelar TTS vía Twilio REST API) se harían
+    de forma asíncrona en background.
+    """
+    if not UnstableSpeechResult or not CallSid:
+        return Response(content="", media_type="text/xml")
+
+    t_lower = strip_accents(UnstableSpeechResult.lower().strip())
+    sess    = get_session(CallSid) if CallSid else None
+
+    try:
+        seq = int(SequenceNumber or 0)
+    except ValueError:
+        seq = 0
+
+    logger.debug(f"[PARTIAL] seq={seq} text={t_lower!r}")
+
+    # Procesar con el turn processor de la sesión
+    if sess and sess.turn_processor:
+        result = sess.turn_processor.process_partial_speech(
+            UnstableSpeechResult,
+            confidence=0.5,  # Parciales no tienen confidence score
+            current_state=sess.state if sess else "unknown",
+            seq_num=seq,
         )
-        if not ok:
-            sess.last_message = closing
-            return _twiml_response(
-                await _twiml_gather_message(request, closing, action_url)
-            )
 
-        sess.service_created = True
-        sess.state = STATE_FINISHED
-        reset_session(call_sid)
-        return _twiml_response(await _twiml_say_hangup(request, closing))
+        action = result.get("action", "wait")
 
-    # ── Fallback ──
-    return _twiml_response(
-        await _twiml_say_hangup(
-            request, "¡Gracias por llamarnos! Que te vaya súper bien, chao."
-        )
-    )
+        if action == "interrupt_tts":
+            logger.info(f"[PARTIAL] INTERRUPT signal detected: {t_lower!r}")
+            # En producción: llamar Twilio REST API para cancelar el TTS actual
+            # asyncio.create_task(_cancel_current_tts(CallSid))
+            # Por ahora: loguear para monitoreo
 
+        elif action == "prepare_response":
+            partial_loc = result.get("partial_location")
+            if partial_loc and sess:
+                sess.memory.add_location_mention(partial_loc)
+                logger.info(f"[PARTIAL] Early location slot filled: {partial_loc!r}")
+
+        # Barge-in explícito
+        elif BargeInHandler.is_interruption(t_lower):
+            logger.info(f"[PARTIAL] Barge-in detected: {t_lower!r}")
+
+    return Response(content="", media_type="text/xml")
+
+
+# ── WebSocket Media Streams ───────────────────────────────────────────────────
+
+@voice_router.websocket("/voice/stream")
+async def voice_stream(websocket: WebSocket):
+    """
+    WebSocket para Twilio Media Streams.
+    
+    Permite streaming de audio bidireccional para:
+    - STT incremental con Deepgram/AssemblyAI (menor latencia que polling)
+    - TTS en streaming directo al caller
+    - Control de barge-in en tiempo real
+    
+    Estado actual: captura eventos y loguea. Para STT real vía WebSocket,
+    integrar con Deepgram Nova-2 o similar.
+    """
+    await websocket.accept()
+    stream_sid = None
+    call_sid   = None
+    audio_buffer: list[bytes] = []
+
+    try:
+        while True:
+            message = await websocket.receive_text()
+            data    = json.loads(message)
+            event   = data.get("event")
+
+            if event == "connected":
+                logger.info("[WS_STREAM] Connected")
+
+            elif event == "start":
+                stream_sid = data["start"]["streamSid"]
+                call_sid   = data["start"]["callSid"]
+                logger.info(f"[WS_STREAM] Started: CallSid={call_sid} StreamSid={stream_sid}")
+
+            elif event == "media":
+                # Audio µ-law 8kHz mono en base64
+                # Para STT en tiempo real: acumular y enviar a Deepgram vía WebSocket
+                payload = data["media"].get("payload", "")
+                # audio_buffer.append(base64.b64decode(payload))  # Activar con Deepgram
+                pass
+
+            elif event == "stop":
+                logger.info(f"[WS_STREAM] Stopped: StreamSid={stream_sid}")
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"[WS_STREAM] Disconnected: StreamSid={stream_sid}")
+    except Exception as e:
+        logger.error(f"[WS_STREAM] Error: {e}")
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
 
 @voice_router.get("/health")
 async def voice_health():
-    """Health check endpoint for the Laravel proxy."""
     from core.config import settings
 
     return {
-        "ok": True,
-        "service": "lyra-intellitaxi-voice",
-        "backend_api": settings.INTELLITAXI_API_BASE,
-        "twilio_voice": _twilio_voice(),
-        "twilio_gather_timeout": _twilio_gather_timeout(),
-        "twilio_speech_timeout": _twilio_speech_timeout(),
-        "gather_action_url": _gather_action_url() or "inferred from request",
-        "llm_provider": settings.LLM_PROVIDER,
+        "ok":                True,
+        "service":           "lyra-intellitaxi-voice-v2",
+        "backend_api":       settings.INTELLITAXI_API_BASE,
+        "twilio_voice":      _twilio_voice(),
+        "speech_timeout":    _twilio_speech_timeout(),
+        "gather_timeout":    _twilio_gather_timeout(),
+        "gather_action_url": _gather_action_url() or "inferred",
+        "llm_provider":      settings.LLM_PROVIDER,
+        "active_sessions":   len(_SESSIONS),
+        "improvements": [
+            "adaptive_vad",
+            "stt_phonetic_correction",
+            "human_reference_resolution",
+            "conversational_repair",
+            "partial_intent_detection",
+            "contextual_memory",
+            "barge_in_detection",
+            "quality_adaptive_endpointing",
+        ],
     }
