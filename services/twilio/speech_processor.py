@@ -288,23 +288,41 @@ class SpeechProcessor:
 
     def try_local_match(self, user_text: str) -> Optional[str]:
         """Hace match del texto contra lugares conocidos de Popayán."""
-        norm = normalize_text(user_text)
+        from services.twilio.navigation import NavigationParser
+        
+        # Extrae modificadores relativos y aísla el landmark real
+        nav_data = NavigationParser.extract_relative_context(user_text)
+        base_landmark = nav_data.get("landmark") or user_text
+        modifier = nav_data.get("modifier")
+        
+        norm = normalize_text(base_landmark)
         if len(norm) < 3:
             return None
+
+        matched_canonical = None
 
         # Alias index (más rápido, sin I/O)
         for alias_norm, canonical in self.alias_index:
             if alias_norm in norm:
-                return canonical
+                matched_canonical = canonical
+                break
 
-        # Geocodificación local
-        result = self._try_geocode_local(user_text)
-        if result:
-            return result
+        if not matched_canonical:
+            # Geocodificación local
+            geo_result = self._try_geocode_local(base_landmark)
+            if geo_result:
+                matched_canonical = geo_result
 
-        # Calles / carreras por patrón
-        if any(re.search(pat, norm) for pat in _STREET_PATTERNS):
-            return user_text.strip()
+        if not matched_canonical:
+            # Calles / carreras por patrón
+            if any(re.search(pat, norm) for pat in _STREET_PATTERNS):
+                matched_canonical = base_landmark.strip()
+
+        # Reconstruir con el modificador si se encontró algo
+        if matched_canonical:
+            if modifier:
+                return f"{modifier} {matched_canonical}"
+            return matched_canonical
 
         return None
 
