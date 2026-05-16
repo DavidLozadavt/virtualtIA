@@ -29,11 +29,14 @@ _FILLER_WORDS = {
 }
 
 _PREAMBLE_PATTERNS = [
-    r'^(?:hola|buenas|buen día|buenas tardes|buenas noches|qhubo|qué hubo|amiga|vecina|mija),?\s*',
-    r'^(?:por favor|un favor),?\s*',
-    r'^(?:me regala|me daría|necesito|quiero|podría solicitar|pídame|pídeme)\s*(?:un|el)?\s*(?:taxi|móvil|movil|carro|servicio)\s*',
-    r'^(?:en|desde|estoy en|me encuentro en|aquí en|aqui en|ubicada en|ubicado en)\s*',
-    r'^(?:sería para|es para)\s*',
+    # Greetings — LONGER alternatives first so 'buenas noches' beats 'buenas'
+    r'^(?:hola\s+)?(?:buenas\s+noches|buenas\s+tardes|buen\s+día|buenas|hola|qhubo|qué\s+hubo|amiga|amigo|vecina|vecino|mija|mijo|señor|señora),?\s*',
+    r'^(?:por favor|un favor|oiga|mire|oye|disculpe|disculpa),?\s*',
+    r'^(?:me\s+regala|me\s+daría|necesito|quiero|podría\s+solicitar|pídame|pídeme|solicito)\s*(?:un|el)?\s*(?:taxi|móvil|movil|carro|servicio|carrito)\s*',
+    r'^(?:por\s+aquí\s+en|aquí\s+en|acá\s+en|estoy\s+en|me\s+encuentro\s+en|ubicad[ao]\s+en|estamos\s+en|en|desde)\s*',
+    r'^(?:sería\s+para|es\s+para|para)\s*',
+    # Trailing filler after address
+    r'\s+(?:por\s+favor|porfavor|porfa|gracias|please)\.?\s*$',
 ]
 
 _SPEECH_CORRECTIONS: Dict[str, str] = {
@@ -55,6 +58,9 @@ _SPEECH_CORRECTIONS: Dict[str, str] = {
     "balle del ortigal": "valle del ortigal",
     "va del ortigal": "valle del ortigal",
     "vale del ortigal": "valle del ortigal",
+    "valle ordinal": "valle del ortigal",
+    "valle el ortigal": "valle del ortigal",
+    "valle original": "valle del ortigal",
     # ── "maría oriente" misheard as: ──
     "mari oriente": "maría oriente",
     "maria de oriente": "maría oriente",
@@ -230,23 +236,24 @@ def _nominatim_geocode_raw(query: str) -> Optional[Tuple[float, float, str]]:
         return None
 
 def _nominatim_geocode(query: str) -> Optional[Tuple[float, float, str]]:
-    """Geocode with local fallback."""
+    """Geocode with local fallback (Local first, then Nominatim)."""
     q = (query or "").strip()
     if not q: return None
     
-    # 1. Nominatim API
-    result = _nominatim_geocode_raw(q)
-    if result: return result
-
-    # 2. Local geodata fallback
+    # 1. Local geodata fallback (Fast & accurate for Popayán)
     try:
         from tools.popayan_geodata import geocode_local
         local = geocode_local(q)
         if local:
             _geocode_cache_set(q, local)
             return local
-    except ImportError:
-        pass
+    except (ImportError, Exception) as e:
+        logger.warning(f"Local geodata not available or error: {e}")
+
+    # 2. Nominatim API (Fallback for unknown places)
+    result = _nominatim_geocode_raw(q)
+    if result: return result
+
     return None
 
 
@@ -598,6 +605,7 @@ POPAYAN_PLACES: dict = {
     "Los Naranjos": ["los naranjos", "barrio los naranjos"],
     "Nuevo Hogar": ["nuevo hogar", "barrio nuevo hogar"],
     "La Esmeralda": ["la esmeralda", "esmeralda", "barrio la esmeralda"],
+    "Santa Lucía": ["santa lucía", "santa lucia", "santa luca", "barrio santa lucía", "urbanización santa lucía", "urbanizacion santa lucia", "organización santa lucía", "organizacion santa lucia"],
 
     # ── BARRIOS COMUNA 9 (Sur-Occidente) ──
     "Pomona": ["pomona", "barrio pomona"],
@@ -726,7 +734,8 @@ def _is_repeat_request(text: str) -> bool:
 # ── ADDRESS EXTRACTION ──────────────────────────────────────────────────────
 
 def _try_local_match(text: str) -> Optional[str]:
-    """Deterministic local matching using geodata registry and aliases."""
+    """Deterministic local matching using geodata registry and aliases.
+    Returns the CANONICAL place name, not the raw input text."""
     if not text: return None
     t_clean = _strip_preamble(text)
     t_corrected = _correct_speech(t_clean)
@@ -738,13 +747,15 @@ def _try_local_match(text: str) -> Optional[str]:
             if _normalize_text(alias) == t_norm:
                 return canonical
 
-    # 2. Geodata search
+    # 2. Geodata search — return CANONICAL name, not raw text
     try:
         from tools.popayan_geodata import geocode_local
         geo = geocode_local(t_corrected)
         if geo:
-            # If geocode_local found it, it's a valid address or alias
-            return t_corrected
+            # geo = (lat, lng, display_name) where display_name = "Canonical, Popayán, Cauca, Colombia"
+            display_name = geo[2] if len(geo) > 2 else ""
+            canonical = display_name.split(",")[0].strip() if display_name else t_corrected
+            return canonical if len(canonical) >= 2 else t_corrected
     except ImportError:
         pass
 
