@@ -330,6 +330,7 @@ async def _create_wp_service(
         "pasajero_id": 1,
         "celular": celular,
         "pasajero_nombre": f"WhatsApp: {tipo_servicio.title()}",
+        "canal_origen": "WHATSAPP_AI_CHAT",
         "origen": payload_origen,
         "origen_lat": float(olat),
         "origen_lng": float(olng),
