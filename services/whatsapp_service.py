@@ -228,7 +228,7 @@ class WhatsappService:
         # Cancelación global
         if t_low in _CANCEL_WORDS:
             self._sessions.reset(sender_phone)
-            await self.send_message(sender_phone, "Has cancelado la solicitud. Escríbeme cuando necesites un taxi.")
+            await self.send_message(sender_phone, "Tu solicitud ha sido cancelada sin ningún problema. 😊 Cuando gustes o necesites algún servicio, solo escríbeme, ¡estaré encantada de ayudarte!")
             return
 
         if sess.state == STATE_FINISHED:
@@ -241,7 +241,7 @@ class WhatsappService:
             sess.state = STATE_WAITING_TIPO_SERVICIO
             await self.send_interactive_buttons(
                 sender_phone,
-                "¡Hola! Soy Mía, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+                "¡Hola, qué gusto saludarte! 😊 Soy Lyra, tu asistente de TaxBelalcazar. Te ayudaré asistiéndote en tu servicio con el mayor de los gustos. ¿Qué tipo de servicio deseas solicitar hoy?",
                 [
                     ("taxi_ahora", "Taxi Ahora"),
                     ("taxi_prog",  "Taxi Programado"),
@@ -279,16 +279,14 @@ class WhatsappService:
             sess.state         = STATE_WAITING_HORA_PROG
             await self.send_message(
                 phone,
-                "¡Perfecto! Has elegido Taxi Programado. "
-                "Dime para qué fecha y a qué hora lo necesitas (ej. mañana a las 7:00 AM).",
+                "¡Perfecto! 📅 Has elegido la opción de *Taxi Programado*. Con muchísimo gusto te ayudaré. Cuéntame, ¿para qué fecha y a qué hora lo necesitas? Por ejemplo: mañana a las 7:00 AM. 😊",
             )
         elif t in ("taxi ahora", "domicilio"):
             sess.tipo_servicio = t
             sess.state         = STATE_WAITING_ORIGIN
             await self.send_message(
                 phone,
-                f"¡Perfecto! Has elegido {t.title()}. "
-                "¿En qué parte te recogemos? Puedes decirme una calle, barrio o un lugar conocido.",
+                f"¡Excelente elección! Has solicitado *{t.title()}*. Con el mayor de los gustos te asistiré. ¿En qué parte te recogemos? Puedes decirme la dirección, calle, barrio o lugar de referencia. 😊",
             )
         else:
             # Texto libre — intentar parsear como origen directamente
@@ -300,7 +298,7 @@ class WhatsappService:
     ) -> None:
         sess.fecha_hora_prog = texto
         sess.state           = STATE_WAITING_ORIGIN
-        await self.send_message(phone, "Anotado. ¿En qué lugar o calle de Popayán te recogemos?")
+        await self.send_message(phone, f"¡Anotado con mucho gusto! 📝 Quedó programado para el *{texto}*. Ahora cuéntame, ¿en qué lugar de Popayán te recogemos? Por favor, dime la calle, barrio o lugar de referencia. 😊")
 
     async def _handle_origin(
         self, phone: str, texto: str, sess: WpSession
@@ -309,7 +307,7 @@ class WhatsappService:
         origen = normalize_address(origen_llm or texto).strip()
 
         if not origen or len(origen) < 2:
-            await self.send_message(phone, hint or "¿Me dices de nuevo dónde te recogemos? Un barrio, calle o sitio en Popayán.")
+            await self.send_message(phone, hint or "Disculpa, ¿me podrías indicar nuevamente en dónde te recogemos? Por favor, dime la dirección, calle o barrio. 😊")
             return
 
         sess.origen_text = origen
@@ -322,8 +320,7 @@ class WhatsappService:
         sess.state = STATE_WAITING_DEST_OR_SKIP
         await self.send_message(
             phone,
-            f"Listo, te recogemos en {origen}. "
-            "¿A dónde te diriges? Dime el destino o escribe NO si prefieres contarle al conductor.",
+            f"¡Listo! 📍 Te recogeremos en *{origen}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o escribirme *NO* si prefieres coordinarlo directamente con el conductor. 😊",
         )
 
     async def _try_confirm_barrio(
@@ -344,9 +341,7 @@ class WhatsappService:
                     sess.state         = STATE_CONFIRMING_ORIGIN
                     await self.send_message(
                         phone,
-                        f"Ok, entendemos que es por {origen}. "
-                        f"Queda por el barrio {sess.origen_barrio}, ¿es correcto? "
-                        "Responde SÍ, o dime el nombre de tu barrio.",
+                        f"Entendido, veo que la dirección es en {origen}. 📍 Eso queda por el barrio *{sess.origen_barrio}*, ¿es correcto? Respóndeme *SÍ*, o por favor cuéntame el nombre de tu barrio para ubicarte de la mejor manera. 😊",
                     )
                     return
         except Exception as exc:
@@ -355,7 +350,7 @@ class WhatsappService:
         sess.state = STATE_CONFIRMING_ORIGIN
         await self.send_message(
             phone,
-            f"Ok, {origen}. ¿En qué barrio queda eso? Dime el nombre del barrio para ubicarte mejor.",
+            f"Perfecto, {origen}. ¿Me podrías indicar en qué barrio queda? Cuéntame el nombre del barrio para poder ubicarte muchísimo mejor. 😊",
         )
 
     async def _handle_confirming_origin(
@@ -367,14 +362,13 @@ class WhatsappService:
             sess.state = STATE_WAITING_DEST_OR_SKIP
             await self.send_message(
                 phone,
-                f"Perfecto. Te recogemos en {sess.origen_text}. "
-                "¿A dónde te diriges? Dime el destino o escribe NO.",
+                f"¡Perfecto! ✅ Te recogeremos en *{sess.origen_text}*. ¿Hacia dónde viajas hoy? Puedes decirme tu destino o responderme *NO* si prefieres decírselo al conductor. 😊",
             )
             return
 
         if respuesta is False:
             sess.state = STATE_WAITING_ORIGIN
-            await self.send_message(phone, "¿En qué barrio estás entonces? Dime el nombre para ubicarte mejor.")
+            await self.send_message(phone, "¡No te preocupes, no hay ningún problema! ¿En qué barrio estás entonces? Cuéntame el nombre para poder ubicarte muchísimo mejor. 😊")
             return
 
         local = _try_local_match(texto)
@@ -383,13 +377,13 @@ class WhatsappService:
             sess.state       = STATE_WAITING_DEST_OR_SKIP
             await self.send_message(
                 phone,
-                f"Listo, te recogemos en {local}. ¿A dónde te diriges? Dime el destino o responde NO.",
+                f"¡Excelente! 📍 Te recogeremos en *{local}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o responderme *NO*. 😊",
             )
             return
 
         await self.send_message(
             phone,
-            f"No te entendí. ¿Confirmas que estás por {sess.origen_barrio or 'esa zona'}? Responde SÍ o dime tu barrio.",
+            f"Disculpa, no logré entenderte muy bien. ¿Confirmas que estás por el barrio *{sess.origen_barrio or 'esa zona'}*? Respóndeme *SÍ* o cuéntame en qué barrio te encuentras. 😊",
         )
 
     async def _handle_dest_or_skip(
@@ -398,7 +392,7 @@ class WhatsappService:
         if _is_correction_request(texto):
             sess.state       = STATE_WAITING_ORIGIN
             sess.origen_text = None
-            await self.send_message(phone, "Sin problema, vamos a corregir. ¿Dónde te recogemos?")
+            await self.send_message(phone, "¡Claro que sí, no te preocupes! Vamos a corregir la ubicación de inmediato. 😊 Cuéntame, ¿dónde te recogemos?")
             return
 
         if _parse_si_no(texto) is False:
@@ -414,7 +408,7 @@ class WhatsappService:
         dest = normalize_address(dest_llm or texto).strip()
 
         if not dest or len(dest) < 2:
-            await self.send_message(phone, hint or "¿Me dices a dónde vas? Un barrio, calle o sitio, o escribe NO.")
+            await self.send_message(phone, hint or "Disculpa, ¿me indicas a dónde vas? Cuéntame el barrio, calle o sitio de destino, o escribe *NO*. 😊")
             return
 
         sess.destino_text = dest
