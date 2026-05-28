@@ -412,7 +412,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         sess.state = STATE_WAITING_TIPO_SERVICIO
         await send_whatsapp_interactive_buttons(
             sender_phone,
-            "¡Hola! Soy Mía, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+            "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
             [
                 ("taxi_ahora", "Taxi Ahora"),
                 ("taxi_prog", "Taxi Programado"),

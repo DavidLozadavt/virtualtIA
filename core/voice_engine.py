@@ -15,11 +15,30 @@ Voces disponibles para español colombiano (edge-tts):
 Usage in any project: enable via voice.enabled: true in the project's YAML config.
 """
 
+import asyncio
 import logging
 import re as _re
-import edge_tts
+import sys
+import threading
 from io import BytesIO
 from typing import Literal, AsyncGenerator
+
+import edge_tts
+
+# ── FIX PARA WINDOWS DNS: Forzar ThreadedResolver en aiohttp ───────────────
+import aiohttp
+from aiohttp.resolver import ThreadedResolver
+
+_orig_tcp_connector_init = aiohttp.TCPConnector.__init__
+
+def _patched_tcp_connector_init(self, *args, **kwargs):
+    # Forzamos ThreadedResolver si no se pasó un resolver
+    if kwargs.get('resolver') is None:
+        kwargs['resolver'] = ThreadedResolver()
+    _orig_tcp_connector_init(self, *args, **kwargs)
+
+aiohttp.TCPConnector.__init__ = _patched_tcp_connector_init
+# ─────────────────────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("lyra.voice")
 
@@ -90,6 +109,36 @@ def _clean_for_tts(text: str) -> str:
     
     result = _re.sub(r'\s+', ' ', clean).strip()
     return result if result else " "  # Nunca retornar vacío para no romper el stream Audio
+
+
+# ── Fix para Windows: edge-tts en hilo con SelectorEventLoop propio ─────────
+
+def _edge_tts_sync_bytes(text: str, voice: str) -> bytes:
+    """
+    Ejecuta edge-tts de forma síncrona dentro de un SelectorEventLoop propio.
+    Esto evita el bug de DNS de aiohttp en el ProactorEventLoop de Uvicorn/Windows.
+    """
+    loop = asyncio.SelectorEventLoop()
+    try:
+        async def _inner():
+            communicate = edge_tts.Communicate(text=text, voice=voice)
+            buf = BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            return buf.getvalue()
+        return loop.run_until_complete(_inner())
+    finally:
+        loop.close()
+
+
+async def _run_edge_tts_in_thread(text: str, voice: str) -> bytes:
+    """
+    Wrapper asíncrono: lanza edge-tts en un hilo de fondo con su propio loop,
+    devuelve los bytes al caller sin bloquear el event loop de Uvicorn.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _edge_tts_sync_bytes, text, voice)
 
 
 class VoiceEngine:
@@ -245,14 +294,9 @@ class VoiceEngine:
             return b""
             
         try:
-            communicate = edge_tts.Communicate(text=clean_text, voice=voice)
-            from io import BytesIO
-            buffer = BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    buffer.write(chunk["data"])
-            audio_bytes = buffer.getvalue()
-            logger.info(f"[edge-tts BYTES] {len(audio_bytes)} bytes generados en memoria | voz={voice}")
+            audio_bytes = await _run_edge_tts_in_thread(clean_text, voice)
+            if audio_bytes:
+                logger.info(f"[edge-tts BYTES] {len(audio_bytes)} bytes generados en memoria | voz={voice}")
             return audio_bytes
         except Exception as e:
             logger.error(f"Error en synthesize_to_bytes: {e}")
@@ -298,18 +342,27 @@ class VoiceEngine:
             rate_str = "+0%"
 
         try:
-            communicate = edge_tts.Communicate(text=clean_text, voice=voice, rate=rate_str)
+            # Usamos el helper en hilo para evitar el bug DNS en Windows
+            def _sync_with_rate(text, voice):
+                loop = asyncio.SelectorEventLoop()
+                try:
+                    async def _inner():
+                        communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate_str)
+                        chunks = []
+                        async for chunk in communicate.stream():
+                            if chunk["type"] == "audio":
+                                chunks.append(chunk["data"])
+                        return b"".join(chunks)
+                    return loop.run_until_complete(_inner())
+                finally:
+                    loop.close()
 
-            # Recopilar todos los chunks de audio en memoria
-            audio_chunks = []
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_chunks.append(chunk["data"])
+            event_loop = asyncio.get_running_loop()
+            audio_bytes = await event_loop.run_in_executor(None, _sync_with_rate, clean_text, voice)
 
-            if not audio_chunks:
+            if not audio_bytes:
                 return {"success": False, "audio_bytes": b"", "error": "edge-tts no generó audio."}
 
-            audio_bytes = b"".join(audio_chunks)
             logger.info(f"[edge-tts] {len(audio_bytes)} bytes sintetizados | voz={voice} | '{clean_text[:50]}'")
             return {"success": True, "audio_bytes": audio_bytes, "format": "mp3"}
 
@@ -337,12 +390,14 @@ class VoiceEngine:
         rate_str = f"{int((speed - 1.0) * 100):+d}%" if speed != 1.0 else "+0%"
         
         try:
-            communicate = edge_tts.Communicate(text=clean_text, voice=voice, rate=rate_str)
-            logger.info(f"[edge-tts STREAM] Iniciando stream con voz={voice} | '{clean_text[:50]}'")
-            
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    yield chunk["data"]
+            # Para streaming, generamos los bytes completos en hilo y luego los emitimos
+            logger.info(f"[edge-tts STREAM] Generando con voz={voice} | '{clean_text[:50]}'")
+            audio_bytes = await _run_edge_tts_in_thread(clean_text, voice)
+            if audio_bytes:
+                # Emitir en chunks de 4KB para mantener la semántica de streaming
+                chunk_size = 4096
+                for i in range(0, len(audio_bytes), chunk_size):
+                    yield audio_bytes[i:i + chunk_size]
         except Exception as e:
             logger.error(f"Error en stream TTS: {e}")
 
