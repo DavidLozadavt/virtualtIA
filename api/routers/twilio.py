@@ -1,5 +1,5 @@
 """
-gateway/twilio_voice.py — Gateway de voz Twilio para Lyra/IntelliTaxi.
+routers/twilio.py — Gateway de voz Twilio para Lyra/IntelliTaxi.
 VERSIÓN MEJORADA: streaming, tolerancia STT, adaptación dinámica, reparación conversacional.
 
 Mejoras integradas:
@@ -160,6 +160,7 @@ _SESSIONS: Dict[str, "CallSession"] = {}
 @dataclass
 class CallSession:
     call_sid: str
+    caller_phone: Optional[str] = None
     state: str = STATE_WAITING_ORIGIN
     origen_text: Optional[str] = None
     origen_barrio: Optional[str] = None
@@ -213,6 +214,7 @@ def get_session(call_sid: str) -> CallSession:
     with _SESSION_LOCK:
         _prune_sessions()
         if call_sid not in _SESSIONS:
+            logger.warning("[SESSION] Warning: Using in-memory sessions. In a multi-worker production environment (e.g., Gunicorn), caller_phone may be lost. Migration to Redis/Shared Storage is required.")
             _SESSIONS[call_sid] = CallSession(call_sid=call_sid)
         s = _SESSIONS[call_sid]
         s.touch()
@@ -397,30 +399,42 @@ def _twiml_response(xml: str) -> Response:
     return Response(content=xml, media_type="text/xml; charset=utf-8")
 
 
-def _get_process_speech_url(request: Request) -> str:
+from urllib.parse import urlencode
+
+def _get_process_speech_url(request: Request, telefono_cliente: str = "", telefono_source: str = "") -> str:
     action = _gather_action_url()
-    if action:
-        return action
+    base_process_url = action
 
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get(
-        "host", ""
-    )
-    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
-
-    if forwarded_host and "trycloudflare.com" in forwarded_host:
-        return f"{forwarded_proto}://{forwarded_host}/process_speech"
-
-    if forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
-        host_no_port = (
-            forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
+    if not base_process_url:
+        forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get(
+            "host", ""
         )
-        if not host_no_port.replace(".", "").isdigit():
-            return f"{forwarded_proto}://{forwarded_host}/process_speech"
+        forwarded_proto = request.headers.get("x-forwarded-proto", "https")
 
-    base = str(request.base_url).rstrip("/")
-    if base.startswith("http://"):
-        base = "https://" + base[len("http://") :]
-    return base + "/process_speech"
+        if forwarded_host and "trycloudflare.com" in forwarded_host:
+            base_process_url = f"{forwarded_proto}://{forwarded_host}/process_speech"
+        elif forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
+            host_no_port = (
+                forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
+            )
+            if not host_no_port.replace(".", "").isdigit():
+                base_process_url = f"{forwarded_proto}://{forwarded_host}/process_speech"
+
+        if not base_process_url:
+            base = str(request.base_url).rstrip("/")
+            if base.startswith("http://"):
+                base = "https://" + base[len("http://") :]
+            base_process_url = base + "/process_speech"
+            
+    if telefono_cliente or telefono_source:
+        params = urlencode({
+            "telefono_cliente": telefono_cliente or "",
+            "telefono_source": telefono_source or "not_found"
+        })
+        separator = "&" if "?" in base_process_url else "?"
+        return f"{base_process_url}{separator}{params}"
+
+    return base_process_url
 
 
 # ── Procesamiento de texto STT ────────────────────────────────────────────────
@@ -505,6 +519,65 @@ _NUM_WORDS_STREET = {
     "cuarenta": 40,
     "cincuenta": 50,
 }
+
+import re
+
+def limpiar_numero(valor: str | None) -> str | None:
+    if not valor:
+        return None
+
+    # Handle sip:, whatsapp: prefixes by extracting only the digit part
+    match = re.search(r'\+?\d{7,15}', str(valor))
+    if not match:
+        return None
+
+    numero = match.group(0)
+
+    if numero.startswith("+"):
+        if numero.startswith("+57") and len(numero) == 13:
+            return numero
+        return numero
+
+    if len(numero) == 10 and numero.startswith("3"):
+        return "+57" + numero
+
+    if len(numero) == 12 and numero.startswith("57"):
+        return "+" + numero
+
+    return numero
+
+
+def es_numero_troncal_o_empresa(numero: str | None) -> bool:
+    if not numero:
+        return False
+        
+    limpio = re.sub(r'\D', '', numero)
+    prohibidos = ['576028231111', '6028231111', '57602823111', '602823111']
+    
+    for prohibido in prohibidos:
+        if prohibido in limpio:
+            return True
+            
+    return False
+
+
+def obtener_telefono_cliente(form_data) -> tuple[str | None, str]:
+    campos_prioritarios = [
+        "SipHeader_X-Original-Caller",
+        "SipHeader_X-Original-ANI",
+        "SipHeader_P-Asserted-Identity",
+        "SipHeader_Remote-Party-ID",
+        "SipHeader_Diversion",
+        "From",
+        "Caller",
+    ]
+
+    for campo in campos_prioritarios:
+        telefono = limpiar_numero(form_data.get(campo))
+        if telefono and not es_numero_troncal_o_empresa(telefono):
+            return telefono, campo
+
+    return None, "not_found"
 
 
 def preprocess_stt(text: str, confidence: float = 1.0) -> str:
@@ -767,6 +840,8 @@ async def _create_service(
     payload = {
         "pasajero_id": 1,
         "celular": celular,
+        "telefonoLlamada": celular,
+        "telefono_cliente_final": celular,
         "pasajero_nombre": "Usuario Telefónico",
         "canal_origen": "PHONE_AI_CALL",
         "origen": origen,
@@ -845,7 +920,20 @@ async def voice(request: Request):
     call_sid = str(
         form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
     )
+    telefono_cliente, source = obtener_telefono_cliente(form)
+    
+    logger.info({
+        "event": "twilio_incoming_call",
+        "call_sid": call_sid,
+        "from": form.get("From"),
+        "caller": form.get("Caller"),
+        "original_caller": form.get("SipHeader_X-Original-Caller"),
+        "telefono_cliente_final": telefono_cliente,
+        "source": source
+    })
+
     sess = get_session(call_sid)
+    sess.caller_phone = telefono_cliente
     sess.state = STATE_WAITING_ORIGIN
 
     # Log headers para debugging de tunnel/proxy
@@ -865,7 +953,7 @@ async def voice(request: Request):
     )
     sess.last_message = saludo
 
-    action_url = _get_process_speech_url(request)
+    action_url = _get_process_speech_url(request, telefono_cliente, source)
     logger.info(f"[VOICE] action_url={action_url}")
 
     xml = await _twiml_gather_adaptive(saludo, action_url, sess, short_answer=False)
@@ -882,7 +970,41 @@ async def process_speech(request: Request):
     call_sid = str(
         form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
     )
-    caller_id = str(form.get("From") or "").replace("whatsapp:", "")
+    
+    sess = get_session(call_sid)
+    
+    telefono_cliente = None
+    source = "not_found"
+    
+    # 1. Recuperar de query params
+    q_phone = request.query_params.get("telefono_cliente")
+    q_source = request.query_params.get("telefono_source", "query_param")
+    
+    if q_phone and not es_numero_troncal_o_empresa(q_phone):
+        telefono_cliente = q_phone
+        source = q_source
+    # 2. Recuperar de Memoria
+    elif sess.caller_phone and not es_numero_troncal_o_empresa(sess.caller_phone):
+        telefono_cliente = sess.caller_phone
+        source = "session.caller_phone"
+    # 3. Payload actual
+    else:
+        t_form, s_form = obtener_telefono_cliente(form)
+        if t_form:
+            telefono_cliente = t_form
+            source = s_form
+
+    sess.caller_phone = telefono_cliente
+    
+    logger.info({
+        "event": "telefono_cliente_resolved_process_speech",
+        "telefono_cliente_final": telefono_cliente,
+        "source": source,
+        "call_sid": call_sid
+    })
+    
+    caller_id = telefono_cliente
+    action_url = _get_process_speech_url(request, telefono_cliente, source)
 
     # ── Extraer resultado STT de Twilio ──
     texto_usuario = ""
@@ -901,7 +1023,7 @@ async def process_speech(request: Request):
         logger.info(f"[RAW_STT] conf={confidence:.2f} text={texto_usuario!r}")
 
     sess = get_session(call_sid)
-    action_url = _get_process_speech_url(request)
+    action_url = _get_process_speech_url(request, telefono_cliente, source)
 
     # ── Pipeline de pre-procesamiento STT ──
     texto_original = texto_usuario
@@ -965,8 +1087,42 @@ async def process_speech(request: Request):
 
     # ── Creación de servicio (estado de transición) ──
     if sess.state == STATE_CREATING_SERVICE:
+        telefono_final = caller_id
+        source_final = source
+        
+        if es_numero_troncal_o_empresa(telefono_final):
+            logger.error({
+                "event": "blocked_trunk_number_as_customer",
+                "call_sid": call_sid,
+                "telefono_detectado": telefono_final,
+                "from_original": form.get("From"),
+                "original_caller": form.get("SipHeader_X-Original-Caller")
+            })
+            telefono_final = None
+            source_final = "not_found"
+            
+        log_data = {
+            "event": "sending_service_to_laravel",
+            "call_sid": call_sid,
+            "from_original": form.get("From"),
+            "payload_field": "celular"
+        }
+        
+        if telefono_final:
+            log_data["telefono_cliente_final"] = telefono_final
+            log_data["source"] = source_final
+        else:
+            log_data["telefono_cliente_final"] = None
+            log_data["source"] = source_final
+            log_data["warning"] = "No original caller found; trunk number was blocked"
+            
+        # Reemplazamos payload_field a como va a quedar
+        log_data["payload_field"] = "telefonoLlamada/celular/telefono_cliente_final"
+        
+        logger.info(log_data)
+        
         ok, closing = await _create_service(
-            caller_id,
+            telefono_final,
             sess.origen_text or "",
             sess.destino_text,
             http_client=http_client,
