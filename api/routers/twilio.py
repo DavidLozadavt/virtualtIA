@@ -400,6 +400,7 @@ def _twiml_response(xml: str) -> Response:
 
 
 from urllib.parse import urlencode
+from html import escape
 
 def _get_process_speech_url(request: Request, telefono_cliente: str = "", telefono_source: str = "") -> str:
     action = _gather_action_url()
@@ -432,9 +433,10 @@ def _get_process_speech_url(request: Request, telefono_cliente: str = "", telefo
             "telefono_source": telefono_source or "not_found"
         })
         separator = "&" if "?" in base_process_url else "?"
-        return f"{base_process_url}{separator}{params}"
+        final_url = f"{base_process_url}{separator}{params}"
+        return escape(final_url)
 
-    return base_process_url
+    return escape(base_process_url)
 
 
 # ── Procesamiento de texto STT ────────────────────────────────────────────────
