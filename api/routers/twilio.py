@@ -768,6 +768,7 @@ async def _create_service(
         "pasajero_id": 1,
         "celular": celular,
         "pasajero_nombre": "Usuario Telefónico",
+        "canal_origen": "PHONE_AI_CALL",
         "origen": origen,
         "origen_lat": float(olat),
         "origen_lng": float(olng),

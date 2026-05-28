@@ -77,6 +77,7 @@ async def solicitar_taxi(
         "pasajero_id": 1,
         "celular": celular or None,
         "pasajero_nombre": pasajero_nombre,
+        "canal_origen": "WHATSAPP_AI_CHAT",
         "origen": origen,
         "destino": destino or "",
         "origen_lat": float(olat),

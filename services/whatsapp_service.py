@@ -189,6 +189,7 @@ class WhatsappService:
             "pasajero_id":      1,
             "celular":          celular,
             "pasajero_nombre":  f"WhatsApp: {tipo_servicio.title()}",
+            "canal_origen":     "WHATSAPP_AI_CHAT",
             "origen":           origen_payload,
             "origen_lat":       float(olat),
             "origen_lng":       float(olng),
