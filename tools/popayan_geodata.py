@@ -142,7 +142,9 @@ BARRIO_ALIASES: Dict[str, List[str]] = {
     "El Bambú": ["el bambu", "el bambú", "bambu", "barrio bambu"],
     "Bella Vista": ["bella vista", "bellavista", "bella bista", "vista hermosa norte"],
     "Cruz Roja": ["cruz roja", "cruzroja", "barrio cruz roja"],
-    "Rincón del Río": ["rincon del rio", "rincón del río", "rincon rio", "el rincon del rio"],
+    # "Rincón del Río" fue duplicado y asignado erróneamente a Comuna 1; pertenece a Comuna 3.
+    # "Guayacanes" también duplicado; ahora solo en Comuna 3 (Oriente).
+    # "El Plateado" era duplicado; permanece en Comuna 5.
 
     # ── COMUNA 3 ──────────────────────────────────────────────────────────────
     "Bolívar": ["bolivar", "bolívar", "barrio bolivar", "sector bolivar"],
@@ -177,6 +179,9 @@ BARRIO_ALIASES: Dict[str, List[str]] = {
     "Alicante I": ["alicante i", "alicante 1", "alicante uno", "primer alicante"],
     "Alicante II": ["alicante ii", "alicante 2", "alicante dos", "segundo alicante"],
     "Acacias": ["acacias", "las acacias", "barrio acacias"],
+    "Rincón del Río": ["rincon del rio", "rincón del río", "rincon rio", "el rincon del rio"],
+    "Urbanización La Aldea": ["urbanizacion la aldea", "urbanización la aldea", "Urbanización aldea", "urbaniz la aldea", "urb la aldea", "urbanizacion aldea"],
+    "La Aldea": ["la aldea", "la aldea norte"],
 
     # ── COMUNA 4 ──────────────────────────────────────────────────────────────
     "Provitec II Etapa": ["provitec ii", "provitec 2", "provitec segunda", "provitec segunda etapa"],
@@ -350,9 +355,9 @@ BARRIOS_COMUNA_1: Dict[str, Tuple[float, float]] = {
     "Fancal": (2.4632, -76.5952),
     "Ciudad Capri": (2.4641, -76.5941),
     "Puerta del Sol": (2.4652, -76.5932),
-    "Villa del Norte": (2.4686, -76.5906),
+    "Villa del Norte": (2.4774064673324827, -76.55752155846807),
     "El Placer": (2.4697, -76.5896),
-    "Bello Horizonte": (2.4706, -76.5887),
+    "Bello Horizonte": (2.487592, -76.566679),
     "Río Vista": (2.4716, -76.5877),
     "Pino Pardo": (2.4701, -76.5901),
     "Balcón del Norte": (2.4721, -76.5881),
@@ -363,7 +368,8 @@ BARRIOS_COMUNA_1: Dict[str, Tuple[float, float]] = {
     "Morinda": (2.4761, -76.5791),
     "El Tablazo": (2.4681, -76.5921),
     "La Florida": (2.4691, -76.5911),
-    "La Aldea": (2.4671, -76.5931),
+    "Urbanización La Aldea": (2.4908566, -76.5626847),
+    "La Aldea": (2.490858, -76.563088),
     "Rinconcito Primaveral": (2.4661, -76.5941),
     "La Primavera": (2.4651, -76.5951),
     "Cruz Roja": (2.4726, -76.5866),
@@ -388,12 +394,13 @@ BARRIOS_COMUNA_1: Dict[str, Tuple[float, float]] = {
     "Los Ángeles": (2.4541, -76.5991),
     "Pinares": (2.4551, -76.5981),
     "San Fernando": (2.4561, -76.5971),
-    "Valle del Ortigal": (2.4621, -76.5741),
+    "Valle del Ortigal": (2.4603913005798788, -76.63971248137291),
     "Santa Lucía": (2.4651, -76.5801),
-    "Rincón del Río": (2.4356, -76.5916),
     "Villa del Viento": (2.4696, -76.5891),
-    "Guayacanes": (2.4449, -76.6011),
-    "El Plateado": (2.4346, -76.5996),
+    # Barrios eliminados de Comuna 1 (asignados a otras comunas):
+    # "Rincón del Río" -> Comuna 3
+    # "Guayacanes"     -> Comuna 3
+    # "El Plateado"    -> Comuna 5
 }
 
 # ── COMUNA 2 — Norte/Noroccidente ─────────────────────────────────────────────
@@ -459,6 +466,7 @@ BARRIOS_COMUNA_3: Dict[str, Tuple[float, float]] = {
     "Altos del Jardín": (2.4446, -76.6006),
     "La Estancia": (2.4469, -76.6036),
     "Moravia": (2.4459, -76.6026),
+    "Guayacanes": (2.4449, -76.6011),
     "Aida Lucía": (2.4439, -76.5996),
     "Alicante I": (2.4376, -76.5936),
     "Alicante II": (2.4381, -76.5941),
@@ -514,7 +522,7 @@ BARRIOS_COMUNA_5: Dict[str, Tuple[float, float]] = {
     "María Oriente": (2.4307, -76.6012),
     "Los Sauces": (2.4293, -76.6027),
     "Santa Mónica": (2.4281, -76.6011),
-    "La Floresta": (2.4271, -76.6001),
+    "La Floresta": (2.4463047518720624, -76.64233271260449),
     "Los Andes": (2.4261, -76.5991),
     "La Alameda": (2.4361, -76.6011),
     "El Plateado": (2.4346, -76.5996),
@@ -542,7 +550,7 @@ BARRIOS_COMUNA_6: Dict[str, Tuple[float, float]] = {
     "Valparaíso": (2.4371, -76.6101),
     "Primero de Mayo": (2.4366, -76.6096),
     "Comuneros": (2.4361, -76.6091),
-    "Loma de la Virgen": (2.4571, -76.6086),
+    "Loma de la Virgen": (2.4571, -76.6086),  # este barrio está en la zona alta, se mantiene su coordenada original
     "Sindical I": (2.4356, -76.6086),
     "Sindical II": (2.4351, -76.6081),
     "Calicanto": (2.4346, -76.6101),
@@ -681,7 +689,7 @@ BARRIOS_COMUNA_9: Dict[str, Tuple[float, float]] = {
     "Santa Inés": (2.4356, -76.6171),
     "La María": (2.4351, -76.6211),
     "El Sendero": (2.4346, -76.6206),
-    "Sector Campanario Sur": (2.4641, -76.5991),
+    # Eliminado "Sector Campanario Sur" (pertenece a zona nororiental)
     "Las Acacias Sur": (2.4341, -76.6196),
     "El Vergel Sur": (2.4336, -76.6186),
     "Villa Nariño": (2.4331, -76.6176),
@@ -725,6 +733,12 @@ for _cn, _bd in _COMUNA_DICTS:
 # ══════════════════════════════════════════════════════════════════════════════
 
 LANDMARKS: Dict[str, Tuple[float, float]] = {
+    # NUEVAS UBICACIONES CLAVE
+    "Hospital Susana López de Valencia": (2.4402, -76.6111),   # corregido según dirección Cl. 14 #18
+    "Valle del Ortigal": (2.4603913005798788, -76.63971248137291),
+    "SENA Norte": (2.4829669540145356, -76.56233437579733),
+    "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca": (2.441584217876181, -76.6028230716416),
+
     # CENTRO HISTÓRICO Y PATRIMONIO
     "Parque Caldas": (2.4419, -76.6063),
     "Torre del Reloj": (2.4413, -76.6074),
@@ -757,8 +771,8 @@ LANDMARKS: Dict[str, Tuple[float, float]] = {
     "Edificio Hernando Borrero Mutis": (2.4416, -76.6059),
 
     # CENTROS COMERCIALES Y SUPERMERCADOS
-    "Centro Comercial Campanario": (2.4645, -76.5985),
-    "CC Campanario": (2.4645, -76.5985),
+    "Centro Comercial Campanario": (2.459635441153488, -76.59421007333673),
+    "CC Campanario": (2.459635441153488, -76.59421007333673),
     "Centro Comercial Terra Plaza": (2.4865, -76.5605),
     "Centro Comercial Anarkos": (2.4425, -76.6050),
     "Centro Comercial Plaza Colonial": (2.4420, -76.6045),
@@ -790,9 +804,9 @@ LANDMARKS: Dict[str, Tuple[float, float]] = {
     "FUP": (2.4435, -76.6050),
     "Universidad Autónoma del Cauca": (2.4455, -76.6040),
     "Uniautónoma": (2.4455, -76.6040),
-    "SENA Popayán": (2.4600, -76.5995),
-    "SENA Norte": (2.4610, -76.5985),
-    "SENA Centro": (2.4445, -76.6055),
+    "SENA Popayán": (2.4829669540145356, -76.56233437579733),
+    "SENA Norte": (2.4829669540145356, -76.56233437579733),
+    "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca": (2.441584217876181, -76.6028230716416),
     "Colegio Mayor del Cauca": (2.4430, -76.6070),
     "Universidad Antonio Nariño": (2.4460, -76.6020),
     "Fundación Universitaria María Cano": (2.4615, -76.5970),
@@ -824,7 +838,7 @@ LANDMARKS: Dict[str, Tuple[float, float]] = {
     "Clínica Santa Gracia": (2.4440, -76.6060),
     "Hospital María Occidente": (2.4500, -76.6200),
     "Hospital Toribio Maya": (2.4350, -76.6040),
-    "Hospital Susana López de Valencia": (2.4420, -76.6070),
+    "Hospital Susana López de Valencia": (2.4402, -76.6111),
     "Cruz Roja Colombiana Seccional Cauca": (2.4470, -76.6045),
     "Clínica Mediláser": (2.4435, -76.6055),
     "Centro de Especialistas Popayán": (2.4425, -76.6060),
@@ -1164,7 +1178,7 @@ CORREGIMIENTOS: Dict[str, Tuple[float, float]] = {
     "Calibío": (2.5000, -76.5800),
     "Poblazón": (2.4100, -76.5700),
     "Quintana": (2.4200, -76.5600),
-    "Las Guacas": (2.3800, -76.5800),
+    "Las Guacas": (2.4728043891159093, -76.54795054691283),
     "Los Cerrillos": (2.3900, -76.6100),
     "Pisojé Alto": (2.4700, -76.6400),
     "Pisojé Bajo": (2.4650, -76.6350),
@@ -1301,7 +1315,7 @@ STT_PHONETIC_MAP: Dict[str, str] = {
     "galeria esmeralda": "Galería La Esmeralda",
     "el sena": "SENA Popayán",
     "sena norte": "SENA Norte",
-    "sena centro": "SENA Centro",
+    "sena centro": "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca",
     "el terminal": "Terminal de Transporte Popayán",
     "la terminal": "Terminal de Transporte Popayán",
     "terminal de buses": "Terminal de Transporte Popayán",
@@ -1710,10 +1724,12 @@ def geocode_local(query: str) -> Optional[Tuple[float, float, str]]:
     """
     _ensure_index()
 
-    if not query or len(query.strip()) < 2:
-        return None
-
     query_strip = query.strip()
+
+    # Block generic service words from being geocoded as locations
+    generic_words = {"taxi", "taxis", "domicilio", "domicilios", "servicio", "servicios", "movil", "móvil", "un taxi", "el taxi"}
+    if query_strip.lower() in generic_words:
+        return None
 
     # 1. STT fonético
     query_low = query_strip.lower()

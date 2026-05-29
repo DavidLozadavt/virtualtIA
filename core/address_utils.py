@@ -263,6 +263,51 @@ async def _nominatim_geocode_async(query: str) -> Optional[Tuple[float, float, s
     import asyncio
     return await asyncio.to_thread(_nominatim_geocode, query)
 
+def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates via Nominatim."""
+    global _NOMINATIM_LAST_REQ
+    
+    cache_key = f"rev_geo_{lat}_{lng}"
+    cached = _geocode_cache_get(cache_key)
+    if cached is not None: return cached
+
+    params = {
+        "lat": lat, "lon": lng, "format": "json", "addressdetails": 0
+    }
+    headers = {"User-Agent": GEOCODE_USER_AGENT, "Accept": "application/json"}
+
+    try:
+        for attempt in range(3):
+            with _NOMINATIM_LOCK:
+                now = time.monotonic()
+                wait = _NOMINATIM_LAST_REQ + GEOCODE_MIN_INTERVAL - now
+                if wait > 0: time.sleep(wait)
+                try:
+                    r = httpx.get("https://nominatim.openstreetmap.org/reverse", params=params, headers=headers, timeout=5.0)
+                finally:
+                    _NOMINATIM_LAST_REQ = time.monotonic()
+
+            if r.status_code == 200: break
+            if r.status_code == 429 and attempt < 2:
+                time.sleep(min(2.0 ** attempt, 10.0))
+                continue
+            return None
+
+        data = r.json()
+        if "display_name" in data:
+            name = str(data["display_name"])
+            name_short = name.replace(", Popayán, Cauca, Colombia", "").replace(", Centro", "").strip(", ")
+            _geocode_cache_set(cache_key, name_short)
+            return name_short
+        return None
+    except Exception as exc:
+        logger.error(f"Reverse geocode error: {exc}")
+        return None
+
+async def _nominatim_reverse_geocode_async(lat: float, lng: float) -> Optional[str]:
+    import asyncio
+    return await asyncio.to_thread(_nominatim_reverse_geocode_raw, lat, lng)
+
 POPAYAN_PLACES: dict = {
     # ── Centros Comerciales ──
     "Centro Comercial Campanario": [
@@ -330,6 +375,8 @@ POPAYAN_PLACES: dict = {
         "fundación universitaria", "fundacion universitaria", "fup", "la fup",
     ],
     "SENA Popayán": ["sena", "el sena", "sena popayán", "sena popayan"],
+    "SENA Norte": ["sena norte", "el sena norte", "sena del norte"],
+    "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca": ["sena centro", "el sena centro", "sena del centro"],
     "Colegio Mayor del Cauca": [
         "colegio mayor", "colegio mayor del cauca", "unimayor",
     ],
@@ -357,6 +404,10 @@ POPAYAN_PLACES: dict = {
     ],
     "Clínica Santa Gracia": [
         "clínica santa gracia", "clinica santa gracia", "santa gracia",
+    ],
+    "Hospital Susana López de Valencia": [
+        "hospital susana", "hospital susana lópez", "hospital susana lopez",
+        "susana lópez", "susana lopez", "hospital susana lópez de valencia",
     ],
     "Hospital María Occidente": [
         "hospital maría occidente", "hospital maria occidente",
@@ -712,7 +763,7 @@ def _strip_preamble(text: str) -> str:
 def _parse_si_no(text: str) -> Optional[bool]:
     """Interprets affirmative/negative response."""
     t = _normalize_text(text)
-    positivos = {"si", "claro", "exacto", "correcto", "ok", "dale", "yes", "obvio", "afirmativo", "asi", "eso"}
+    positivos = {"si", "claro", "exacto", "correcto", "ok", "dale", "yes", "obvio", "afirmativo", "asi", "eso", "bien"}
     negativos = {"no", "nop", "nel", "nope", "para nada", "negativo", "incorrecto", "tampoco", "nunca", "jamas"}
     words = set(t.split())
     if words & positivos: return True
