@@ -263,6 +263,51 @@ async def _nominatim_geocode_async(query: str) -> Optional[Tuple[float, float, s
     import asyncio
     return await asyncio.to_thread(_nominatim_geocode, query)
 
+def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates via Nominatim."""
+    global _NOMINATIM_LAST_REQ
+    
+    cache_key = f"rev_geo_{lat}_{lng}"
+    cached = _geocode_cache_get(cache_key)
+    if cached is not None: return cached
+
+    params = {
+        "lat": lat, "lon": lng, "format": "json", "addressdetails": 0
+    }
+    headers = {"User-Agent": GEOCODE_USER_AGENT, "Accept": "application/json"}
+
+    try:
+        for attempt in range(3):
+            with _NOMINATIM_LOCK:
+                now = time.monotonic()
+                wait = _NOMINATIM_LAST_REQ + GEOCODE_MIN_INTERVAL - now
+                if wait > 0: time.sleep(wait)
+                try:
+                    r = httpx.get("https://nominatim.openstreetmap.org/reverse", params=params, headers=headers, timeout=5.0)
+                finally:
+                    _NOMINATIM_LAST_REQ = time.monotonic()
+
+            if r.status_code == 200: break
+            if r.status_code == 429 and attempt < 2:
+                time.sleep(min(2.0 ** attempt, 10.0))
+                continue
+            return None
+
+        data = r.json()
+        if "display_name" in data:
+            name = str(data["display_name"])
+            name_short = name.replace(", Popayán, Cauca, Colombia", "").replace(", Centro", "").strip(", ")
+            _geocode_cache_set(cache_key, name_short)
+            return name_short
+        return None
+    except Exception as exc:
+        logger.error(f"Reverse geocode error: {exc}")
+        return None
+
+async def _nominatim_reverse_geocode_async(lat: float, lng: float) -> Optional[str]:
+    import asyncio
+    return await asyncio.to_thread(_nominatim_reverse_geocode_raw, lat, lng)
+
 POPAYAN_PLACES: dict = {
     # ── Centros Comerciales ──
     "Centro Comercial Campanario": [
