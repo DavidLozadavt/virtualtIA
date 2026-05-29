@@ -215,6 +215,8 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "calibio":           "calibío",
     "poblason":          "poblazón",
     "guacas":            "las guacas",
+    "huacas":            "las guacas",
+    "las huacas":        "las guacas",
     "pisohe":            "pisojé",
     "pisoje":            "pisojé",
 
@@ -348,8 +350,8 @@ HUMAN_REFERENCES: dict[str, dict] = {
     },
     "campanario cc": {
         "canonical": "Centro Comercial Campanario",
-        "lat": 2.4672, "lon": -76.5901,
-        "aliases": ["campanario cc", "campanario mall", "centro comercial campanario"],
+        "lat": 2.459635441153488, "lon": -76.59421007333673,
+        "aliases": ["campanario cc", "campanario mall", "centro comercial campanario", "campanario", "el campanario"],
     },
 
     # Referencias a combustible / servicios
@@ -375,6 +377,26 @@ HUMAN_REFERENCES: dict[str, dict] = {
         "canonical": "Hospital San José",
         "lat": 2.4350, "lon": -76.6080,
         "aliases": ["hospital san jose", "san jose", "el hospital"],
+    },
+    "hospital susana": {
+        "canonical": "Hospital Susana López de Valencia",
+        "lat": 2.4398, "lon": -76.6111,
+        "aliases": ["hospital susana", "susana lopez", "susana", "hospital susana lopez"],
+    },
+    "valle del ortigal": {
+        "canonical": "Valle del Ortigal",
+        "lat": 2.4603913005798788, "lon": -76.63971248137291,
+        "aliases": ["valle del ortigal", "ortigal", "el ortigal", "valle ortigal"],
+    },
+    "sena norte": {
+        "canonical": "SENA Norte",
+        "lat": 2.4829669540145356, "lon": -76.56233437579733,
+        "aliases": ["sena norte", "sena del norte"],
+    },
+    "sena centro": {
+        "canonical": "SENA Centro De Comercio Y Servicios",
+        "lat": 2.441584217876181, "lon": -76.6028230716416,
+        "aliases": ["sena centro", "sena del centro"],
     },
     "la estancia clinica": {
         "canonical": "Clínica La Estancia",
@@ -453,6 +475,20 @@ def resolve_human_reference(text: str) -> Optional[dict]:
     """
     t_lower = strip_accents(text.lower().strip())
 
+    # 1. Exact match first
+    for key, data in HUMAN_REFERENCES.items():
+        for alias in data.get("aliases", []):
+            alias_norm = strip_accents(alias.lower())
+            if alias_norm == t_lower:
+                return {
+                    "canonical": data["canonical"],
+                    "lat":       data.get("lat"),
+                    "lon":       data.get("lon"),
+                    "note":      data.get("note"),
+                    "matched_alias": alias,
+                }
+
+    # 2. Substring match
     for key, data in HUMAN_REFERENCES.items():
         for alias in data.get("aliases", []):
             alias_norm = strip_accents(alias.lower())
