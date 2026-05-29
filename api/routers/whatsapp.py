@@ -17,6 +17,7 @@ from core.address_utils import (
     normalize_address,
     _try_local_match,
     _nominatim_geocode,
+    _nominatim_reverse_geocode_async,
     extract_datetime_with_llm,
 )
 
@@ -286,7 +287,12 @@ async def _create_wp_service(
     map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)", origen)
     if map_match_o:
         olat, olng = map_match_o.groups()
-        origen = f"Ubicación compartida GPS (Enlace: https://maps.google.com/?q={olat},{olng})"
+        address = await _nominatim_reverse_geocode_async(float(olat), float(olng))
+        gps_link = f"https://maps.google.com/?q={olat},{olng}"
+        if address:
+            origen = f"{address} (GPS: {gps_link})"
+        else:
+            origen = f"Ubicación compartida GPS ({gps_link})"
         g_o = (olat, olng, origen)
     else:
         origen_norm = normalize_address(origen)
@@ -302,7 +308,12 @@ async def _create_wp_service(
         map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)", destino)
         if map_match_d:
             dlat, dlng = map_match_d.groups()
-            destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
+            address = await _nominatim_reverse_geocode_async(float(dlat), float(dlng))
+            gps_link_d = f"https://maps.google.com/?q={dlat},{dlng}"
+            if address:
+                destino = f"{address} (GPS: {gps_link_d})"
+            else:
+                destino = f"Destino GPS ({gps_link_d})"
         else:
             dest_norm = normalize_address(destino)
             g_d = _nominatim_geocode(dest_norm) or _nominatim_geocode(destino)
