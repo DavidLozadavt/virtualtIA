@@ -947,10 +947,10 @@ async def voice(request: Request):
     )
 
     saludo = (
-        "¡Hola! Te recordamos que para mayor facilidad, puedes solicitar tus servicios mediante WhatsApp al número: "
-        "3  11... 5  44... 48... 51. ... ... "
+        "¡Hola! Recuerda que también puedes solicitar tu servicio a través de WhatsApp en el número. "
+        "3  11... 5  44... 48... 51. ..."
         "Soy Lyra, tu asistente de TaxBelalcazar. "
-        "Estoy aquí para ayudarte con tu servicio. "
+        "Y con gusto te ayudaré a gestionar tu servicio. "
         "Cuéntame, ¿en dónde te recogemos hoy?"
     )
     sess.last_message = saludo
