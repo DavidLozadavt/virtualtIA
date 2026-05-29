@@ -247,6 +247,17 @@ STATE_WAITING_DOM_DEST = "waiting_dom_dest"
 STATE_WAITING_DOM_OBS = "waiting_dom_obs"
 STATE_FINISHED = "finished"
 
+def clean_map_location(loc_name: str) -> str:
+    """Removes city, country, and zip codes from a map location name for a more natural response."""
+    if not loc_name:
+        return ""
+    loc = loc_name.strip()
+    loc = re.sub(r',\s*Popayán.*', '', loc, flags=re.IGNORECASE)
+    loc = re.sub(r',\s*Cauca.*', '', loc, flags=re.IGNORECASE)
+    loc = re.sub(r',\s*Colombia.*', '', loc, flags=re.IGNORECASE)
+    loc = re.sub(r',\s*CO$', '', loc, flags=re.IGNORECASE)
+    return loc.strip()
+
 class WpSession:
     def __init__(self, phone: str, company_id: int = 1):
         self.phone = phone
@@ -297,7 +308,7 @@ async def _create_wp_service(
     if map_match_o:
         olat, olng, explicit_name = map_match_o.groups()
         if explicit_name:
-            origen = f"{explicit_name.strip()}"
+            origen = clean_map_location(explicit_name)
         else:
             l_info = get_nearby_landmarks(float(olat), float(olng), radius_km=0.3)
             if l_info:
@@ -324,13 +335,8 @@ async def _create_wp_service(
 
         g_o = (olat, olng, origen)
     else:
-        origen_norm = normalize_address(origen)
-        g_o = _nominatim_geocode(origen_norm) or _nominatim_geocode(origen)
-
-    if not g_o:
-        return False, "Ay, no me aparece esa ubicación en Popayán. ¿Me la dices de otra forma? Prueba con un barrio o una calle."
-    
-    olat, olng, _ = g_o
+        origen = normalize_address(origen) or origen
+        olat, olng = 0.0, 0.0
 
     dlat, dlng = 0.0, 0.0
     if destino:
@@ -338,7 +344,7 @@ async def _create_wp_service(
         if map_match_d:
             dlat, dlng, explicit_name = map_match_d.groups()
             if explicit_name:
-                destino = f"{explicit_name.strip()}"
+                destino = clean_map_location(explicit_name)
             else:
                 l_info = get_nearby_landmarks(float(dlat), float(dlng), radius_km=0.3)
                 if l_info:
@@ -363,12 +369,8 @@ async def _create_wp_service(
             if is_maria_oriente_d:
                 dlat, dlng = 2.4307, -76.6012
         else:
-            dest_norm = normalize_address(destino)
-            g_d = _nominatim_geocode(dest_norm) or _nominatim_geocode(destino)
-            if g_d:
-                dlat, dlng, _ = g_d
-            else:
-                return False, "Hmm, ese destino no me aparece en Popayán. ¿Me lo dices de otra forma? Una calle, barrio o sitio."
+            destino = normalize_address(destino) or destino
+            dlat, dlng = 0.0, 0.0
 
     clase_v = "TAXI"
     service_type = "TAXI AHORA"
@@ -626,7 +628,13 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             origen = texto_usuario
             sess.origen_text = origen
             sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = f"Listo, te recogemos en la ubicación compartida. ¿A dónde te diriges? Envía la ubicación con el botón, escríbela, o dinos NO si prefieres avisarle al conductor."
+            
+            map_match_o = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", origen)
+            loc_name = "la ubicación compartida"
+            if map_match_o and map_match_o.group(1):
+                loc_name = clean_map_location(map_match_o.group(1))
+                
+            msg = f"Listo, te recogemos en {loc_name}. ¿A dónde te diriges? Envía la ubicación con el botón, escríbela, o dinos NO si prefieres avisarle al conductor."
             await send_whatsapp_location_request(sender_phone, msg)
             return
 
@@ -647,26 +655,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
         is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+', origen.lower()))
         if is_street:
-            try:
-                from tools.popayan_geodata import geocode_local, get_nearby_barrios, ALL_BARRIOS, _haversine
-                geo = geocode_local(origen)
-                if geo:
-                    nearby = get_nearby_barrios(geo[0], geo[1], radius_km=5.0)
-                    if not nearby:
-                        closest = min(ALL_BARRIOS.items(), key=lambda x: _haversine(geo[0], geo[1], x[1][0], x[1][1]))
-                        nearby = [{"name": closest[0]}]
-                    if nearby:
-                        barrio_name = nearby[0]["name"]
-                        sess.origen_barrio = barrio_name
-                        sess.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"Ok, entendemos que es por {origen}. Queda por el barrio {barrio_name}, ¿es correcto? Responde SÍ, o dime el nombre de tu barrio."
-                        await send_whatsapp_message(sender_phone, msg)
-                        return
-            except Exception as exc:
-                logger.warning(f"Error confirmando barrio: {exc}")
-
             sess.state = STATE_CONFIRMING_ORIGIN
-            msg = f"Ok, {origen}. ¿En qué barrio queda eso? Dime el nombre del barrio para ubicarte mejor."
+            msg = f"Entendemos que tu dirección es: {origen}. ¿Es correcta? Responde SÍ o NO."
             await send_whatsapp_message(sender_phone, msg)
             return
 
@@ -687,20 +677,16 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             
         if is_yes is False:
             sess.state = STATE_WAITING_ORIGIN
-            msg = "¿En qué barrio estás entonces? Dime el nombre para ubicarte mejor."
+            sess.origen_text = None
+            msg = "¿En qué dirección te recogemos entonces? (Puedes enviarla escrita o compartir ubicación)"
             await send_whatsapp_message(sender_phone, msg)
             return
 
-        local = _try_local_match(texto_usuario)
-        if local:
-            sess.origen_text = local
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = f"Listo, te recogemos en {local}. ¿A dónde te diriges? Toca el botón para compartir la ubicación, escríbela o di NO."
-            await send_whatsapp_location_request(sender_phone, msg)
-            return
-
-        msg = f"No te entendí. ¿Confirmas que estás por {sess.origen_barrio or 'esa zona'}? Responde SÍ o dime tu barrio."
-        await send_whatsapp_message(sender_phone, msg)
+        # Si responde otra cosa, lo tomamos como corrección directa de la dirección
+        sess.origen_text = texto_usuario
+        sess.state = STATE_WAITING_DEST_OR_SKIP
+        msg = f"Listo, te recogemos en {texto_usuario}. ¿A dónde te diriges? Toca el botón para compartir la ubicación, escríbela o di NO."
+        await send_whatsapp_location_request(sender_phone, msg)
         return
 
     # ── STATE: waiting_dest_or_skip ──
@@ -750,7 +736,13 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             origen = texto_usuario
             sess.origen_text = origen
             sess.state = STATE_WAITING_DOM_DEST
-            await send_whatsapp_location_request(sender_phone, "Anotado, recogemos en la ubicación compartida. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
+            
+            map_match_o = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", origen)
+            loc_name = "la ubicación compartida"
+            if map_match_o and map_match_o.group(1):
+                loc_name = clean_map_location(map_match_o.group(1))
+
+            await send_whatsapp_location_request(sender_phone, f"Anotado, recogemos en {loc_name}. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
             return
 
         origen_llm, hint = extract_pickup_address(texto_usuario)
@@ -792,7 +784,14 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, msg)
             return
             
-        msg_dest = "la ubicación compartida" if texto_usuario.startswith("Ubicación en mapa:") else dest
+        msg_dest = "la ubicación compartida"
+        if dest.startswith("Ubicación en mapa:"):
+            map_match_d = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", dest)
+            if map_match_d and map_match_d.group(1):
+                msg_dest = clean_map_location(map_match_d.group(1))
+        else:
+            msg_dest = dest
+
         sess.state = STATE_WAITING_DOM_OBS
         await send_whatsapp_message(sender_phone, f"Listo, lo llevamos a {msg_dest}. ¿Tienes alguna observación? Por ejemplo, a quién debemos entregarlo, si hay que pagar algo al recibir, o alguna otra instrucción.")
         return
