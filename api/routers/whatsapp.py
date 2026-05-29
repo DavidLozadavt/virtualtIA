@@ -291,23 +291,37 @@ async def _create_wp_service(
     observacion: Optional[str] = None
 ) -> tuple[bool, str]:
     import re
+    from tools.popayan_geodata import get_nearby_landmarks, get_nearby_barrios
     
     map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", origen)
     if map_match_o:
-        olat = map_match_o.group(1)
-        olng = map_match_o.group(2)
-        loc_text = map_match_o.group(3)
+        olat, olng, explicit_name = map_match_o.groups()
+        if explicit_name:
+            origen = f"{explicit_name.strip()}"
+        else:
+            l_info = get_nearby_landmarks(float(olat), float(olng), radius_km=0.3)
+            if l_info:
+                origen = f"{l_info[0]['name']}"
+            else:
+                b_info = get_nearby_barrios(float(olat), float(olng), radius_km=2.0)
+                if b_info:
+                    origen = f"Barrio {b_info[0]['name']}"
+                else:
+                    origen = f"Ubicación compartida GPS (Enlace: https://maps.google.com/?q={olat},{olng})"
         
-        if loc_text:
-            address = loc_text.strip()
+        # Check if the location is Maria Oriente to override coords
+        is_maria_oriente = False
+        if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
+            is_maria_oriente = True
         else:
-            address = await _nominatim_reverse_geocode_async(float(olat), float(olng))
-            
-        gps_link = f"https://maps.google.com/?q={olat},{olng}"
-        if address:
-            origen = f"{address} (GPS: {gps_link})"
-        else:
-            origen = f"Ubicación compartida GPS ({gps_link})"
+            b_info = get_nearby_barrios(float(olat), float(olng), radius_km=1.5)
+            if b_info and b_info[0]["name"] == "María Oriente":
+                is_maria_oriente = True
+                origen = "Barrio María Oriente"
+
+        if is_maria_oriente:
+            olat, olng = 2.4307, -76.6012
+
         g_o = (olat, olng, origen)
     else:
         origen_norm = normalize_address(origen)
@@ -322,20 +336,32 @@ async def _create_wp_service(
     if destino:
         map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
         if map_match_d:
-            dlat = map_match_d.group(1)
-            dlng = map_match_d.group(2)
-            loc_text = map_match_d.group(3)
+            dlat, dlng, explicit_name = map_match_d.groups()
+            if explicit_name:
+                destino = f"{explicit_name.strip()}"
+            else:
+                l_info = get_nearby_landmarks(float(dlat), float(dlng), radius_km=0.3)
+                if l_info:
+                    destino = f"{l_info[0]['name']}"
+                else:
+                    b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=2.0)
+                    if b_info:
+                        destino = f"Barrio {b_info[0]['name']}"
+                    else:
+                        destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
             
-            if loc_text:
-                address = loc_text.strip()
+            # Check if the destination is Maria Oriente to override coords
+            is_maria_oriente_d = False
+            if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
+                is_maria_oriente_d = True
             else:
-                address = await _nominatim_reverse_geocode_async(float(dlat), float(dlng))
-                
-            gps_link_d = f"https://maps.google.com/?q={dlat},{dlng}"
-            if address:
-                destino = f"{address} (GPS: {gps_link_d})"
-            else:
-                destino = f"Destino GPS ({gps_link_d})"
+                b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=1.5)
+                if b_info and b_info[0]["name"] == "María Oriente":
+                    is_maria_oriente_d = True
+                    destino = "Barrio María Oriente"
+
+            if is_maria_oriente_d:
+                dlat, dlng = 2.4307, -76.6012
         else:
             dest_norm = normalize_address(destino)
             g_d = _nominatim_geocode(dest_norm) or _nominatim_geocode(destino)
@@ -423,6 +449,31 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         if not words: return False
         return all(w in greetings for w in words)
 
+    def is_thanks(text: str) -> bool:
+        """Detecta mensajes de agradecimiento."""
+        t = re.sub(r'[^\w\s]', '', text.lower().strip())
+        thanks_phrases = {
+            "gracias", "muchas gracias", "mil gracias", "gracias a ti", "gracias listo",
+            "ok gracias", "okey gracias", "ok muchas gracias", "muchas gracias a ti",
+            "gracia", "grcias", "grasias", "graciass", "gracias totales", "te agradezco",
+            "muy amable", "que amable", "dios te bendiga", "bendecido", "bendecida"
+        }
+        words = t.split()
+        return t in thanks_phrases or (len(words) <= 4 and any(
+            t.startswith(p) for p in ["gracias", "gracia", "muchas", "mil gracias", "te agradezco", "muy amable", "que amable"]
+        ))
+
+    THANKS_RESPONSES = [
+        "¡Con mucho gusto! 😊 Si necesitas otro servicio, aquí estaré.",
+        "¡Para servirte! 🙌 Cuando necesites, cuéntame.",
+        "¡De nada! Fue un placer atenderte. Si necesitas algo más, escríbeme.",
+        "¡Claro que sí! Para eso estoy. Que tengas buen viaje 🚕",
+        "¡A la orden! Cuando necesites otro taxi o domicilio, me avisas 😊",
+    ]
+
+    import hashlib
+    _thanks_idx = int(hashlib.md5(sender_phone.encode()).hexdigest(), 16) % len(THANKS_RESPONSES)
+
     texto_usuario = message.strip()
     sess = get_wp_session(sender_phone, company_id)
 
@@ -433,14 +484,51 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         await send_whatsapp_message(sender_phone, "Has cancelado la solicitud. Escríbeme cuando necesites un taxi.")
         return
 
+    # ── DETECCIÓN GLOBAL DE AGRADECIMIENTO ──
+    # Si el usuario dice gracias en cualquier estado, respondemos y NO rompemos el flujo activo.
+    if is_thanks(texto_usuario):
+        response = THANKS_RESPONSES[_thanks_idx]
+        await send_whatsapp_message(sender_phone, response)
+        # Si el servicio ya finalizó, dejamos el estado en finished para que un próximo mensaje
+        # pueda reiniciar. Si estaba a mitad del flujo, no alteramos el estado.
+        return
+
     if sess.state == STATE_FINISHED:
-        t_clean_alpha = re.sub(r'[^\w\s]', '', t_clean).strip()
-        if t_clean_alpha in ["gracias", "ok", "vale", "listo", "bueno", "muchas gracias", "mil gracias", "gracias a ti", "gracias listo", "ok gracias"]:
-            return  # Ignorar mensajes de agradecimiento después de terminar el servicio
-        
         # ✅ RESETEAR CONTEXTO AL INICIAR NUEVA INTERACCIÓN
         reset_wp_session(sender_phone)
         sess = get_wp_session(sender_phone, company_id)
+
+        t_clean_new = re.sub(r'[^\w\s]', '', texto_usuario.lower()).strip()
+        SERVICE_KEYWORDS_MENU = {
+            "taxi", "un taxi", "necesito taxi", "quiero taxi",
+            "pedir taxi", "pide taxi", "solicitar taxi",
+            "servicio", "un servicio", "necesito servicio",
+        }
+        SERVICE_KEYWORDS_AHORA = {"taxi ahora", "taxiahora", "taxi ya"}
+        SERVICE_KEYWORDS_DOM = {"domicilio", "un domicilio", "necesito domicilio", "pedir domicilio"}
+
+        if t_clean_new in SERVICE_KEYWORDS_MENU or is_just_greeting(texto_usuario):
+            sess.state = STATE_WAITING_TIPO_SERVICIO
+            await send_whatsapp_interactive_buttons(
+                sender_phone,
+                "¡Hola de nuevo! 👋 ¿Qué tipo de servicio necesitas?",
+                [
+                    ("taxi_ahora", "Taxi Ahora"),
+                    ("taxi_prog", "Taxi Programado"),
+                    ("domicilio", "Domicilio")
+                ]
+            )
+            return
+        elif t_clean_new in SERVICE_KEYWORDS_AHORA:
+            sess.tipo_servicio = "taxi ahora"
+            sess.state = STATE_WAITING_ORIGIN
+            await send_whatsapp_location_request(sender_phone, "¡Hola! ¿En qué parte te recogemos? Toca el botón de abajo para enviar tu ubicación, o escribe una calle, barrio o lugar.")
+            return
+        elif t_clean_new in SERVICE_KEYWORDS_DOM:
+            sess.tipo_servicio = "domicilio"
+            sess.state = STATE_WAITING_DOM_ORIGIN
+            await send_whatsapp_location_request(sender_phone, "¡Hola! ¿En qué dirección debemos recoger el paquete o pedido? (Usa el botón para tu ubicación o escíbela)")
+            return
 
     if is_just_greeting(texto_usuario) and sess.state in (STATE_NEW, STATE_WAITING_ORIGIN, STATE_WAITING_TIPO_SERVICIO):
         sess.state = STATE_WAITING_TIPO_SERVICIO
@@ -455,8 +543,34 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         )
         return
 
+    # ── Keywords de servicio para sesiones nuevas (STATE_NEW) ──
+    # Mismo mecanismo que el reinicio post-STATE_FINISHED, para primera interacción.
     if sess.state == STATE_NEW:
-        sess.state = STATE_WAITING_ORIGIN
+        _t_new = re.sub(r'[^\w\s]', '', texto_usuario.lower()).strip()
+        _MENU_KW = {"taxi", "un taxi", "necesito taxi", "quiero taxi", "pedir taxi", "solicitar taxi", "servicio", "un servicio"}
+        _AHORA_KW = {"taxi ahora", "taxiahora", "taxi ya"}
+        _DOM_KW   = {"domicilio", "un domicilio", "necesito domicilio", "pedir domicilio"}
+
+        if _t_new in _MENU_KW or is_just_greeting(texto_usuario):
+            sess.state = STATE_WAITING_TIPO_SERVICIO
+            await send_whatsapp_interactive_buttons(
+                sender_phone,
+                "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+                [("taxi_ahora", "Taxi Ahora"), ("taxi_prog", "Taxi Programado"), ("domicilio", "Domicilio")]
+            )
+            return
+        elif _t_new in _AHORA_KW:
+            sess.tipo_servicio = "taxi ahora"
+            sess.state = STATE_WAITING_ORIGIN
+            await send_whatsapp_location_request(sender_phone, "¡Hola! ¿En qué parte te recogemos? Toca el botón de abajo para enviar tu ubicación, o escribe una calle, barrio o lugar.")
+            return
+        elif _t_new in _DOM_KW:
+            sess.tipo_servicio = "domicilio"
+            sess.state = STATE_WAITING_DOM_ORIGIN
+            await send_whatsapp_location_request(sender_phone, "¡Hola! ¿En qué dirección debemos recoger el paquete o pedido? (Usa el botón para tu ubicación o escíbela)")
+            return
+        else:
+            sess.state = STATE_WAITING_ORIGIN
 
     # ── STATE: waiting_tipo_servicio ──
     if sess.state == STATE_WAITING_TIPO_SERVICIO:

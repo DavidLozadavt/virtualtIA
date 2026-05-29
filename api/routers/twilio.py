@@ -124,7 +124,7 @@ def _get_cached_audio(audio_id: str) -> Optional[bytes]:
 
 
 def _twilio_speech_timeout() -> str:
-    return _cfg("TWILIO_SPEECH_TIMEOUT", "1.5")  # Mejorado: 1.0 → 1.5
+    return _cfg("TWILIO_SPEECH_TIMEOUT", "2.0")  # Mejorado: 1.5 → 2.0
 
 
 def _twilio_gather_timeout() -> int:
@@ -144,6 +144,7 @@ def _gather_action_url() -> str:
 STATE_WAITING_ORIGIN = "waiting_origin"
 STATE_CONFIRMING_ORIGIN = "confirming_origin"
 STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
+STATE_CONFIRMING_DEST = "confirming_dest"
 STATE_SERVICE_CREATED = "service_created"
 STATE_CREATING_SERVICE = "creating_service"
 STATE_FINISHED = "finished"
@@ -311,6 +312,7 @@ async def _twiml_gather_message(
         f'<Gather input="speech" language="es-CO"'
         f' speechTimeout="{speech_timeout}"'
         f' timeout="{gather_timeout}"'
+        f' speechModel="experimental_conversations"'
         f' action="{action_url}" method="POST"'
         f"{partial_attr}"
         f' profanityFilter="false"'
@@ -707,24 +709,105 @@ async def extract_pickup_address(user_text: str) -> Tuple[Optional[str], str]:
         return (fb if len(fb) > 3 else None), "¿Dónde te recogemos en Popayán?"
 
     model = _get_model()
-    prompt = (
-        "Eres asistente de taxi en Popayán, Cauca, Colombia. El usuario habla por teléfono.\n"
-        "Extrae SOLO el punto de RECOGIDA (origen). Si dice 'de X a Y', el origen es X.\n"
-        "Prioriza: cruces (calle 5 con carrera 9), nomenclatura (carrera 6 # 12-34), "
-        "una vía (calle 15), barrio o lugar conocido de Popayán.\n"
-        'Responde SOLO JSON: {"origen": "texto normalizado o null", "nota": "breve"}\n'
-        f"Texto: {user_text}"
-    )
+    prompt = f"""ROL:
+Eres un motor de resolución de ubicaciones geográficas para Popayán, Colombia. Tu función es idéntica a la de Google Maps: tomar una mención de lugar —exacta, parcial, coloquial o con errores tipográficos— y devolver la ubicación más precisa y específica posible, no una zona general.
+
+(Extrae SOLO el punto de RECOGIDA / ORIGEN. Si el usuario dice 'de X a Y', el origen es X.)
+
+BASE DE CONOCIMIENTO LOCAL OBLIGATORIA (POPAYÁN):
+- Hospital Susana López de Valencia: Cl. 14, 18
+- Valle del ortigal: 2.4603913005798788, -76.63971248137291
+- Sena norte: 2.4829669540145356, -76.56233437579733
+- Sena centro: SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca (2.441584217876181, -76.6028230716416)
+
+REGLAS CRÍTICAS:
+
+1. EXACTITUD ANTES QUE GENERALIZACIÓN
+   - Nunca devuelvas una zona genérica ("centro", "norte", "sur") si existe un lugar específico que coincida.
+   - "centro comercial campanario" → Centro Comercial Campanario (Av. Panamericana con Cl 5), NO "zona centro".
+   - "centro comercial terraplaza" → Centro Comercial Teraplaza (Transversal 9, barrio Bolívar), NO "zona centro".
+   - "hospital susana" → Hospital Susana López de Valencia (Cl 24 con Cra 6), NO Hospital San José ni genérico.
+
+2. FUZZY MATCHING CON PRIORIDAD AL NOMBRE MÁS PARECIDO
+   - Compara el input contra tu base de lugares con similitud fonética y de caracteres.
+   - Prioridad: coincidencia de nombre propio > tipo de lugar > zona.
+   - "hospital susana" → score alto para "Susana López" (nombre propio presente), score bajo para "San José".
+   - "campanario" → score alto para "Campanario" (nombre exacto en la cadena), score bajo para genéricos.
+   - Si el input contiene una palabra única y distintiva (nombre propio, marca, apellido), ESA palabra es el identificador principal.
+   - También integra las zonas comunes, como sena centro, sena norte, etc.
+
+3. TIPOS DE LUGAR — NUNCA COLAPSES LA JERARQUÍA
+   - Si el usuario dice "centro comercial X", busca centros comerciales, no el "centro" de la ciudad.
+   - Si el usuario dice "hospital X", busca hospitales/clínicas, no zonas médicas genéricas.
+   - Si el usuario dice "colegio X" o "universidad X", busca instituciones educativas específicas.
+   - El tipo de lugar actúa como filtro duro antes de hacer fuzzy matching.
+
+4. FORMATO DE RESPUESTA
+   Devuelve siempre un objeto JSON con:
+   {{
+     "nombre_oficial": "...",
+     "direccion": "...",
+     "barrio": "...",
+     "latitud": ...,
+     "longitud": ...,
+     "confianza": "alta|media|baja",
+     "input_recibido": "...",
+     "nota": "..."
+   }}
+   Responde ÚNICA Y EXCLUSIVAMENTE con el JSON, sin texto adicional.
+
+5. MANEJO DE AMBIGÜEDAD
+   - Si hay 2 o más matches con confianza similar, devuelve un array con los candidatos ordenados por score.
+   - Nunca elijas silenciosamente el lugar incorrecto. Es mejor retornar candidatos que dar una ubicación equivocada.
+   - Si la confianza es "baja", incluye en "nota" qué información adicional ayudaría a desambiguar.
+
+6. EJEMPLOS DE COMPORTAMIENTO ESPERADO
+   Input: "hospital susana"
+   ✅ Hospital Susana López de Valencia — Cl 24 #6-39
+   ❌ Hospital San José (nombre propio diferente)
+
+   Input: "campanario"
+   ✅ Centro Comercial Campanario — Av. Panamericana
+   ❌ "zona centro de Popayán"
+
+   Input: "terraplaza"
+   ✅ Centro Comercial Teraplaza — Tv 9 # 4N-25
+   ❌ "centro comercial en el centro"
+
+   Input: "la 14 del sur"
+   ✅ Almacenes 14 — Av. Panamericana Sur
+   ❌ "zona sur de Popayán"
+
+INPUT DEL USUARIO:
+"{user_text}"
+"""
 
     try:
         result = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            timeout=4.0,
+            timeout=5.0,
         )
-        data = json.loads(result.choices[0].message.content or "{}")
-        origen = data.get("origen")
+        content = result.choices[0].message.content or "{}"
+        
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        data = json.loads(content)
+        
+        if isinstance(data, list):
+            data = data[0] if len(data) > 0 else {}
+            
+        origen = data.get("nombre_oficial")
+
+        if not origen or str(origen).strip().lower() in ("null", "none", ""):
+            origen = data.get("direccion")
 
         if not origen or str(origen).strip().lower() in ("null", "none", ""):
             fb = user_text.strip()
@@ -762,22 +845,105 @@ async def extract_destination_address(user_text: str) -> Tuple[Optional[str], st
         return (fb if len(fb) > 2 else None), "¿A dónde vas en Popayán?"
 
     model = _get_model()
-    prompt = (
-        "Popayán, Cauca, Colombia. Extrae SOLO el DESTINO del viaje.\n"
-        "Prioriza: cruces, nomenclatura, una vía, barrio o lugar conocido.\n"
-        'Responde SOLO JSON: {"destino": "texto o null", "nota": "breve"}\n'
-        f"Texto: {user_text}"
-    )
+    prompt = f"""ROL:
+Eres un motor de resolución de ubicaciones geográficas para Popayán, Colombia. Tu función es idéntica a la de Google Maps: tomar una mención de lugar —exacta, parcial, coloquial o con errores tipográficos— y devolver la ubicación más precisa y específica posible, no una zona general.
+
+(Extrae SOLO el DESTINO del viaje.)
+
+BASE DE CONOCIMIENTO LOCAL OBLIGATORIA (POPAYÁN):
+- Hospital Susana López de Valencia: Cl. 14, 18
+- Valle del ortigal: 2.4603913005798788, -76.63971248137291
+- Sena norte: 2.4829669540145356, -76.56233437579733
+- Sena centro: 2.441584217876181, -76.6028230716416
+
+REGLAS CRÍTICAS:
+
+1. EXACTITUD ANTES QUE GENERALIZACIÓN
+   - Nunca devuelvas una zona genérica ("centro", "norte", "sur") si existe un lugar específico que coincida.
+   - "centro comercial campanario" → Centro Comercial Campanario (Av. Panamericana con Cl 5), NO "zona centro".
+   - "centro comercial terraplaza" → Centro Comercial Teraplaza (Transversal 9, barrio Bolívar), NO "zona centro".
+   - "hospital susana" → Hospital Susana López de Valencia (Cl 24 con Cra 6), NO Hospital San José ni genérico.
+
+2. FUZZY MATCHING CON PRIORIDAD AL NOMBRE MÁS PARECIDO
+   - Compara el input contra tu base de lugares con similitud fonética y de caracteres.
+   - Prioridad: coincidencia de nombre propio > tipo de lugar > zona.
+   - "hospital susana" → score alto para "Susana López" (nombre propio presente), score bajo para "San José".
+   - "campanario" → score alto para "Campanario" (nombre exacto en la cadena), score bajo para genéricos.
+   - Si el input contiene una palabra única y distintiva (nombre propio, marca, apellido), ESA palabra es el identificador principal.
+   - También integra las zonas comunes, como sena centro, sena norte, etc.
+
+3. TIPOS DE LUGAR — NUNCA COLAPSES LA JERARQUÍA
+   - Si el usuario dice "centro comercial X", busca centros comerciales, no el "centro" de la ciudad.
+   - Si el usuario dice "hospital X", busca hospitales/clínicas, no zonas médicas genéricas.
+   - Si el usuario dice "colegio X" o "universidad X", busca instituciones educativas específicas.
+   - El tipo de lugar actúa como filtro duro antes de hacer fuzzy matching.
+
+4. FORMATO DE RESPUESTA
+   Devuelve siempre un objeto JSON con:
+   {{
+     "nombre_oficial": "...",
+     "direccion": "...",
+     "barrio": "...",
+     "latitud": ...,
+     "longitud": ...,
+     "confianza": "alta|media|baja",
+     "input_recibido": "...",
+     "nota": "..."
+   }}
+   Responde ÚNICA Y EXCLUSIVAMENTE con el JSON, sin texto adicional.
+
+5. MANEJO DE AMBIGÜEDAD
+   - Si hay 2 o más matches con confianza similar, devuelve un array con los candidatos ordenados por score.
+   - Nunca elijas silenciosamente el lugar incorrecto. Es mejor retornar candidatos que dar una ubicación equivocada.
+   - Si la confianza es "baja", incluye en "nota" qué información adicional ayudaría a desambiguar.
+
+6. EJEMPLOS DE COMPORTAMIENTO ESPERADO
+   Input: "hospital susana"
+   ✅ Hospital Susana López de Valencia — Cl 24 #6-39
+   ❌ Hospital San José (nombre propio diferente)
+
+   Input: "campanario"
+   ✅ Centro Comercial Campanario — Av. Panamericana
+   ❌ "zona centro de Popayán"
+
+   Input: "terraplaza"
+   ✅ Centro Comercial Teraplaza — Tv 9 # 4N-25
+   ❌ "centro comercial en el centro"
+
+   Input: "la 14 del sur"
+   ✅ Almacenes 14 — Av. Panamericana Sur
+   ❌ "zona sur de Popayán"
+
+INPUT DEL USUARIO:
+"{user_text}"
+"""
 
     try:
         result = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            timeout=4.0,
+            timeout=5.0,
         )
-        data = json.loads(result.choices[0].message.content or "{}")
-        dest = data.get("destino")
+        content = result.choices[0].message.content or "{}"
+        
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        data = json.loads(content)
+        
+        if isinstance(data, list):
+            data = data[0] if len(data) > 0 else {}
+            
+        dest = data.get("nombre_oficial")
+
+        if not dest or str(dest).strip().lower() in ("null", "none", ""):
+            dest = data.get("direccion")
 
         if not dest or str(dest).strip().lower() in ("null", "none", ""):
             fb = user_text.strip()
@@ -1186,6 +1352,10 @@ async def process_speech(request: Request):
                 STATE_CONFIRMING_ORIGIN,
                 1,
             ): f"¿Confirmas {sess.origen_barrio or 'esa zona'}? Di sí o no.",
+            (
+                STATE_CONFIRMING_DEST,
+                1,
+            ): f"¿Confirmas que vas a {sess.destino_text or 'ese destino'}? Di sí o no.",
         }
 
         msg = silence_msgs.get(
@@ -1317,9 +1487,9 @@ async def process_speech(request: Request):
             sess.last_message = msg
             return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
 
-        # Lugar nombrado: ir directo a destino
-        sess.state = STATE_WAITING_DEST_OR_SKIP
-        msg = f"¡Excelente! Te recogemos en {origen}. ¿Tienes algún destino en mente o prefieres indicárselo al conductor?"
+        # Lugar nombrado: ir a confirmación
+        sess.state = STATE_CONFIRMING_ORIGIN
+        msg = f"Entendido, te recogemos en {origen}. ¿Es correcto?"
         sess.last_message = msg
         return _twiml_response(
             await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
@@ -1331,6 +1501,39 @@ async def process_speech(request: Request):
 
         if is_yes is True:
             sess.memory.last_confirmed_origin = sess.origen_text
+            
+            # Check if user already provided destination in this turn (e.g., "sí, y voy para el Valle del Ortigal")
+            dest_candidate = None
+            cleaned_dest_input = re.sub(r'^(?:sí|si|bien|correcto|exacto|ok|dale|claro)[,\s]*(?:y\s+)?', '', texto_usuario, flags=re.IGNORECASE).strip()
+            
+            if len(cleaned_dest_input) > 2:
+                human_ref = resolve_human_reference(cleaned_dest_input)
+                if human_ref and human_ref.get("canonical"):
+                    dest_candidate = human_ref["canonical"]
+                else:
+                    local_dest = _try_local_match(cleaned_dest_input)
+                    if local_dest:
+                        dest_candidate = local_dest
+                    else:
+                        dest_llm, _ = await extract_destination_address(cleaned_dest_input)
+                        if dest_llm:
+                            dest_candidate = dest_llm
+
+            if dest_candidate:
+                norm = normalize_address(dest_candidate)
+                if norm and len(norm) > len(dest_candidate) * 0.4:
+                    dest_candidate = norm
+                sess.destino_text = dest_candidate
+                sess.memory.add_location_mention(dest_candidate)
+                # Confirm destination before creating service
+                sess.state = STATE_CONFIRMING_DEST
+                msg = f"¿Tu destino es {dest_candidate}? Responde sí o no."
+                sess.last_message = msg
+                logger.info(f"[CONFIRM_ORIGIN] Destination pre-extracted, confirming: {dest_candidate!r}")
+                return _twiml_response(
+                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                )
+
             sess.state = STATE_WAITING_DEST_OR_SKIP
             msg = f"¡Perfecto! Te recogemos entonces en {sess.origen_text}. ¿Tienes algún destino para tu viaje o prefieres indicárselo directamente al conductor?"
             sess.last_message = msg
@@ -1466,9 +1669,68 @@ async def process_speech(request: Request):
                 await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
             )
 
-        sess.state = STATE_CREATING_SERVICE
+        # Confirm destination before creating service
+        sess.state = STATE_CONFIRMING_DEST
+        msg = f"¿Te llevamos a {dest}? Responde sí o corriges el destino."
+        sess.last_message = msg
         return _twiml_response(
-            await _twiml_redirect(action_url, "Procesando tu solicitud...")
+            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+        )
+
+    # ── ESTADO: confirming_dest ─────────────────────────────────────
+    if sess.state == STATE_CONFIRMING_DEST:
+        is_yes = _parse_si_no(texto_usuario)
+
+        if is_yes is True:
+            # User confirmed destination → create service
+            sess.state = STATE_CREATING_SERVICE
+            return _twiml_response(
+                await _twiml_redirect(action_url, "Perfecto, procesando tu solicitud...")
+            )
+
+        if is_yes is False:
+            # User rejected → ask again for destination
+            sess.destino_text = None
+            sess.state = STATE_WAITING_DEST_OR_SKIP
+            msg = "Sin problema. ¿Cuál es tu destino? Dímelo o di no si prefieres contarle al conductor."
+            sess.last_message = msg
+            return _twiml_response(
+                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=False)
+            )
+
+        # Try to match a correction inline (e.g. "no, al ortigal")
+        rest = re.sub(
+            r"^(?:no|nones|negativo|nop)[,\s]*",
+            "",
+            texto_usuario,
+            flags=re.IGNORECASE,
+        ).strip()
+        if len(rest) > 3:
+            # Treat the remainder as the corrected destination
+            local_dest = _try_local_match(rest)
+            if local_dest:
+                dest_corr = local_dest
+            else:
+                dest_corr_llm, _ = await extract_destination_address(rest)
+                dest_corr = (dest_corr_llm or rest).strip()
+            if dest_corr and len(dest_corr) >= 2:
+                norm = normalize_address(dest_corr)
+                if norm and len(norm) > len(dest_corr) * 0.4:
+                    dest_corr = norm
+                sess.destino_text = dest_corr
+                sess.memory.add_location_mention(dest_corr)
+                msg = f"¿Te llevamos a {dest_corr}? Di sí para confirmar o corriges de nuevo."
+                sess.last_message = msg
+                return _twiml_response(
+                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                )
+
+        # Could not parse: ask again
+        dest_name = sess.destino_text or "ese destino"
+        msg = f"Disculpa, no logré entenderte. ¿Confirmas que vas a {dest_name}? Di sí o no."
+        sess.last_message = msg
+        return _twiml_response(
+            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
         )
 
     # ── Fallback ──────────────────────────────────────────────────

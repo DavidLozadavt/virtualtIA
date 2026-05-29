@@ -375,6 +375,8 @@ POPAYAN_PLACES: dict = {
         "fundación universitaria", "fundacion universitaria", "fup", "la fup",
     ],
     "SENA Popayán": ["sena", "el sena", "sena popayán", "sena popayan"],
+    "SENA Norte": ["sena norte", "el sena norte", "sena del norte"],
+    "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca": ["sena centro", "el sena centro", "sena del centro"],
     "Colegio Mayor del Cauca": [
         "colegio mayor", "colegio mayor del cauca", "unimayor",
     ],
@@ -402,6 +404,10 @@ POPAYAN_PLACES: dict = {
     ],
     "Clínica Santa Gracia": [
         "clínica santa gracia", "clinica santa gracia", "santa gracia",
+    ],
+    "Hospital Susana López de Valencia": [
+        "hospital susana", "hospital susana lópez", "hospital susana lopez",
+        "susana lópez", "susana lopez", "hospital susana lópez de valencia",
     ],
     "Hospital María Occidente": [
         "hospital maría occidente", "hospital maria occidente",
@@ -757,7 +763,7 @@ def _strip_preamble(text: str) -> str:
 def _parse_si_no(text: str) -> Optional[bool]:
     """Interprets affirmative/negative response."""
     t = _normalize_text(text)
-    positivos = {"si", "claro", "exacto", "correcto", "ok", "dale", "yes", "obvio", "afirmativo", "asi", "eso"}
+    positivos = {"si", "claro", "exacto", "correcto", "ok", "dale", "yes", "obvio", "afirmativo", "asi", "eso", "bien"}
     negativos = {"no", "nop", "nel", "nope", "para nada", "negativo", "incorrecto", "tampoco", "nunca", "jamas"}
     words = set(t.split())
     if words & positivos: return True

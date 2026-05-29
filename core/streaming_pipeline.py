@@ -297,29 +297,29 @@ class AdaptiveEndpointController:
         # ── speechTimeout ──
         if short_answer_expected:
             # Para sí/no: 0.8s es suficiente pero no muy agresivo
-            speech_timeout = "0.8"
+            speech_timeout = "1.2"
         elif profile.is_noisy_call:
             # Audio ruidoso: más tiempo para acumular contexto
-            speech_timeout = "2.5"
+            speech_timeout = "3.0"
         elif profile.is_fast_speaker:
             # Habla rápida: esperar que termine la ráfaga
-            speech_timeout = "2.0"
+            speech_timeout = "2.5"
         elif profile.is_slow_speaker:
             # Habla lenta: pausas largas son parte del habla
-            speech_timeout = "1.8"
+            speech_timeout = "2.5"
         elif self._consecutive_retries >= 2:
             # Múltiples reintentos: algo falla, dar más tiempo
-            speech_timeout = "2.0"
+            speech_timeout = "2.5"
         else:
-            speech_timeout = "1.5"  # Default mejorado
+            speech_timeout = "2.0"  # Default mejorado
 
         # ── timeout total ──
         if profile.is_slow_speaker:
             gather_timeout = 35
         elif self._consecutive_empties >= 2:
-            gather_timeout = 20  # No lo dejamos esperando eternamente
+            gather_timeout = 25  # No lo dejamos esperando eternamente
         else:
-            gather_timeout = 25
+            gather_timeout = 30
 
         # ── hints de vocabulario ──
         # Se pueden adaptar por estado (ej: en confirming_origin, añadir el barrio)
