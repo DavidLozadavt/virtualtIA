@@ -123,7 +123,15 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                 elif msg_type == "location":
                     lat = msg.get("location", {}).get("latitude")
                     lng = msg.get("location", {}).get("longitude")
-                    message_content = f"Ubicación en mapa: {lat},{lng}"
+                    name = msg.get("location", {}).get("name", "")
+                    addr = msg.get("location", {}).get("address", "")
+                    
+                    parts = [p for p in (name, addr) if p]
+                    if parts:
+                        loc_text = " - ".join(parts)
+                        message_content = f"Ubicación en mapa: {lat},{lng} | {loc_text}"
+                    else:
+                        message_content = f"Ubicación en mapa: {lat},{lng}"
 
                 elif msg_type == "interactive":
                     interactive = msg.get("interactive", {})
@@ -284,10 +292,17 @@ async def _create_wp_service(
 ) -> tuple[bool, str]:
     import re
     
-    map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)", origen)
+    map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", origen)
     if map_match_o:
-        olat, olng = map_match_o.groups()
-        address = await _nominatim_reverse_geocode_async(float(olat), float(olng))
+        olat = map_match_o.group(1)
+        olng = map_match_o.group(2)
+        loc_text = map_match_o.group(3)
+        
+        if loc_text:
+            address = loc_text.strip()
+        else:
+            address = await _nominatim_reverse_geocode_async(float(olat), float(olng))
+            
         gps_link = f"https://maps.google.com/?q={olat},{olng}"
         if address:
             origen = f"{address} (GPS: {gps_link})"
@@ -305,10 +320,17 @@ async def _create_wp_service(
 
     dlat, dlng = 0.0, 0.0
     if destino:
-        map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)", destino)
+        map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
         if map_match_d:
-            dlat, dlng = map_match_d.groups()
-            address = await _nominatim_reverse_geocode_async(float(dlat), float(dlng))
+            dlat = map_match_d.group(1)
+            dlng = map_match_d.group(2)
+            loc_text = map_match_d.group(3)
+            
+            if loc_text:
+                address = loc_text.strip()
+            else:
+                address = await _nominatim_reverse_geocode_async(float(dlat), float(dlng))
+                
             gps_link_d = f"https://maps.google.com/?q={dlat},{dlng}"
             if address:
                 destino = f"{address} (GPS: {gps_link_d})"
