@@ -17,6 +17,7 @@ from core.address_utils import (
     normalize_address,
     _try_local_match,
     _nominatim_geocode,
+    _nominatim_reverse_geocode_async,
     extract_datetime_with_llm,
 )
 
@@ -122,7 +123,15 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                 elif msg_type == "location":
                     lat = msg.get("location", {}).get("latitude")
                     lng = msg.get("location", {}).get("longitude")
-                    message_content = f"Ubicación en mapa: {lat},{lng}"
+                    name = msg.get("location", {}).get("name", "")
+                    addr = msg.get("location", {}).get("address", "")
+                    
+                    parts = [p for p in (name, addr) if p]
+                    if parts:
+                        loc_text = " - ".join(parts)
+                        message_content = f"Ubicación en mapa: {lat},{lng} | {loc_text}"
+                    else:
+                        message_content = f"Ubicación en mapa: {lat},{lng}"
 
                 elif msg_type == "interactive":
                     interactive = msg.get("interactive", {})
