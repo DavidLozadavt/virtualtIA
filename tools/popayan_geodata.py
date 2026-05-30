@@ -1748,11 +1748,15 @@ def geocode_local(query: str) -> Optional[Tuple[float, float, str]]:
         if _normalize_text(phrase) == query_norm_coll:
             logger.info(f"[GEODATA] Coloquial: {query!r} → {phrase}")
             return (coords[0], coords[1], f"{phrase}, Popayán, Cauca, Colombia")
-    for phrase, coords in COLLOQUIAL_REFERENCES.items():
-        phrase_norm = _normalize_text(phrase)
-        if phrase_norm in query_norm_coll or query_norm_coll in phrase_norm:
-            logger.info(f"[GEODATA] Coloquial parcial: {query!r} → {phrase}")
-            return (coords[0], coords[1], f"{phrase}, Popayán, Cauca, Colombia")
+    # Check if the query contains street/carrera nomenclature with a number.
+    is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|transversal|tr|diagonal|diag|avenida|av|kr|kra)\s*\d+', query_strip.lower()))
+
+    if not is_street:
+        for phrase, coords in COLLOQUIAL_REFERENCES.items():
+            phrase_norm = _normalize_text(phrase)
+            if phrase_norm in query_norm_coll or query_norm_coll in phrase_norm:
+                logger.info(f"[GEODATA] Coloquial parcial: {query!r} → {phrase}")
+                return (coords[0], coords[1], f"{phrase}, Popayán, Cauca, Colombia")
 
     query_norm = _normalize_text(query_strip)
 
@@ -1766,19 +1770,20 @@ def geocode_local(query: str) -> Optional[Tuple[float, float, str]]:
     # 4. Match parcial
     best_match = None
     best_score = 0
-    for alias_norm, canonical, coords in _ALIAS_INDEX:
-        if len(alias_norm) < 3:
-            continue
-        if alias_norm in query_norm:
-            score = len(alias_norm)
-            if score > best_score:
-                best_match = (canonical, coords)
-                best_score = score
-        elif query_norm in alias_norm:
-            score = len(query_norm)
-            if score > best_score:
-                best_match = (canonical, coords)
-                best_score = score
+    if not is_street:
+        for alias_norm, canonical, coords in _ALIAS_INDEX:
+            if len(alias_norm) < 3:
+                continue
+            if alias_norm in query_norm:
+                score = len(alias_norm)
+                if score > best_score:
+                    best_match = (canonical, coords)
+                    best_score = score
+            elif query_norm in alias_norm:
+                score = len(query_norm)
+                if score > best_score:
+                    best_match = (canonical, coords)
+                    best_score = score
 
     if best_match:
         canonical, coords = best_match
