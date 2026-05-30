@@ -791,6 +791,11 @@ def _try_local_match(text: str) -> Optional[str]:
     t_clean = _strip_preamble(text)
     t_corrected = _correct_speech(t_clean)
     
+    # If the text contains street/carrera nomenclature with a number, bypass local match to avoid discarding the street number.
+    is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|transversal|tr|diagonal|diag|avenida|av|kr|kra)\s*\d+', t_clean.lower()))
+    if is_street:
+        return None
+    
     # 1. Alias lookup
     t_norm = _normalize_text(t_corrected)
     for canonical, aliases in POPAYAN_PLACES.items():
