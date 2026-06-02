@@ -19,6 +19,7 @@ from core.address_utils import (
     _nominatim_geocode,
     _nominatim_reverse_geocode_async,
     extract_datetime_with_llm,
+    looks_like_place,
 )
 
 logger = logging.getLogger("lyra.whatsapp")
@@ -646,12 +647,16 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
 
-        sess.origen_text = origen
-
-        if not origen or len(origen) < 2:
-            msg = hint or "¿Me dices de nuevo dónde te recogemos? Puedes pulsar el botón abajo para enviar tu ubicación GPS o escribir el nombre."
-            await send_whatsapp_location_request(sender_phone, msg)
+        if not origen or len(origen) < 2 or not looks_like_place(origen):
+            sess.state = STATE_WAITING_TIPO_SERVICIO
+            await send_whatsapp_interactive_buttons(
+                sender_phone,
+                "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+                [("taxi_ahora", "Taxi Ahora"), ("taxi_prog", "Taxi Programado"), ("domicilio", "Domicilio")],
+            )
             return
+
+        sess.origen_text = origen
 
         is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+', origen.lower()))
         if is_street:
@@ -710,19 +715,19 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             dest = texto_usuario
         else:
             dest_llm, hint = extract_destination_address(texto_usuario)
-            dest = (dest_llm or texto_usuario or "").strip()
+            dest = (dest_llm or "").strip()
 
             if dest:
                 normalized = normalize_address(dest)
                 if normalized and len(normalized) > len(dest) * 0.5:
                     dest = normalized
 
-        sess.destino_text = dest
-
-        if not dest or len(dest) < 2:
-            msg = hint or "¿Me dices a dónde vas? Dime un barrio, calle o sitio, envía tu ubicación con el botón, o escribe NO."
+        if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
+            msg = "¿A dónde te diriges? Envía tu ubicación con el botón, escribe un barrio o calle, o di *NO* si prefieres contarle al conductor."
             await send_whatsapp_location_request(sender_phone, msg)
             return
+
+        sess.destino_text = dest
 
         ok, closing = await _create_wp_service(sender_phone, sess.origen_text or "", dest, sess.tipo_servicio or "taxi ahora", sess.fecha_programada, sess.hora_programada)
         if ok:
@@ -746,19 +751,19 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             return
 
         origen_llm, hint = extract_pickup_address(texto_usuario)
-        origen = (origen_llm or texto_usuario or "").strip()
-        
+        origen = (origen_llm or "").strip()
+
         if origen:
             normalized = normalize_address(origen)
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
 
-        sess.origen_text = origen
-        
-        if not origen or len(origen) < 2:
-            msg = hint or "¿Me dices nuevamente en dónde recogemos el domicilio? Usa el botón para enviar tu ubicación o escribe un lugar."
+        if not origen or len(origen) < 2 or not looks_like_place(origen):
+            msg = "¿En qué dirección recogemos el domicilio? Usa el botón para enviar tu ubicación o escribe la dirección."
             await send_whatsapp_location_request(sender_phone, msg)
             return
+
+        sess.origen_text = origen
             
         sess.state = STATE_WAITING_DOM_DEST
         await send_whatsapp_location_request(sender_phone, f"Anotado, recogemos en {origen}. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
@@ -770,19 +775,19 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             dest = texto_usuario
         else:
             dest_llm, hint = extract_destination_address(texto_usuario)
-            dest = (dest_llm or texto_usuario or "").strip()
-            
+            dest = (dest_llm or "").strip()
+
             if dest:
                 normalized = normalize_address(dest)
                 if normalized and len(normalized) > len(dest) * 0.5:
                     dest = normalized
 
-        sess.destino_text = dest
-        
-        if not dest or len(dest) < 2:
-            msg = hint or "¿A qué dirección debemos llevar el domicilio? Envía tu ubicación con el botón o descríbela."
+        if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
+            msg = "¿A qué dirección llevamos el domicilio? Envía tu ubicación con el botón o escribe la dirección."
             await send_whatsapp_location_request(sender_phone, msg)
             return
+
+        sess.destino_text = dest
             
         msg_dest = "la ubicación compartida"
         if dest.startswith("Ubicación en mapa:"):

@@ -405,10 +405,23 @@ def _xml_escape(s: str) -> str:
     )
 
 
+def _tts_expand(text: str) -> str:
+    """Expands street abbreviations so TTS reads full words instead of letters."""
+    if not text:
+        return text
+    t = re.sub(r'\bCra\.\s*', 'Carrera ', text)
+    t = re.sub(r'\bCl\.\s*',  'Calle ',   t)
+    t = re.sub(r'\bAv\.\s*',  'Avenida ', t)
+    t = re.sub(r'\bTr\.\s*',  'Transversal ', t)
+    t = re.sub(r'\bDiag\.\s*','Diagonal ', t)
+    t = re.sub(r'#\s*',        'número ',  t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+
 def _generate_say_twiml(msg: str) -> str:
     """Fallback: genera <Say> con voz Polly (si edge_tts no está disponible)."""
     voice = _twilio_voice()
-    return f'<Say voice="{voice}" language="es-MX">{_xml_escape(msg)}</Say>'
+    return f'<Say voice="{voice}" language="es-MX">{_xml_escape(_tts_expand(msg))}</Say>'
 
 
 async def _generate_tts_audio(msg: str) -> Optional[bytes]:
@@ -417,7 +430,7 @@ async def _generate_tts_audio(msg: str) -> Optional[bytes]:
         from core.voice_engine import get_voice_engine
 
         engine = get_voice_engine()
-        audio_bytes = await engine.synthesize_to_bytes(msg, voice=_lyra_tts_voice())
+        audio_bytes = await engine.synthesize_to_bytes(_tts_expand(msg), voice=_lyra_tts_voice())
         if audio_bytes and len(audio_bytes) > 100:
             return audio_bytes
     except Exception as e:

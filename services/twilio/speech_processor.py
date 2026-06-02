@@ -20,7 +20,7 @@ _FILLER_WORDS: frozenset[str] = frozenset({
 })
 
 _PREAMBLE_PATTERNS: tuple[str, ...] = (
-    r'^(?:hola|buenas?\s*(?:tardes?|noches?|d[ií]as?)?|ey|oye|oiga|mira|ve)\s*[,.]?\s*',
+    r'^(?:hola|buen[oa]s?\s*(?:tardes?|noches?|d[ií]as?)?|ey|oye|oiga|mira|ve)\s*[,.]?\s*',
     r'^(?:amig[oa]|mij[oa]|herman[oa]|parce|parcero|vecin[oa]|señor[ai]?|joven|jefe|pana)\s*[,.]?\s*',
     r'(?:me\s+encuentro|estoy|quedo|voy|ando)\s+(?:aqu[ií]\s+)?(?:en|por|cerca\s+de?)\s+',
     r'(?:necesito|mand[ae]me?|env[ií][ae]me?|quiero)\s+(?:un\s+)?(?:taxi|carro|servicio|veh[ií]culo)\s+(?:a|en|para|por|hacia)\s+',
@@ -389,8 +389,7 @@ class SpeechProcessor:
                 return local, ""
 
         if not self.llm:
-            fb = text.strip()
-            return (fb if len(fb) > 3 else None), _ADDRESS_FALLBACK[address_type]
+            return None, _ADDRESS_FALLBACK[address_type]
 
         return await self._llm_extract(text, address_type)
 
@@ -418,12 +417,10 @@ class SpeechProcessor:
             addr = data.get(field_name)
 
             if not addr or str(addr).strip().lower() in ("null", "none", ""):
-                fb = text.strip()
-                return (fb if len(fb) >= 4 else None), _ADDRESS_FALLBACK[address_type]
+                return None, _ADDRESS_FALLBACK[address_type]
 
             return str(addr).strip(), ""
 
         except Exception as exc:
             logger.error(f"LLM extract [{address_type}] error: {exc}")
-            fb = text.strip()
-            return (fb if len(fb) >= 4 else None), "Hubo un problema técnico. ¿Puedes repetir?"
+            return None, "Hubo un problema técnico. ¿Puedes repetir?"
