@@ -140,21 +140,37 @@ def _twilio_gather_timeout() -> int:
 # poder ajustar el modelo en producción SIN tocar código (solo .env + reinicio).
 #
 # Modelos disponibles en Twilio <Gather speechModel=...>:
-#   googlev2               → premium, soporta es-CO, robusto en ruido (DEFAULT)
+#   deepgram_nova-2/-3     → DEFAULT. Maneja MUCHO mejor el audio PSTN degradado
+#                            (µ-law 8kHz, ruido de línea, eco) y el español LATAM
+#                            que googlev2. Idioma: Deepgram nova-2 SOLO acepta
+#                            "es" / "es-419" — NO "es-CO". Se mapea automáticamente
+#                            (ver _build_speech_attrs / _deepgram_language).
+#   googlev2               → premium, soporta es-CO, robusto en ruido. Fallback si
+#                            se revierte TWILIO_SPEECH_MODEL=googlev2.
 #   phone_call             → modelo telefónico (requiere enhanced="true"); en
 #                            español usar language es-US (es-CO NO está en la
-#                            lista enhanced). Probar si googlev2 no convence.
-#   deepgram_nova-2/-3     → premium alternativo, muy bueno en español LATAM
-#   experimental_conversations → el anterior; peor en audio telefónico real
+#                            lista enhanced).
+#   experimental_conversations → legacy; peor en audio telefónico real
 #
-# `enhanced="true"` SOLO aplica a phone_call. Para los demás se omite.
+# `enhanced="true"` SOLO aplica a phone_call (Google STT V1). Para los demás se
+# omite. NO existe atributo enhancedAudioQuality en <Gather> (verificado contra
+# la spec de TwiML) → no se emite.
 
 def _twilio_speech_model() -> str:
-    return _cfg("TWILIO_SPEECH_MODEL", "googlev2")
+    return _cfg("TWILIO_SPEECH_MODEL", "deepgram_nova-2")
 
 
 def _twilio_speech_language() -> str:
     return _cfg("TWILIO_SPEECH_LANGUAGE", "es-CO")
+
+
+def _deepgram_language() -> str:
+    """
+    Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo
+    "es" y "es-419" (español LATAM). es-419 es el mejor match para acento
+    payanés/caucano. Configurable sin tocar código.
+    """
+    return _cfg("TWILIO_DEEPGRAM_LANGUAGE", "es-419")
 
 
 def _twilio_speech_enhanced() -> bool:
@@ -167,15 +183,91 @@ def _build_speech_attrs() -> str:
     Construye los atributos de reconocimiento de voz del <Gather>.
 
     Centraliza modelo/idioma/enhanced para que TODOS los Gather usen la misma
-    config telefónica óptima. `enhanced` se emite solo cuando el modelo es
-    phone_call (Twilio lo ignora/rechaza en otros modelos).
+    config telefónica óptima.
+    - Deepgram: el idioma se mapea a un código que el modelo acepta (es-419),
+      porque es-CO produciría error/fallback en Deepgram.
+    - phone_call: emite enhanced="true".
+    - Cualquier otro (googlev2…): usa TWILIO_SPEECH_LANGUAGE tal cual (es-CO).
     """
     model = _twilio_speech_model()
-    lang = _twilio_speech_language()
+    if model.startswith("deepgram"):
+        lang = _deepgram_language()
+    else:
+        lang = _twilio_speech_language()
     attrs = f' language="{lang}" speechModel="{model}"'
     if model == "phone_call" and _twilio_speech_enhanced():
         attrs += ' enhanced="true"'
     return attrs
+
+
+# ── Fallback DTMF (teclado) ───────────────────────────────────────────────────
+# Tras 2 fallos STT consecutivos en waiting_origin, en vez de seguir pidiendo que
+# repita (inútil con audio malo), ofrecemos un menú numérico con los barrios más
+# solicitados. El usuario marca un dígito → mapeo directo al nombre canónico, sin
+# pasar por STT. "8" = otro barrio → vuelve a captura por voz.
+DTMF_BARRIO_MAP: Dict[str, str] = {
+    "1": "Pubenza",
+    "2": "Centro",
+    "3": "Campanario",
+    "4": "Los Sauces",
+    "5": "Yanaconas",
+    "6": "Valle del Ortigal",
+    "7": "María Oriente",
+    # "8" → "otro barrio": no mapea a canónico, vuelve a pedir por voz.
+}
+
+DTMF_MENU_MESSAGE = (
+    "Si no me escuchas bien, marca en el teclado: "
+    "1 para Pubenza. 2 para el Centro. 3 para Campanario. "
+    "4 para Los Sauces. 5 para Yanaconas. 6 para Valle del Ortigal. "
+    "7 para María Oriente. 8 para otro barrio."
+)
+
+
+async def _build_dtmf_gather(
+    msg: str,
+    action_url: str,
+    sess: "CallSession",
+) -> str:
+    """
+    Construye un <Gather input="dtmf speech"> con menú numérico de barrios.
+
+    Acepta tanto dígitos (numDigits=1) como voz (mismo motor/idioma que el resto),
+    para que el usuario pueda marcar O hablar. El <Gather> de Twilio soporta
+    input combinado "dtmf speech"; numDigits termina la captura DTMF al primer
+    dígito. Si el usuario no marca ni habla, el Redirect re-entra a process_speech.
+    """
+    params = sess.get_endpoint_params(short_answer=False)
+    hints = _get_contextual_hints(sess.state)
+
+    audio_bytes = await _generate_tts_audio(msg)
+    base_url = (
+        action_url.rsplit("/process_speech", 1)[0]
+        if "/process_speech" in action_url
+        else action_url.rsplit("/", 1)[0]
+    )
+    if audio_bytes:
+        audio_id = _cache_audio(audio_bytes)
+        play_or_say = _generate_play_twiml(audio_id, base_url)
+    else:
+        play_or_say = _generate_say_twiml(msg)
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        f'<Gather input="dtmf speech"'
+        f"{_build_speech_attrs()}"
+        f' numDigits="1"'
+        f' speechTimeout="{params["speech_timeout"]}"'
+        f' timeout="{params["gather_timeout"]}"'
+        f' action="{action_url}" method="POST"'
+        f' profanityFilter="false"'
+        f' hints="{hints}">'
+        f"{play_or_say}"
+        "</Gather>"
+        f'<Redirect method="POST">{action_url}</Redirect>'
+        "</Response>"
+    )
 
 
 def _max_silence() -> int:
@@ -409,7 +501,13 @@ async def _twiml_gather_adaptive(
     Wrapper que usa los parámetros adaptativos de la sesión.
     """
     params = sess.get_endpoint_params(short_answer)
-    hints = _get_contextual_hints(sess.state)
+    # En confirmación, reforzar el reconocimiento del barrio/destino ya detectado.
+    detected_barrio = None
+    if sess.state == STATE_CONFIRMING_ORIGIN:
+        detected_barrio = sess.origen_barrio or sess.origen_text
+    elif sess.state == STATE_CONFIRMING_DEST:
+        detected_barrio = sess.destino_text
+    hints = _get_contextual_hints(sess.state, detected_barrio)
     return await _twiml_gather_message(
         msg,
         action_url,
@@ -659,11 +757,55 @@ def obtener_telefono_cliente(form_data) -> tuple[str | None, str]:
     return None, "not_found"
 
 
+# ── Normalización agresiva para audio MUY degradado ──────────────────────────
+# Tokens de 1 carácter que SÍ son palabras/marcadores válidos en español o en
+# nomenclatura de direcciones — no se eliminan. El resto de tokens de 1 char
+# (ruido suelto que el STT escupe sobre línea PSTN sucia) se descarta.
+_VALID_1CHAR_TOKENS = frozenset({"a", "y", "o", "u", "e", "#"})
+
+# Frases-basura observadas: "quiero un móvil" mal transcrito como "quisiera/quiero
+# morir". Se eliminan enteras para no contaminar la extracción del destino.
+_STT_JUNK_PHRASES = [
+    r"\bquisiera\s+morir\b",
+    r"\bquiero\s+morir\b",
+]
+
+_REPEAT_CHAR_RE = re.compile(r"(.)\1{2,}")          # 3+ repeticiones → 1
+_WEIRD_CHARS_RE = re.compile(r"[^\w\s#\-]", re.UNICODE)
+
+
+def _aggressive_normalize(text: str) -> str:
+    """
+    Normalización agresiva previa, para audio telefónico muy degradado.
+
+    - Elimina caracteres extraños que Twilio a veces inyecta en transcripciones
+      de audio ruidoso (deja letras —incl. acentuadas—, dígitos, espacio, # y -).
+    - Colapsa caracteres repetidos: "fuuuerza" → "fuerza".
+    - Elimina frases-basura conocidas ("quisiera morir" = "quiero un móvil").
+    - Descarta tokens sueltos de 1 carácter que no sean número ni palabra válida.
+    """
+    t = _WEIRD_CHARS_RE.sub(" ", text)
+    t = _REPEAT_CHAR_RE.sub(r"\1", t)
+
+    for pat in _STT_JUNK_PHRASES:
+        t = re.sub(pat, " ", t, flags=re.IGNORECASE)
+
+    tokens = []
+    for tok in t.split():
+        if len(tok) == 1 and not tok.isdigit() and tok.lower() not in _VALID_1CHAR_TOKENS:
+            continue
+        tokens.append(tok)
+
+    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
+
+
 def preprocess_stt(text: str, confidence: float = 1.0) -> str:
     """
     Pipeline completo de pre-procesamiento STT.
 
     Pasos (en orden):
+    0. Normalización agresiva (audio muy degradado): chars extraños, repeticiones,
+       frases-basura, tokens sueltos de 1 char
     1. Eliminar fragmentos de barge-in de Lyra
     2. Expandir contracciones payanesas
     3. Separar palabras fusionadas (habla rápida)
@@ -675,6 +817,11 @@ def preprocess_stt(text: str, confidence: float = 1.0) -> str:
         return text
 
     t = text.strip()
+
+    # 0. Normalización agresiva previa
+    t = _aggressive_normalize(t)
+    if not t:
+        return text.strip()
 
     # 1. Barge-in cleanup
     for pat in _BARGEIN_FRAGMENTS:
@@ -765,6 +912,41 @@ def classify_speech_quality(
         return "medium"
 
     return "low"
+
+
+def _aggressive_place_recovery(text: str) -> Optional[str]:
+    """
+    Último recurso para rescatar un lugar de una transcripción mala.
+
+    Cuando la confianza es razonable pero el texto vino mal transcrito (ej:
+    "noches quisiera morir para la fuerza" con conf=0.73), en vez de rechazar el
+    turno en silencio, deslizamos ventanas de 3→2→1 palabras sobre el texto y
+    probamos cada fragmento contra el catálogo local (BARRIO_ALIASES + variantes
+    STT + landmarks) y contra las referencias humanas. Devuelve el primer
+    canónico que matchee, o None si nada parece un lugar real.
+    """
+    if not text:
+        return None
+
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    if not words:
+        return None
+
+    for size in (3, 2, 1):
+        for i in range(len(words) - size + 1):
+            frag = " ".join(words[i : i + size]).strip()
+            if len(frag) < 4:
+                continue
+            local = _try_local_match(frag)
+            if local:
+                logger.info(f"[RECOVERY] Fragment {frag!r} → {local!r}")
+                return local
+            human_ref = resolve_human_reference(frag)
+            if human_ref and human_ref.get("canonical"):
+                logger.info(f"[RECOVERY] Fragment {frag!r} → human ref {human_ref['canonical']!r}")
+                return human_ref["canonical"]
+
+    return None
 
 
 # ── Extracción de direcciones ─────────────────────────────────────────────────
@@ -1107,6 +1289,9 @@ async def process_speech(request: Request):
             texto_usuario = v
             break
 
+    # ── DTMF: dígito del teclado (menú fallback de barrios) ──
+    digits = str(form.get("Digits") or "").strip()
+
     try:
         confidence = float(form.get("Confidence") or 0.0)
     except (ValueError, TypeError):
@@ -1236,6 +1421,36 @@ async def process_speech(request: Request):
         reset_session(call_sid)
         return _twiml_response(await _twiml_say_hangup(closing, action_url))
 
+    # ── DTMF: el usuario marcó un dígito en el menú fallback de barrios ──
+    # Se procesa ANTES del silencio (un DTMF llega con SpeechResult vacío y, sin
+    # esto, caería en la rama de silencio). Mapea el dígito al barrio canónico y
+    # salta directo a confirmación, sin pasar por STT.
+    if digits:
+        logger.info(f"[DTMF] Digit pressed: {digits!r} state={sess.state}")
+        sess.silence_count = 0
+        sess.retry_count = 0
+        sess.endpoint_ctrl.on_successful_response()
+        canonical = DTMF_BARRIO_MAP.get(digits)
+        if canonical:
+            # canonical ES el nombre del barrio → no se pasa además como barrio=
+            # al geocoder (duplicaría "Pubenza, Pubenza"). Igual que un lugar
+            # nombrado dicho por voz: origen_barrio se deja sin fijar.
+            sess.origen_text = canonical
+            sess.origen_barrio = None
+            sess.memory.add_location_mention(canonical)
+            sess.geo_origin.reset()
+            sess.state = STATE_CONFIRMING_ORIGIN
+            msg = f"Perfecto, {canonical}. ¿Te recogemos ahí? Di sí para confirmar."
+            sess.last_message = msg
+            return _twiml_response(
+                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+            )
+        # "8" (otro barrio) o dígito no mapeado → volver a captura por voz
+        sess.state = STATE_WAITING_ORIGIN
+        msg = "Listo. Dime el nombre del barrio o la dirección donde te recogemos."
+        sess.last_message = msg
+        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+
     # ── Detección de "repite" ──
     if texto_usuario and _is_repeat_request(texto_usuario):
         logger.info("[SPEECH] Repeat request detected.")
@@ -1304,9 +1519,18 @@ async def process_speech(request: Request):
         sess.retry_count += 1
         sess.endpoint_ctrl.on_retry()
 
+        # Fallback DTMF: tras 2 fallos STT consecutivos en waiting_origin, dejar
+        # de pedir que repita (inútil con audio malo) y ofrecer menú numérico.
+        if sess.state == STATE_WAITING_ORIGIN and sess.retry_count >= 2:
+            logger.info(f"[LOW_QUALITY] Retry #{sess.retry_count} → DTMF fallback menu")
+            sess.last_message = DTMF_MENU_MESSAGE
+            return _twiml_response(
+                await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
+            )
+
         msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
 
-        # En el 3er reintento, cambiar estrategia: pedir solo barrio
+        # En el 3er reintento de destino, cambiar estrategia: pedir solo barrio
         if sess.retry_count >= 3:
             if sess.state == STATE_WAITING_ORIGIN:
                 msg = "¿Solo dime el barrio donde estás?"
@@ -1335,7 +1559,10 @@ async def process_speech(request: Request):
             logger.info(f"[MEDIUM_QUALITY] Resolved via local match: {local_try!r}")
             texto_usuario = local_try
 
-    sess.retry_count = 0
+    # NOTA: retry_count NO se resetea aquí. Un turno de calidad alta/media puede
+    # aún ser rechazado por el gate anti-basura de waiting_origin (extracción que
+    # no parece lugar). El reset ocurre en los puntos de ÉXITO real (origen/dest
+    # aceptado) para que 2 fallos —de cualquier tipo— activen el fallback DTMF.
     sess.endpoint_ctrl.on_successful_response()
 
     # ═══════════════════════════════════════════════════════════════
@@ -1373,11 +1600,37 @@ async def process_speech(request: Request):
         if not trusted_origin and not (
             looks_like_place(origen) or looks_like_place(texto_usuario)
         ):
-            logger.info(f"[ORIGIN] Rejected non-place extraction: {origen!r} (raw={texto_usuario!r})")
-            sess.origen_text = None
-            msg = "Perdona, no te capté el lugar. Dime solo el barrio o la dirección donde te recogemos."
-            sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+            # Antes de rechazar: rescate agresivo. El texto puede venir muy mal
+            # transcrito (conf alta, palabras erradas). Deslizamos ventanas sobre
+            # el texto y el original crudo buscando CUALQUIER fragmento que matchee
+            # el catálogo. Si algo aparece, lo tomamos como hipótesis confiable.
+            recovered = _aggressive_place_recovery(texto_usuario) or _aggressive_place_recovery(texto_original)
+            if recovered:
+                origen = recovered
+                trusted_origin = True
+                logger.info(f"[ORIGIN] Recovered via aggressive matching: {origen!r}")
+            else:
+                # Nada matcheó: contar como fallo y, tras 2, ofrecer menú DTMF en
+                # vez de seguir pidiendo que repita sobre el mismo audio malo.
+                sess.retry_count += 1
+                sess.endpoint_ctrl.on_retry()
+                sess.origen_text = None
+                logger.info(
+                    f"[ORIGIN] Rejected non-place extraction (retry #{sess.retry_count}): "
+                    f"{origen!r} (raw={texto_usuario!r})"
+                )
+                if sess.retry_count >= 2:
+                    sess.last_message = DTMF_MENU_MESSAGE
+                    return _twiml_response(
+                        await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
+                    )
+                msg = "Perdona, no te capté el lugar. Dime solo el barrio o la dirección donde te recogemos."
+                sess.last_message = msg
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+
+        # Origen aceptado (confiable o recuperado/validado) → éxito: resetear el
+        # contador de fallos para que el fallback DTMF parta de cero la próxima vez.
+        sess.retry_count = 0
 
         # Normalizar — aplicar normalize_colombian_address para limpiar artefactos STT
         # (ej: "4a ae" → "4ae", "carrera" → "Cra.", etc.) antes de confirmar
@@ -1841,6 +2094,7 @@ async def process_speech(request: Request):
 
         sess.destino_text = dest
         sess.memory.add_location_mention(dest)
+        sess.retry_count = 0  # destino aceptado → reset de fallos
         logger.info(f"[DEST] Extracted: {dest!r}")
 
         if not dest or len(dest) < 2:

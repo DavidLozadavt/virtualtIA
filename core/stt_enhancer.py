@@ -111,6 +111,13 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "pubensa":           "pubenza",
     "pubenza":           "pubenza",
     "pubensas":          "pubenza",
+    "pubencia":          "pubenza",
+    "povensa":           "pubenza",
+    # Mishears reales observados en logs de producción para "Pubenza" sobre
+    # audio PSTN degradado ("...para la fuerza" / "...la prensa" = "para Pubenza").
+    # En este IVR de taxi el referente es siempre un barrio, no la acepción común.
+    "la fuerza":         "pubenza",
+    "la prensa":         "pubenza",
     "yanaconaz":         "yanaconas",
     "yanakonas":         "yanaconas",
     "llanaconas":        "yanaconas",
@@ -118,6 +125,7 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "pandeguando":       "pandiguando",
     "pandigando":        "pandiguando",
     "pandi guando":      "pandiguando",
+    "pandeiguando":      "pandiguando",
     "esmeraldaaa":       "la esmeralda",
     "esmeraldas":        "la esmeralda",
     "esmeralda":         "la esmeralda",
@@ -125,6 +133,7 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "belalcasar":        "belalcázar",
     "belalcazar":        "belalcázar",
     "belal casar":       "belalcázar",
+    "belal cazar":       "belalcázar",
     "valle del ortigal": "valle del ortigal",   # self-entry → exact match exits early, no subcadena cascade
     "ortigal":           "valle del ortigal",
     "el ortigal":        "valle del ortigal",
@@ -145,6 +154,9 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "alfonso lopes":     "alfonso lópez",
     "camilo tor":        "camilo torres",
     "yambitara":         "yambitará",
+    "jambitara":         "yambitará",
+    "jambitará":         "yambitará",
+    "yanbitara":         "yambitará",
     "loma linda":        "loma linda",
     "berlín":            "berlín",
     "berling":           "berlín",
