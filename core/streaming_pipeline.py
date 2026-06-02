@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from collections import deque
@@ -295,23 +296,28 @@ class AdaptiveEndpointController:
         profile = self._profile
 
         # ── speechTimeout ──
+        # Política (corregida): para captura de direcciones usamos "auto" =
+        # detección adaptativa de fin-de-habla de Twilio. Es lo mejor para habla
+        # natural a ritmo variable con pausas ("calle 16... número 3CE-41...
+        # Santa Teresa"); un timeout fijo corto cortaba al usuario a mitad de
+        # frase. Para sí/no mantenemos un valor numérico para que responda ágil.
+        # Ambos configurables por env sin tocar código.
+        short_to = os.getenv("TWILIO_SPEECH_TIMEOUT_SHORT", "1.5")
+        long_to = os.getenv("TWILIO_SPEECH_TIMEOUT_LONG", "auto")
+
         if short_answer_expected:
-            # Para sí/no: 0.8s es suficiente pero no muy agresivo
-            speech_timeout = "1.2"
+            speech_timeout = short_to
+        elif long_to.lower() == "auto":
+            # Default: Twilio decide el fin de habla (no corta pausas naturales).
+            speech_timeout = "auto"
         elif profile.is_noisy_call:
-            # Audio ruidoso: más tiempo para acumular contexto
             speech_timeout = "3.0"
-        elif profile.is_fast_speaker:
-            # Habla rápida: esperar que termine la ráfaga
-            speech_timeout = "2.5"
-        elif profile.is_slow_speaker:
-            # Habla lenta: pausas largas son parte del habla
+        elif profile.is_fast_speaker or profile.is_slow_speaker:
             speech_timeout = "2.5"
         elif self._consecutive_retries >= 2:
-            # Múltiples reintentos: algo falla, dar más tiempo
             speech_timeout = "2.5"
         else:
-            speech_timeout = "2.0"  # Default mejorado
+            speech_timeout = long_to  # numérico si el env lo fija explícitamente
 
         # ── timeout total ──
         if profile.is_slow_speaker:
@@ -332,44 +338,47 @@ class AdaptiveEndpointController:
         }
 
 
-def _get_contextual_hints(state: str) -> str:
+# Hints FOCALIZADOS. Twilio diluye el boost fonético cuando la lista es larga
+# (50+ términos): cada hint compite y el peso por término cae. Mantener ≤15
+# términos ALTAMENTE relevantes maximiza el boost de los barrios que el STT
+# falla. Para los barrios problemáticos se incluyen variantes fonéticas (varias
+# grafías) para dar al motor más superficie de match sobre audio PSTN degradado.
+_CAPTURE_HINTS = (
+    "Pubenza,Pubensa,Pubencia,"          # Pubenza (el más fallado en prod)
+    "Centro,"
+    "Campanario,Campanaryo,"
+    "Los Sauces,"
+    "Yanaconas,Yanakonas,"
+    "Valle del Ortigal,El Ortigal,"
+    "María Oriente,"
+    "Pandiguando,"
+    "Belalcázar,"
+    "Yambitará"
+)  # ~15 términos
+
+
+def _get_contextual_hints(state: str, detected_barrio: Optional[str] = None) -> str:
     """
-    Genera hints de vocabulario contextuales según el estado.
-    Twilio usa esto para mejorar el reconocimiento de términos esperados.
+    Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos).
+
+    - Estados de captura (waiting_origin / waiting_dest_or_skip): los 10-12
+      barrios más solicitados de Popayán + variantes fonéticas de los que el STT
+      nunca reconoce (Pubenza, Campanario, Yanaconas, Ortigal…).
+    - Estados de confirmación: solo sí/no/correcto/exacto + el barrio ya
+      detectado en sesión (para reforzar su reconocimiento si lo re-dicta).
     """
-    base_hints = (
-        "calle,carrera,barrio,con,esquina,norte,sur,número,"
-        "los sauces,maría oriente,alfonso lópez,pandiguando,yanaconas,"
-        "campanario,la esmeralda,belalcázar,los comuneros,pueblillo,yambitará,"
-        "camilo torres,valle del ortigal,ortigal,polideportivo,"
-        "modelo,loma linda,prados del norte,santa clara,pubenza,el recuerdo,"
-        "bello horizonte,el tablazo,la primavera,villa del norte,san ignacio,"
-        "los ángeles,pinares,san fernando,bolívar,ciudad jardín,"
-        "los hoyos,la estancia,villa mercedes,el prado,los álamos,la pamba,"
-        "berlín,las ferias,la campiña,santa mónica,la floresta,los andes,"
-        "valparaíso,primero de mayo,sindical,calicanto,limonar,"
-        "las palmas,nazaret,chapinero,nuevo popayán,la libertad,santa librada,"
-        "el libertador,el triunfo,popular,llano largo,kennedy,la sombrilla,"
-        "lomas de granada,la capitana,cinco de abril,maría occidente,"
-        "pomona,el uvo,las américas,santa rosa,los tejares,el cadillal,"
-        "retiro alto,la colina,versalles,la paz sur,jorge eliécer gaitán,"
-        "torres del río,provitec,el jardín,zaguan,la alameda,"
-        "centro,parque caldas,torre del reloj,puente del humilladero,"
-        "catedral,universidad del cauca,unicauca,sena,"
-        "hospital san josé,clínica la estancia,terminal,aeropuerto,"
-        "galería,estadio,coliseo,morro de tulcán,polideportivo,"
-        "centro comercial campanario,terra plaza,anarkos,éxito,olímpica,"
-        "julumito,la yunga,calibío,poblazón,las guacas,pisojé,popayán"
-    )
+    if state in ("confirming_origin", "confirming_destination", "confirming_dest"):
+        base = "sí,no,correcto,exacto"
+        if detected_barrio:
+            return f"{base},{detected_barrio.strip()}"
+        return base
 
     if state == "waiting_dest_or_skip":
-        # En estado de destino, también añadir respuestas de "no destino"
-        return base_hints + ",no,sí,claro,conductor,le digo"
+        # Captura de destino: mismos barrios + "no" (declinar destino).
+        return _CAPTURE_HINTS + ",no"
 
-    if state in ("confirming_origin", "confirming_destination"):
-        return base_hints + ",sí,no,correcto,exacto,afirmativo,negativo"
-
-    return base_hints
+    # waiting_origin y default
+    return _CAPTURE_HINTS
 
 
 # ── Pipeline de procesamiento de turno ───────────────────────────────────────
