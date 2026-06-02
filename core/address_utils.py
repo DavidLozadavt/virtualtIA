@@ -757,8 +757,8 @@ def extract_pickup_address(text: str) -> Tuple[Optional[str], Optional[str]]:
     ):
         return normalize_colombian_address(t_stripped), None
 
-    # Texto no vacío sin nomenclatura → posible nombre de lugar o barrio
-    if len(t_stripped) > 3:
+    # Texto sin nomenclatura → solo aceptar si parece un lugar real
+    if len(t_stripped) > 3 and looks_like_place(t_stripped):
         return t_stripped, None
 
     return None, None
@@ -767,7 +767,7 @@ def extract_pickup_address(text: str) -> Tuple[Optional[str], Optional[str]]:
 def extract_destination_address(text: str) -> Tuple[Optional[str], Optional[str]]:
     """Extrae dirección de destino del texto libre."""
     t_stripped = _strip_preamble(text)
-    if len(t_stripped) > 3:
+    if len(t_stripped) > 3 and looks_like_place(t_stripped):
         return t_stripped, None
     return None, None
 
