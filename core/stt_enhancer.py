@@ -111,6 +111,13 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "pubensa":           "pubenza",
     "pubenza":           "pubenza",
     "pubensas":          "pubenza",
+    "pubencia":          "pubenza",
+    "povensa":           "pubenza",
+    # Mishears reales observados en logs de producción para "Pubenza" sobre
+    # audio PSTN degradado ("...para la fuerza" / "...la prensa" = "para Pubenza").
+    # En este IVR de taxi el referente es siempre un barrio, no la acepción común.
+    "la fuerza":         "pubenza",
+    "la prensa":         "pubenza",
     "yanaconaz":         "yanaconas",
     "yanakonas":         "yanaconas",
     "llanaconas":        "yanaconas",
@@ -118,6 +125,7 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "pandeguando":       "pandiguando",
     "pandigando":        "pandiguando",
     "pandi guando":      "pandiguando",
+    "pandeiguando":      "pandiguando",
     "esmeraldaaa":       "la esmeralda",
     "esmeraldas":        "la esmeralda",
     "esmeralda":         "la esmeralda",
@@ -125,9 +133,16 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "belalcasar":        "belalcázar",
     "belalcazar":        "belalcázar",
     "belal casar":       "belalcázar",
+    "belal cazar":       "belalcázar",
+    "valle del ortigal": "valle del ortigal",   # self-entry → exact match exits early, no subcadena cascade
     "ortigal":           "valle del ortigal",
     "el ortigal":        "valle del ortigal",
     "valle ortigal":     "valle del ortigal",
+    "valle del hostiga": "valle del ortigal",   # STT mishear
+    "valle hostiga":     "valle del ortigal",
+    "valle del ostiga":  "valle del ortigal",
+    "valle del osti":    "valle del ortigal",
+    "valle del ortiga":  "valle del ortigal",
     "polidepor":         "polideportivo",
     "polidepotivo":      "polideportivo",
     "los sause":         "los sauces",
@@ -139,6 +154,9 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "alfonso lopes":     "alfonso lópez",
     "camilo tor":        "camilo torres",
     "yambitara":         "yambitará",
+    "jambitara":         "yambitará",
+    "jambitará":         "yambitará",
+    "yanbitara":         "yambitará",
     "loma linda":        "loma linda",
     "berlín":            "berlín",
     "berling":           "berlín",
@@ -251,12 +269,15 @@ def correct_stt_errors(text: str) -> str:
     if t_lower in POPAYAN_STT_CORRECTIONS:
         return POPAYAN_STT_CORRECTIONS[t_lower]
 
-    # 2. Subcadenas — reemplaza la parte errónea dentro de una frase más larga
+    # 2. Subcadenas — reemplaza la parte errónea dentro de una frase más larga.
+    #    Guard: saltar si la forma correcta YA está en el resultado — evita
+    #    doble-reemplazo en cascada (ej: "el ortigal" ⊂ "valle del ortigal"
+    #    causaba "valle dvalle del valle del ortigal").
     result = t_lower
     for wrong, right in sorted(
         POPAYAN_STT_CORRECTIONS.items(), key=lambda x: len(x[0]), reverse=True
     ):
-        if wrong in result:
+        if wrong in result and right.lower() not in result:
             result = result.replace(wrong, right)
 
     # 3. Normalización de abreviaturas de calle
@@ -564,6 +585,72 @@ def expand_number_words_in_streets(text: str) -> str:
         return f"{street} {num}"
 
     return _STREET_NUM_CONTEXT_RE.sub(replace_street_num, text)
+
+
+_STREET_LETTER_BLACKLIST = frozenset({
+    # palabras españolas comunes que NO son códigos de nomenclatura
+    "numero", "número", "norte", "sur", "este", "oeste", "entre", "con",
+    "de", "del", "la", "el", "los", "las", "por", "barrio", "esquina",
+    "bis", "interior", "edificio", "torre", "piso", "apto", "apartamento",
+    "local", "oficina", "casa", "bloque", "manzana", "lote",
+})
+
+
+def repair_mangled_street_address(text: str) -> str:
+    """
+    Repara direcciones callejeras mangled por STT.
+    'carrera 4 a eb 1728' → 'carrera 4a # 17b 28'
+    'calle 5 a 12 34' → 'calle 5a # 12 34'
+    Detecta: (calle|carrera) + número + letra(s) cortas + número(s) mangled
+    NO aplica si la "letra" es una palabra española común (número, norte, etc.)
+    """
+    t = text.strip()
+
+    # Patrón: (calle|carrera) + número + espacio? + letra(s) + espacio + número(s) mangled
+    pattern = r'((?:calle|carrera|cl|cra|cr|kr|kra|k)\s+\d+)\s+([a-záéíóú]+(?:\s+[a-záéíóú]+)*)\s+(\d+)'
+    match = re.search(pattern, t, re.IGNORECASE)
+
+    if match:
+        letters_raw = match.group(2).strip().lower()
+        # Si la "letra" es una palabra española, no es código de nomenclatura — ignorar
+        if letters_raw in _STREET_LETTER_BLACKLIST or len(letters_raw) > 4:
+            return t
+
+        prefix = match.group(1)
+        letters = match.group(2)
+        numbers = match.group(3)
+
+        # Limpiar letras: "a eb" → "ae", "a e b" → "ae"
+        # "eb" es STT mangling de "b" (letra del apartamento) o parte de "ae"
+        # Primero: unir espacios → "aeb"
+        clean_letters = re.sub(r'\s+', '', letters.lower())
+        # Si es "aeb" → "ae" (STT separó "ae" en "a eb")
+        if clean_letters == "aeb":
+            clean_letters = "ae"
+        elif clean_letters.endswith("eb"):
+            # "xeb" → "xb" (eb es mangling de b)
+            clean_letters = clean_letters[:-2] + "b"
+        elif clean_letters.startswith("e"):
+            # "eb" → "b"
+            clean_letters = clean_letters[1:]
+
+        # Intentar separar números mangled: "1728" → "17b 28" o "17 28"
+        # Si hay 4+ dígitos, probablemente son 2 números
+        if len(numbers) >= 4:
+            # Dividir a la mitad: "1728" → "17" y "28"
+            mid = len(numbers) // 2
+            num1 = numbers[:mid]
+            num2 = numbers[mid:]
+            repaired = f"{prefix}{clean_letters} # {num1}b {num2}"
+        elif len(numbers) == 3:
+            # "172" → "17" y "2"
+            repaired = f"{prefix}{clean_letters} # {numbers[:2]} {numbers[2:]}"
+        else:
+            repaired = f"{prefix}{clean_letters} # {numbers}"
+
+        t = t[:match.start()] + repaired + t[match.end():]
+
+    return t
 
 
 # ── Detección de calidad de audio ─────────────────────────────────────────────

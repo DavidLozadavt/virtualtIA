@@ -1294,6 +1294,10 @@ STT_PHONETIC_MAP: Dict[str, str] = {
     "pandigando": "Pandiguando",
     "pandigwando": "Pandiguando",
     "pandiguandoo": "Pandiguando",
+    "pandy huando": "Pandiguando",
+    "pandi guando": "Pandiguando",
+    "pandiwando": "Pandiguando",
+    "pandiguan": "Pandiguando",
     "la ximena": "La Ximena",
     "laximena": "La Ximena",
     "la jimena": "La Ximena",
@@ -1352,92 +1356,92 @@ STT_PHONETIC_MAP: Dict[str, str] = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# REFERENCIAS COLOQUIALES
+# REFERENCIAS COLOQUIALES — Frase coloquial → Nombre canónico
 # ══════════════════════════════════════════════════════════════════════════════
 
-COLLOQUIAL_REFERENCES: Dict[str, Tuple[float, float]] = {
-    "por campanario": (2.4645, -76.5985),
-    "abajo de campanario": (2.4648, -76.5988),
-    "arriba de campanario": (2.4642, -76.5982),
-    "entrada campanario": (2.4643, -76.5987),
-    "por el terminal": (2.4530, -76.5960),
-    "frente al terminal": (2.4529, -76.5961),
-    "al lado del terminal": (2.4531, -76.5962),
-    "por el estadio": (2.4475, -76.6095),
-    "frente al estadio": (2.4474, -76.6094),
-    "por la galería": (2.4438, -76.6158),
-    "al lado de la galería": (2.4437, -76.6157),
-    "frente a la galería": (2.4439, -76.6159),
-    "detrás de la galería": (2.4436, -76.6156),
-    "por pandiguando": (2.4470, -76.6172),
-    "bajando de yanaconas": (2.4401, -76.5961),
-    "subiendo al morro": (2.4432, -76.6088),
-    "por la esmeralda": (2.4439, -76.6158),
-    "por los semáforos de la esmeralda": (2.4440, -76.6158),
-    "semáforos de la esmeralda": (2.4440, -76.6158),
-    "por el sena norte": (2.4610, -76.5985),
-    "sena norte": (2.4610, -76.5985),
-    "la bomba de yanaconas": (2.4400, -76.5960),
-    "el olímpica del centro": (2.4435, -76.6040),
-    "el éxito": (2.4500, -76.6030),
-    "frente al éxito": (2.4499, -76.6031),
-    "al lado del éxito": (2.4501, -76.6029),
-    "detrás del hospital san josé": (2.4378, -76.6068),
-    "frente al hospital": (2.4381, -76.6070),
-    "saliendo del hospital": (2.4380, -76.6071),
-    "subiendo a belén": (2.4393, -76.6095),
-    "bajando de belén": (2.4394, -76.6094),
-    "por belén": (2.4395, -76.6095),
-    "por la universidad": (2.4445, -76.6065),
-    "frente a la unicauca": (2.4444, -76.6066),
-    "detrás de la unicauca": (2.4446, -76.6064),
-    "por el aeropuerto": (2.4550, -76.5850),
-    "saliendo al aeropuerto": (2.4549, -76.5851),
-    "vía al aeropuerto": (2.4550, -76.5870),
-    "por la panamericana": (2.4660, -76.5960),
-    "en la panamericana": (2.4660, -76.5960),
-    "la y de pomona": (2.4396, -76.6145),
-    "entrada a pomona": (2.4395, -76.6146),
-    "por pomona": (2.4401, -76.6141),
-    "por obando": (2.4471, -76.6186),
-    "sector obando": (2.4471, -76.6185),
-    "por llano largo": (2.4476, -76.6191),
-    "por la cañada": (2.4481, -76.6196),
-    "los semáforos del norte": (2.4603, -76.5990),
-    "semáforos panamericana": (2.4660, -76.5961),
-    "la bomba de pandiguando": (2.4468, -76.6170),
-    "al lado de la gobernación": (2.4418, -76.6059),
-    "frente a la alcaldía": (2.4420, -76.6055),
-    "por el parque caldas": (2.4419, -76.6063),
-    "alrededor del parque": (2.4419, -76.6063),
-    "por el centro": (2.4419, -76.6063),
-    "por la torre del reloj": (2.4413, -76.6074),
-    "al frente del reloj": (2.4412, -76.6074),
-    "debajo del puente": (2.4407, -76.6081),
-    "encima del puente": (2.4408, -76.6079),
-    "por el humilladero": (2.4407, -76.6080),
-    "por comfacauca": (2.4480, -76.6000),
-    "frente a comfacauca": (2.4479, -76.6001),
-    "las torres comfacauca": (2.4478, -76.5998),
-    "diagonal al banco": (2.4420, -76.6062),
-    "por los juzgados": (2.4416, -76.6063),
-    "por la fiscalía": (2.4428, -76.6062),
-    "cañadas de brujas": (2.4676, -76.5916),
-    "por torres": (2.4600, -76.6400),
-    "vía a torres": (2.4580, -76.6380),
-    "vía al norte": (2.4700, -76.5980),
-    "carretera al norte": (2.4700, -76.5980),
-    "panamericana sur": (2.4200, -76.6040),
-    "vía al sur": (2.4200, -76.6040),
-    "salida al sur": (2.4200, -76.6041),
-    "entrando a popayán": (2.4650, -76.5960),
-    "saliendo de popayán": (2.4660, -76.5955),
-    "por alfonsol": (2.4381, -76.6111),
-    "por alfonso": (2.4381, -76.6111),
-    "barrio el centro": (2.4419, -76.6063),
-    "por los cerillos": (2.3900, -76.6100),
-    "camino a julumito": (2.4200, -76.6250),
-    "vía a la rejoya": (2.4400, -76.6480),
+COLLOQUIAL_REFERENCES: Dict[str, str] = {
+    "por campanario": "Centro Comercial Campanario",
+    "abajo de campanario": "Centro Comercial Campanario",
+    "arriba de campanario": "Centro Comercial Campanario",
+    "entrada campanario": "Centro Comercial Campanario",
+    "por el terminal": "Terminal de Transporte Popayán",
+    "frente al terminal": "Terminal de Transporte Popayán",
+    "al lado del terminal": "Terminal de Transporte Popayán",
+    "por el estadio": "Estadio Ciro López",
+    "frente al estadio": "Estadio Ciro López",
+    "por la galería": "Galería La Esmeralda",
+    "al lado de la galería": "Galería La Esmeralda",
+    "frente a la galería": "Galería La Esmeralda",
+    "detrás de la galería": "Galería La Esmeralda",
+    "por pandiguando": "Pandiguando",
+    "bajando de yanaconas": "Yanaconas",
+    "subiendo al morro": "Morro de Tulcán",
+    "por la esmeralda": "La Esmeralda",
+    "por los semáforos de la esmeralda": "La Esmeralda",
+    "semáforos de la esmeralda": "La Esmeralda",
+    "por el sena norte": "SENA Norte",
+    "sena norte": "SENA Norte",
+    "la bomba de yanaconas": "Yanaconas",
+    "el olímpica del centro": "Supermercado Olímpica Centro",
+    "el éxito": "Almacenes Éxito Centro",
+    "frente al éxito": "Almacenes Éxito Centro",
+    "al lado del éxito": "Almacenes Éxito Centro",
+    "detrás del hospital san josé": "Hospital Universitario San José",
+    "frente al hospital": "Hospital Universitario San José",
+    "saliendo del hospital": "Hospital Universitario San José",
+    "subiendo a belén": "Santuario de Belén",
+    "bajando de belén": "Santuario de Belén",
+    "por belén": "Santuario de Belén",
+    "por la universidad": "Universidad del Cauca",
+    "frente a la unicauca": "Universidad del Cauca",
+    "detrás de la unicauca": "Universidad del Cauca",
+    "por el aeropuerto": "Aeropuerto Guillermo León Valencia",
+    "saliendo al aeropuerto": "Aeropuerto Guillermo León Valencia",
+    "vía al aeropuerto": "Aeropuerto Guillermo León Valencia",
+    "por la panamericana": "Centro Comercial Campanario",
+    "en la panamericana": "Centro Comercial Campanario",
+    "la y de pomona": "Pomona",
+    "entrada a pomona": "Pomona",
+    "por pomona": "Pomona",
+    "por obando": "José María Obando",
+    "sector obando": "José María Obando",
+    "por llano largo": "Llano Largo",
+    "por la cañada": "La Cañada",
+    "los semáforos del norte": "SENA Norte",
+    "semáforos panamericana": "Centro Comercial Campanario",
+    "la bomba de pandiguando": "Pandiguando",
+    "al lado de la gobernación": "Gobernación del Cauca",
+    "frente a la alcaldía": "Alcaldía de Popayán",
+    "por el parque caldas": "Parque Caldas",
+    "alrededor del parque": "Parque Caldas",
+    "por el centro": "Centro",
+    "por la torre del reloj": "Torre del Reloj",
+    "al frente del reloj": "Torre del Reloj",
+    "debajo del puente": "Puente del Humilladero",
+    "encima del puente": "Puente del Humilladero",
+    "por el humilladero": "Puente del Humilladero",
+    "por comfacauca": "Comfacauca Sede Principal",
+    "frente a comfacauca": "Comfacauca Sede Principal",
+    "las torres comfacauca": "Torres de Comfacauca",
+    "diagonal al banco": "Parque Caldas",
+    "por los juzgados": "Juzgados Popayán",
+    "por la fiscalía": "Fiscalía General",
+    "cañadas de brujas": "Canales de Brujas",
+    "por torres": "Torres",
+    "vía a torres": "Torres",
+    "vía al norte": "SENA Norte",
+    "carretera al norte": "SENA Norte",
+    "panamericana sur": "Olímpica Sur",
+    "vía al sur": "Olímpica Sur",
+    "salida al sur": "Olímpica Sur",
+    "entrando a popayán": "Centro Comercial Campanario",
+    "saliendo de popayán": "Centro Comercial Campanario",
+    "por alfonsol": "Alfonso López",
+    "por alfonso": "Alfonso López",
+    "barrio el centro": "Centro",
+    "por los cerillos": "Los Cerrillos",
+    "camino a julumito": "Julumito",
+    "vía a la rejoya": "La Rejoya",
 }
 
 
@@ -1550,6 +1554,11 @@ def _build_alias_index():
     global _ALIAS_INDEX, _ALIAS_INDEX_BUILT
     pairs: List[Tuple[str, str, Tuple[float, float]]] = []
 
+    def _get_coords(name):
+        return (ALL_BARRIOS.get(name)
+                or LANDMARKS.get(name)
+                or CORREGIMIENTOS.get(name))
+
     for name, coords in ALL_BARRIOS.items():
         norm = _normalize_text(name)
         pairs.append((norm, name, coords))
@@ -1557,7 +1566,7 @@ def _build_alias_index():
             pairs.append((f"{prefix} {norm}", name, coords))
 
     for canonical, alias_list in BARRIO_ALIASES.items():
-        coords = ALL_BARRIOS.get(canonical) or LANDMARKS.get(canonical)
+        coords = _get_coords(canonical)
         if coords is None:
             continue
         for alias in alias_list:
@@ -1586,15 +1595,16 @@ def _build_alias_index():
             alias_norm = _normalize_text(alias)
             pairs.append((alias_norm, canonical, coords))
 
-    for phrase, coords in COLLOQUIAL_REFERENCES.items():
+    # COLLOQUIAL_REFERENCES: Dict[str, str] — phrase → canonical_name
+    for phrase, canonical in COLLOQUIAL_REFERENCES.items():
         norm = _normalize_text(phrase)
-        pairs.append((norm, phrase, coords))
+        coords = _get_coords(canonical)
+        if coords:
+            pairs.append((norm, canonical, coords))
 
     for stt_variant, canonical in STT_PHONETIC_MAP.items():
         norm = _normalize_text(stt_variant)
-        coords = (ALL_BARRIOS.get(canonical)
-                  or LANDMARKS.get(canonical)
-                  or CORREGIMIENTOS.get(canonical))
+        coords = _get_coords(canonical)
         if coords:
             pairs.append((norm, canonical, coords))
 
@@ -1708,6 +1718,134 @@ def _estimate_coords_from_street(address: str) -> Optional[Tuple[float, float, s
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RESOLUCIÓN DE NOMBRE CANÓNICO
+# ══════════════════════════════════════════════════════════════════════════════
+
+def resolve_canonical(query: str) -> Optional[str]:
+    """
+    Resuelve texto libre del usuario a un nombre canónico (sin coordenadas).
+
+    Pipeline:
+    1. Aplica STT_PHONETIC_MAP
+    2. Busca en BARRIO_ALIASES (exact match normalizado)
+    3. Busca en COLLOQUIAL_REFERENCES
+    4. Fuzzy match por bigrams (umbral 0.45) sobre nombres canónicos
+    5. Extrae landmark de frases compuestas con patrones espaciales
+    6. Si ningún patrón funciona, retorna None
+    """
+    if not query or len(query.strip()) < 2:
+        return None
+
+    _ensure_index()
+    q = query.strip()
+    q_low = q.lower()
+    q_norm = _normalize_text(q)
+
+    # Bloquear palabras genéricas
+    generic_words = {"taxi", "taxis", "domicilio", "servicio", "movil", "móvil"}
+    if q_norm in generic_words:
+        return None
+
+    # 1. STT_PHONETIC_MAP
+    for stt_variant, canonical in STT_PHONETIC_MAP.items():
+        if q_low == stt_variant or q_low.startswith(stt_variant + " ") or q_low.endswith(" " + stt_variant):
+            return canonical
+        if q_norm == _normalize_text(stt_variant):
+            return canonical
+
+    # 2. BARRIO_ALIASES — exact match normalizado
+    for canonical, aliases in BARRIO_ALIASES.items():
+        if _normalize_text(canonical) == q_norm:
+            return canonical
+        for alias in aliases:
+            if _normalize_text(alias) == q_norm:
+                return canonical
+
+    # 3. COLLOQUIAL_REFERENCES — exact match
+    for phrase, canonical in COLLOQUIAL_REFERENCES.items():
+        if _normalize_text(phrase) == q_norm:
+            return canonical
+
+    # 3b. COLLOQUIAL_REFERENCES — parcial (la frase está contenida en el input o viceversa)
+    for phrase, canonical in COLLOQUIAL_REFERENCES.items():
+        phrase_norm = _normalize_text(phrase)
+        if phrase_norm in q_norm or q_norm in phrase_norm:
+            return canonical
+
+    # 4. Fuzzy match por bigrams sobre todos los nombres canónicos (umbral 0.45)
+    # Primero, intentar sin prefijos comunes ("barrio X" → "X")
+    prefix_pattern = r'^(?:barrio|sector|urbanizacion|etapa|conjunto|residencial|los|las|el|la)\s+'
+    q_no_prefix = re.sub(prefix_pattern, '', q_norm, flags=re.IGNORECASE).strip()
+
+    all_canonicals = set(ALL_BARRIOS.keys()) | set(LANDMARKS.keys()) | set(CORREGIMIENTOS.keys())
+    # Probar fuzzy match tanto con texto original como sin prefijo
+    for q_fuzzy in [q_no_prefix, q_norm]:
+        if len(q_fuzzy) >= 3:
+            q_bigrams = set(q_fuzzy[i:i+2] for i in range(len(q_fuzzy) - 1))
+            if q_bigrams:
+                best_canonical = None
+                best_score = 0.0
+                for name in all_canonicals:
+                    name_norm = _normalize_text(name)
+                    name_bigrams = set(name_norm[i:i+2] for i in range(len(name_norm) - 1))
+                    if not name_bigrams:
+                        continue
+                    union = q_bigrams | name_bigrams
+                    inter = q_bigrams & name_bigrams
+                    score = len(inter) / len(union) if union else 0.0
+                    if score >= 0.45 and score > best_score:
+                        best_score = score
+                        best_canonical = name
+                if best_canonical:
+                    return best_canonical
+
+    # 5. Extraer landmark de frases compuestas con patrones espaciales
+    spatial_patterns = [
+        # "esquina de X con Y" → extraer X
+        (r'(?:(?:esquina|esq)\s+(?:de|del|la|el)\s+)(.+?)\s+(?:con|y|de)\s+', 1),
+        # "frente a/al X" → extraer X
+        (r'frente\s+(?:a|al|a\s+la|a\s+el)\s+(.+)', 1),
+        # "al lado de X" → extraer X
+        (r'al\s+lado\s+(?:de|del|de\s+la|de\s+el)\s+(.+)', 1),
+        # "detrás de X" → extraer X
+        (r'detras\s+(?:de|del|de\s+la|de\s+el)\s+(.+)', 1),
+        (r'detras\s+(?:de|del|de\s+la|de\s+el)\s+(.+)', 1),
+        # "cerca de/al X" → extraer X
+        (r'cerca\s+(?:de|del|al|a\s+la|a\s+el)\s+(.+)', 1),
+        # "por el/la X" → extraer X
+        (r'por\s+(?:el|la|los|las)\s+(.+)', 1),
+        # "a una cuadra de X" → extraer X
+        (r'a\s+una\s+cuadra\s+(?:de|del)\s+(.+)', 1),
+        # "subiendo/bajando a X" → extraer X
+        (r'(?:subiendo|bajando)\s+(?:a|al|a\s+la|a\s+el)\s+(.+)', 1),
+        # "en X, en la esquina" → extraer X
+        (r'en\s+(.+?),\s*en\s+la\s+esquina', 1),
+        # "en la esquina de X" → extraer X
+        (r'en\s+la\s+esquina\s+(?:de|del)\s+(.+)', 1),
+    ]
+
+    for pattern, group_idx in spatial_patterns:
+        match = re.search(pattern, q_norm, re.IGNORECASE)
+        if match:
+            landmark_text = match.group(group_idx).strip()
+            # Limpiar preposiciones finales
+            landmark_text = re.sub(r'\s+(?:con|y|de|del|en|para)$', '', landmark_text).strip()
+            if len(landmark_text) >= 3:
+                # Intentar resolver el landmark extraído
+                inner = resolve_canonical(landmark_text)
+                if inner:
+                    return inner
+
+    # 6. Si el texto contiene un nombre conocido embebido, intentar extraerlo
+    for name in all_canonicals:
+        name_norm = _normalize_text(name)
+        if len(name_norm) >= 4 and name_norm in q_norm:
+            return name
+
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GEOCODIFICACIÓN LOCAL
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1744,19 +1882,27 @@ def geocode_local(query: str) -> Optional[Tuple[float, float, str]]:
 
     # 2. Referencias coloquiales exactas
     query_norm_coll = _normalize_text(query_strip)
-    for phrase, coords in COLLOQUIAL_REFERENCES.items():
+    for phrase, canonical in COLLOQUIAL_REFERENCES.items():
         if _normalize_text(phrase) == query_norm_coll:
-            logger.info(f"[GEODATA] Coloquial: {query!r} → {phrase}")
-            return (coords[0], coords[1], f"{phrase}, Popayán, Cauca, Colombia")
+            coords = (ALL_BARRIOS.get(canonical)
+                      or LANDMARKS.get(canonical)
+                      or CORREGIMIENTOS.get(canonical))
+            if coords:
+                logger.info(f"[GEODATA] Coloquial: {query!r} → {canonical}")
+                return (coords[0], coords[1], f"{canonical}, Popayán, Cauca, Colombia")
     # Check if the query contains street/carrera nomenclature with a number.
     is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|transversal|tr|diagonal|diag|avenida|av|kr|kra)\s*\d+', query_strip.lower()))
 
     if not is_street:
-        for phrase, coords in COLLOQUIAL_REFERENCES.items():
+        for phrase, canonical in COLLOQUIAL_REFERENCES.items():
             phrase_norm = _normalize_text(phrase)
             if phrase_norm in query_norm_coll or query_norm_coll in phrase_norm:
-                logger.info(f"[GEODATA] Coloquial parcial: {query!r} → {phrase}")
-                return (coords[0], coords[1], f"{phrase}, Popayán, Cauca, Colombia")
+                coords = (ALL_BARRIOS.get(canonical)
+                          or LANDMARKS.get(canonical)
+                          or CORREGIMIENTOS.get(canonical))
+                if coords:
+                    logger.info(f"[GEODATA] Coloquial parcial: {query!r} → {canonical}")
+                    return (coords[0], coords[1], f"{canonical}, Popayán, Cauca, Colombia")
 
     query_norm = _normalize_text(query_strip)
 
@@ -1791,16 +1937,12 @@ def geocode_local(query: str) -> Optional[Tuple[float, float, str]]:
         logger.info(f"[GEODATA] Parcial: {query!r} → {canonical}")
         return (coords[0], coords[1], display)
 
-    # 5. Nomenclatura
-    street_result = _estimate_coords_from_street(query_strip)
-    if street_result:
-        return street_result
-
-    normalized_addr = _normalize_address_advanced(query_strip)
-    if normalized_addr != query_strip.lower().strip():
-        street_result = _estimate_coords_from_street(normalized_addr)
-        if street_result:
-            return street_result
+    # 5. Nomenclatura — NO usar coordenadas hardcodeadas para calles
+    #    Dejar que las APIs (Nominatim/Google) geocodifiquen direcciones reales
+    #    Solo retornar None para que el pipeline use geocoder_service
+    if is_street:
+        logger.info(f"[GEODATA] Street detected, deferring to API geocoding: {query!r}")
+        return None
 
     logger.info(f"[GEODATA] Sin coincidencia local: {query!r}")
     return None
@@ -1866,11 +2008,14 @@ def validate_location_exists(query: str) -> dict:
                 "canonical_name": name, "comuna": None, "coords": coords, "suggestion": None,
             }
 
-    for phrase, coords in COLLOQUIAL_REFERENCES.items():
+    for phrase, canonical in COLLOQUIAL_REFERENCES.items():
         if _normalize_text(phrase) == query_norm or query_norm in _normalize_text(phrase):
+            coords = (ALL_BARRIOS.get(canonical)
+                      or LANDMARKS.get(canonical)
+                      or CORREGIMIENTOS.get(canonical))
             return {
                 "exists": True, "confidence": "medium", "type": "coloquial",
-                "canonical_name": phrase, "comuna": None, "coords": coords, "suggestion": None,
+                "canonical_name": canonical, "comuna": None, "coords": coords, "suggestion": None,
             }
 
     street_result = _estimate_coords_from_street(query)
