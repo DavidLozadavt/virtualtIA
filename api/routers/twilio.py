@@ -1158,8 +1158,9 @@ async def _create_service(
             )
 
         return True, (
-            "Listo, ya te busco un taxi. "
-            "El conductor te llama en un momento. ¡Que te vaya bien!"
+            "Te enviaremos los datos del conductor por WhatsApp "
+            "y en un momento él se comunica contigo. "
+            "¡Que tengas un excelente viaje!"
         )
 
     except httpx.TimeoutException:
@@ -1766,7 +1767,7 @@ async def process_speech(request: Request):
             if not ASK_DESTINATION:
                 sess.state = STATE_CREATING_SERVICE
                 return _twiml_response(
-                    await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                    await _twiml_redirect(action_url, "Un momento por favor...")
                 )
 
             sess.state = STATE_WAITING_DEST_OR_SKIP
@@ -1862,7 +1863,7 @@ async def process_speech(request: Request):
                 if not ASK_DESTINATION:
                     sess.state = STATE_CREATING_SERVICE
                     return _twiml_response(
-                        await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                        await _twiml_redirect(action_url, "Un momento por favor...")
                     )
                 sess.state = STATE_WAITING_DEST_OR_SKIP
                 msg = f"Listo, te recogemos en {sess.origen_text or local}. ¿A dónde vas, o se lo cuentas al conductor?"
@@ -1893,7 +1894,7 @@ async def process_speech(request: Request):
             if not ASK_DESTINATION:
                 sess.state = STATE_CREATING_SERVICE
                 return _twiml_response(
-                    await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                    await _twiml_redirect(action_url, "Un momento por favor...")
                 )
             sess.state = STATE_WAITING_DEST_OR_SKIP
             msg = f"Listo, te recogemos en {sess.origen_text}. ¿Me dices a dónde vas, o se lo cuentas al conductor?"
@@ -2056,7 +2057,7 @@ async def process_speech(request: Request):
         if is_no is False or indirect_decline:
             sess.state = STATE_CREATING_SERVICE
             return _twiml_response(
-                await _twiml_redirect(action_url, "Procesando tu solicitud...")
+                await _twiml_redirect(action_url, "Un momento por favor...")
             )
 
         # Tratar como destino
@@ -2120,7 +2121,7 @@ async def process_speech(request: Request):
             # User confirmed destination → create service
             sess.state = STATE_CREATING_SERVICE
             return _twiml_response(
-                await _twiml_redirect(action_url, "Perfecto, procesando tu solicitud...")
+                await _twiml_redirect(action_url, "Un momento por favor...")
             )
 
         if is_yes is False:
