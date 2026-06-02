@@ -38,6 +38,7 @@ from core.stt_enhancer import (
     correct_stt_errors,
     expand_number_words_in_streets,
     fuzzy_match_location,
+    repair_mangled_street_address,
     resolve_human_reference,
     strip_accents,
     POPAYAN_STT_CORRECTIONS,
@@ -65,9 +66,12 @@ from core.address_utils import (
     _is_correction_request,
     _is_repeat_request,
     _try_local_match,
+    looks_like_place,
     normalize_address,
-    _nominatim_geocode_async,
+    normalize_colombian_address,
 )
+from core.geocoder_service import geocode, run_pipeline, handle_user_context
+from core.geo_types import GeoSessionState
 from core.llm_utils import (
     get_async_openai_client as _get_async_openai,
     get_model as _get_model,
@@ -131,6 +135,49 @@ def _twilio_gather_timeout() -> int:
     return _cfg_int("TWILIO_GATHER_TIMEOUT", 25)
 
 
+# ── Configuración de reconocimiento de voz (Twilio Speech) ────────────────────
+# Optimizado para audio telefónico colombiano. Todo configurable por env para
+# poder ajustar el modelo en producción SIN tocar código (solo .env + reinicio).
+#
+# Modelos disponibles en Twilio <Gather speechModel=...>:
+#   googlev2               → premium, soporta es-CO, robusto en ruido (DEFAULT)
+#   phone_call             → modelo telefónico (requiere enhanced="true"); en
+#                            español usar language es-US (es-CO NO está en la
+#                            lista enhanced). Probar si googlev2 no convence.
+#   deepgram_nova-2/-3     → premium alternativo, muy bueno en español LATAM
+#   experimental_conversations → el anterior; peor en audio telefónico real
+#
+# `enhanced="true"` SOLO aplica a phone_call. Para los demás se omite.
+
+def _twilio_speech_model() -> str:
+    return _cfg("TWILIO_SPEECH_MODEL", "googlev2")
+
+
+def _twilio_speech_language() -> str:
+    return _cfg("TWILIO_SPEECH_LANGUAGE", "es-CO")
+
+
+def _twilio_speech_enhanced() -> bool:
+    # Solo relevante para phone_call. Acepta "true"/"false".
+    return _cfg("TWILIO_SPEECH_ENHANCED", "true").lower() in ("true", "1", "yes")
+
+
+def _build_speech_attrs() -> str:
+    """
+    Construye los atributos de reconocimiento de voz del <Gather>.
+
+    Centraliza modelo/idioma/enhanced para que TODOS los Gather usen la misma
+    config telefónica óptima. `enhanced` se emite solo cuando el modelo es
+    phone_call (Twilio lo ignora/rechaza en otros modelos).
+    """
+    model = _twilio_speech_model()
+    lang = _twilio_speech_language()
+    attrs = f' language="{lang}" speechModel="{model}"'
+    if model == "phone_call" and _twilio_speech_enhanced():
+        attrs += ' enhanced="true"'
+    return attrs
+
+
 def _max_silence() -> int:
     return _cfg_int("MAX_SILENCE_BEFORE_HANGUP", 3)
 
@@ -139,15 +186,39 @@ def _gather_action_url() -> str:
     return _cfg("TWILIO_GATHER_ACTION_URL", "")
 
 
+def _twilio_enable_partial() -> bool:
+    """
+    partialResultCallback (/partial_speech) — DESACTIVADO por defecto.
+
+    Razón: cada turno dispara ~15-20 callbacks parciales; cada uno corre trabajo
+    CPU SÍNCRONO en el event loop (correct_stt_errors ordena ~150 entradas,
+    resolve_human_reference hace fuzzy sobre todos los landmarks, infer_intent).
+    Con 2+ llamadas simultáneas satura el único event loop → una llamada "pausa"
+    a la otra. Además hoy es funcionalmente inerte (solo loguea INTERRUPT; el
+    barge-in real vía Twilio REST no está implementado).
+
+    Reactivar SOLO cuando se implemente barge-in real: TWILIO_ENABLE_PARTIAL=true
+    """
+    return _cfg("TWILIO_ENABLE_PARTIAL", "false").lower() in ("true", "1", "yes")
+
+
 # ── Estados de la máquina de estados ─────────────────────────────────────────
 
-STATE_WAITING_ORIGIN = "waiting_origin"
-STATE_CONFIRMING_ORIGIN = "confirming_origin"
+STATE_WAITING_ORIGIN      = "waiting_origin"
+STATE_WAITING_GEO_CONTEXT = "waiting_geo_context"   # pipeline en CONTEXT_GATHERING
+STATE_CONFIRMING_ORIGIN   = "confirming_origin"
 STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
-STATE_CONFIRMING_DEST = "confirming_dest"
-STATE_SERVICE_CREATED = "service_created"
-STATE_CREATING_SERVICE = "creating_service"
-STATE_FINISHED = "finished"
+STATE_CONFIRMING_DEST     = "confirming_dest"
+STATE_SERVICE_CREATED     = "service_created"
+STATE_CREATING_SERVICE    = "creating_service"
+STATE_FINISHED            = "finished"
+
+# ── Feature flag: preguntar destino ──────────────────────────────────────────
+# Cuando es False, el sistema crea el servicio inmediatamente después de
+# confirmar el origen, sin preguntar a dónde va el pasajero.
+# Para re-habilitar: cambiar a True. El estado STATE_WAITING_DEST_OR_SKIP
+# y STATE_CONFIRMING_DEST siguen implementados y funcionan normalmente.
+ASK_DESTINATION = False
 
 SESSION_TTL_SEC = int(os.getenv("CALL_SESSION_TTL_SEC", "7200"))
 
@@ -178,6 +249,8 @@ class CallSession:
     intent_detector: Optional[PartialIntentDetector] = None
     turn_processor: Optional[TurnProcessor] = None
     retry_count: int = 0  # Reintentos consecutivos en el mismo estado
+    geo_origin: GeoSessionState = field(default_factory=GeoSessionState)
+    geo_dest:   GeoSessionState = field(default_factory=GeoSessionState)
 
     def __post_init__(self):
         self.memory = ConversationMemory(self.call_sid)
@@ -272,7 +345,7 @@ async def _twiml_gather_message(
     speech_timeout: str = "1.5",
     gather_timeout: int = 25,
     hints: Optional[str] = None,
-    enable_partial: bool = True,
+    enable_partial: Optional[bool] = None,
 ) -> str:
     """
     Construye TwiML <Gather> con:
@@ -284,6 +357,8 @@ async def _twiml_gather_message(
     """
     if hints is None:
         hints = _get_contextual_hints("waiting_origin")
+    if enable_partial is None:
+        enable_partial = _twilio_enable_partial()
 
     # Intentar generar audio con la voz real de Lyra
     audio_bytes = await _generate_tts_audio(msg)
@@ -309,10 +384,10 @@ async def _twiml_gather_message(
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
-        f'<Gather input="speech" language="es-CO"'
+        f'<Gather input="speech"'
+        f"{_build_speech_attrs()}"
         f' speechTimeout="{speech_timeout}"'
         f' timeout="{gather_timeout}"'
-        f' speechModel="experimental_conversations"'
         f' action="{action_url}" method="POST"'
         f"{partial_attr}"
         f' profanityFilter="false"'
@@ -619,6 +694,9 @@ def preprocess_stt(text: str, confidence: float = 1.0) -> str:
     # 4. Números-palabra en contexto de calle: "calle quince" → "calle 15"
     t = expand_number_words_in_streets(t)
 
+    # 4b. Reparar direcciones mangled: "carrera 4 a eb 1728" → "carrera 4a # 17b 28"
+    t = repair_mangled_street_address(t)
+
     # 5. Correcciones STT específicas de Popayán
     t = correct_stt_errors(t)
 
@@ -628,10 +706,31 @@ def preprocess_stt(text: str, confidence: float = 1.0) -> str:
     return t
 
 
+# Señales de que el texto YA contiene una dirección/lugar útil. Si Twilio
+# transcribió esto, oyó algo procesable — no hay que pedir que repita.
+_ADDRESS_SIGNAL_RE = re.compile(
+    r"\d|#|\b(calle|carrera|cra|cr|cl|kr|kra|diagonal|diag|transversal|tr|"
+    r"avenida|av|barrio|sector|conjunto|urbanizaci[oó]n|manzana|"
+    r"norte|sur|oriente|occidente)\b",
+    re.IGNORECASE,
+)
+
+
 def classify_speech_quality(
     text: str, confidence: float, profile: AudioQualityProfile
 ) -> str:
-    """Clasifica calidad teniendo en cuenta el perfil de audio de la llamada."""
+    """
+    Clasifica la calidad del turno de voz.
+
+    Filosofía (corregida): Twilio YA hizo VAD + STT. Si devolvió texto, oyó algo.
+    Confiamos en el TEXTO, no en el `Confidence` (que Twilio reporta de forma
+    poco fiable — frecuentemente 0.00 en transcripciones correctas). La confianza
+    es solo un desempate, NUNCA una barrera que obligue al usuario a repetir o a
+    subir la voz.
+
+    "low" se reserva para ruido real: 1 token corto sin contenido. Todo lo que
+    parezca dirección/lugar o frase con varias palabras se procesa.
+    """
     t = (text or "").strip()
 
     if not t or len(t) < 2:
@@ -640,323 +739,156 @@ def classify_speech_quality(
     word_count = len(t.split())
     t_clean = re.sub(r"[^\w\s]", "", t.lower()).strip()
 
-    # Respuestas cortas explícitas: siempre high
+    # Respuestas cortas explícitas (sí/no/ok...) → siempre procesables
     if t_clean in {
-        "no",
-        "si",
-        "sí",
-        "sip",
-        "nop",
-        "ok",
-        "vale",
-        "dale",
-        "listo",
-        "bueno",
-        "ya",
-        "claro",
-        "exacto",
-        "correcto",
-        "afirmativo",
-        "negativo",
+        "no", "si", "sí", "sip", "nop", "ok", "vale", "dale", "listo",
+        "bueno", "ya", "claro", "exacto", "correcto", "afirmativo", "negativo",
     }:
         return "high"
 
-    # Si la llamada es consistentemente ruidosa, ser más tolerante
-    if profile.is_noisy_call:
-        if confidence >= 0.30 or word_count >= 4:
-            return "medium"
-        return "low"
-
-    # Normal
-    if confidence >= 0.65 or word_count >= 6:
+    # Texto con señal de dirección/lugar (número, calle, barrio, sector...) →
+    # Twilio transcribió contenido útil sin importar la confianza reportada.
+    if _ADDRESS_SIGNAL_RE.search(t_clean):
         return "high"
-    if 0.35 <= confidence < 0.65 and word_count >= 3:
-        return "medium"
-    if confidence < 0.35 and word_count < 4:
-        return "low"
 
-    return "medium"
+    # Frase con varias palabras reales → procesable.
+    if word_count >= 3:
+        return "high"
+
+    # 2 palabras → procesar (puede ser "los sauces", "santa teresa", etc.)
+    if word_count == 2:
+        return "medium"
+
+    # 1 sola palabra: si parece nombre de lugar (>=4 letras) la intentamos;
+    # si es un token corto/ruido ("eh", "mmm", "ah") → low.
+    if len(t_clean) >= 4:
+        return "medium"
+
+    return "low"
 
 
 # ── Extracción de direcciones ─────────────────────────────────────────────────
 
 
-async def extract_pickup_address(user_text: str) -> Tuple[Optional[str], str]:
+_STREET_KW_RE = re.compile(
+    r"\b(calle|carrera|cra|cr|cl|kr|kra|transversal|tr|diagonal|diag|avenida|av)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_address_span(text: str) -> str:
     """
-    Extrae dirección de recogida.
-    Pipeline: preamble strip → local match → referencia humana → LLM
+    Recorta el ruido conversacional dejando solo la dirección.
+
+    El geocoder NO debe recibir "muy buenas tardes quisiera un móvil para aquí
+    para la calle 16 # 366" — solo "calle 16 # 366". Devuelve el texto desde la
+    primera palabra-clave vial en adelante; si no hay, devuelve el texto igual.
+    """
+    if not text:
+        return text
+    m = _STREET_KW_RE.search(text)
+    if m and m.start() > 0:
+        return text[m.start():].strip()
+    return text
+
+
+async def extract_address(user_text: str, role: str = "origen") -> Tuple[Optional[str], str]:
+    """
+    Pipeline unificado de extracción. role = "origen" | "destino"
+    Retorna (canonical_name, hint_message)
     """
     # 1. Strip preamble
     cleaned = _strip_preamble(user_text)
 
-    # 2. Referencia humana ("por el éxito", "frente a la galería")
+    # 2. Detectar si hay nomenclatura de calle con número
+    has_street = bool(re.search(
+        r'(?:calle|carrera|cl|cra|cr|transversal|tr|diagonal|diag|avenida|av|kr|kra)\s*[\da-záéíóú]',
+        cleaned.lower()
+    ))
+
+    # 3. Referencia humana ("por el éxito", "frente a la galería")
     human_ref = resolve_human_reference(cleaned) or resolve_human_reference(user_text)
     if human_ref and human_ref.get("canonical"):
+        # Si el texto ALSO contiene dirección de calle, mantener la dirección
+        # (recortando el ruido conversacional previo a la palabra-clave vial).
+        if has_street:
+            span = _extract_address_span(cleaned)
+            logger.info(f"[EXTRACT] Human ref + street → address span: {span!r}")
+            return span, ""
         logger.info(f"[EXTRACT] Human ref: {user_text!r} → {human_ref['canonical']!r}")
         return human_ref["canonical"], ""
 
-    # 3. Local match (barrios/calles conocidas)
+    # 4. Local match (stub → siempre None; mantenido por compatibilidad de flujo)
     for candidate in (cleaned, user_text):
         local = _try_local_match(candidate)
         if local:
-            logger.info(f"[EXTRACT] Local match origin: {local!r}")
+            logger.info(f"[EXTRACT] Local match {role}: {local!r}")
             return local, ""
 
-    # 4. LLM (solo si no hay match local)
+    # 5. Si hay dirección de calle, recortar ruido conversacional y retornar.
+    if has_street:
+        span = _extract_address_span(cleaned)
+        logger.info(f"[EXTRACT] Street address span: {span!r}")
+        return span, ""
+
+    # 6. LLM con prompt simplificado (solo si no hay match local)
     client = _get_async_openai()
     if not client:
         fb = user_text.strip()
-        return (fb if len(fb) > 3 else None), "¿Dónde te recogemos en Popayán?"
+        if role == "origen":
+            return (fb if len(fb) > 3 else None), "¿Dónde te recogemos en Popayán?"
+        else:
+            return (fb if len(fb) > 2 else None), "¿A dónde vas en Popayán?"
 
     model = _get_model()
-    prompt = f"""ROL:
-Eres un motor de resolución de ubicaciones geográficas para Popayán, Colombia. Tu función es idéntica a la de Google Maps: tomar una mención de lugar —exacta, parcial, coloquial o con errores tipográficos— y devolver la ubicación más precisa y específica posible, no una zona general.
-
-(Extrae SOLO el punto de RECOGIDA / ORIGEN. Si el usuario dice 'de X a Y', el origen es X.)
-
-BASE DE CONOCIMIENTO LOCAL OBLIGATORIA (POPAYÁN):
-- Hospital Susana López de Valencia: Cl. 14, 18
-- Valle del ortigal: 2.4603913005798788, -76.63971248137291
-- Sena norte: 2.4829669540145356, -76.56233437579733
-- Sena centro: SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca (2.441584217876181, -76.6028230716416)
-
-REGLAS CRÍTICAS:
-
-1. EXACTITUD ANTES QUE GENERALIZACIÓN
-   - Nunca devuelvas una zona genérica ("centro", "norte", "sur") si existe un lugar específico que coincida.
-   - "centro comercial campanario" → Centro Comercial Campanario (Av. Panamericana con Cl 5), NO "zona centro".
-   - "centro comercial terraplaza" → Centro Comercial Teraplaza (Transversal 9, barrio Bolívar), NO "zona centro".
-   - "hospital susana" → Hospital Susana López de Valencia (Cl 24 con Cra 6), NO Hospital San José ni genérico.
-
-2. FUZZY MATCHING CON PRIORIDAD AL NOMBRE MÁS PARECIDO
-   - Compara el input contra tu base de lugares con similitud fonética y de caracteres.
-   - Prioridad: coincidencia de nombre propio > tipo de lugar > zona.
-   - "hospital susana" → score alto para "Susana López" (nombre propio presente), score bajo para "San José".
-   - "campanario" → score alto para "Campanario" (nombre exacto en la cadena), score bajo para genéricos.
-   - Si el input contiene una palabra única y distintiva (nombre propio, marca, apellido), ESA palabra es el identificador principal.
-   - También integra las zonas comunes, como sena centro, sena norte, etc.
-
-3. TIPOS DE LUGAR — NUNCA COLAPSES LA JERARQUÍA
-   - Si el usuario dice "centro comercial X", busca centros comerciales, no el "centro" de la ciudad.
-   - Si el usuario dice "hospital X", busca hospitales/clínicas, no zonas médicas genéricas.
-   - Si el usuario dice "colegio X" o "universidad X", busca instituciones educativas específicas.
-   - El tipo de lugar actúa como filtro duro antes de hacer fuzzy matching.
-
-4. FORMATO DE RESPUESTA
-   Devuelve siempre un objeto JSON con:
-   {{
-     "nombre_oficial": "...",
-     "direccion": "...",
-     "barrio": "...",
-     "latitud": ...,
-     "longitud": ...,
-     "confianza": "alta|media|baja",
-     "input_recibido": "...",
-     "nota": "..."
-   }}
-   Responde ÚNICA Y EXCLUSIVAMENTE con el JSON, sin texto adicional.
-
-5. MANEJO DE AMBIGÜEDAD
-   - Si hay 2 o más matches con confianza similar, devuelve un array con los candidatos ordenados por score.
-   - Nunca elijas silenciosamente el lugar incorrecto. Es mejor retornar candidatos que dar una ubicación equivocada.
-   - Si la confianza es "baja", incluye en "nota" qué información adicional ayudaría a desambiguar.
-
-6. EJEMPLOS DE COMPORTAMIENTO ESPERADO
-   Input: "hospital susana"
-   ✅ Hospital Susana López de Valencia — Cl 24 #6-39
-   ❌ Hospital San José (nombre propio diferente)
-
-   Input: "campanario"
-   ✅ Centro Comercial Campanario — Av. Panamericana
-   ❌ "zona centro de Popayán"
-
-   Input: "terraplaza"
-   ✅ Centro Comercial Teraplaza — Tv 9 # 4N-25
-   ❌ "centro comercial en el centro"
-
-   Input: "la 14 del sur"
-   ✅ Almacenes 14 — Av. Panamericana Sur
-   ❌ "zona sur de Popayán"
-
-INPUT DEL USUARIO:
-"{user_text}"
-"""
+    prompt = (
+        "Eres un asistente de taxi en Popayán, Colombia.\n"
+        f"El usuario dijo: '{user_text}'\n"
+        f"Extrae SOLO el nombre del lugar de {role} como texto limpio.\n"
+        "Sin JSON, sin explicaciones, solo el nombre.\n"
+        "Si el usuario dio una dirección con número (ej: carrera 5 # 12-34), retorna la dirección COMPLETA.\n"
+        "Si el usuario dio solo un barrio o punto de referencia, retorna solo ese nombre.\n"
+        "Ejemplos:\n"
+        "- 'recógeme en la torre del reloj' → Torre del Reloj\n"
+        "- 'estoy en carrera 5 # 12-34 barrio Modelo' → Carrera 5 # 12-34\n"
+        "- 'campanario' → Centro Comercial Campanario\n"
+        "Lugar:"
+    )
 
     try:
         result = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            timeout=5.0,
+            max_tokens=60,
+            timeout=4.0,
         )
-        content = result.choices[0].message.content or "{}"
-        
-        content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
+        raw = (result.choices[0].message.content or "").strip()
 
-        data = json.loads(content)
-        
-        if isinstance(data, list):
-            data = data[0] if len(data) > 0 else {}
-            
-        origen = data.get("nombre_oficial")
-
-        if not origen or str(origen).strip().lower() in ("null", "none", ""):
-            origen = data.get("direccion")
-
-        if not origen or str(origen).strip().lower() in ("null", "none", ""):
+        if not raw or raw.lower() in ("null", "none", ""):
             fb = user_text.strip()
-            return (
-                fb if len(fb) >= 4 else None
-            ), "¿Dónde te recogemos? Dime el barrio o la calle."
+            if role == "origen":
+                return (fb if len(fb) >= 4 else None), "¿Dónde te recogemos? Dime el barrio o la calle."
+            else:
+                return (fb if len(fb) >= 3 else None), "¿Cuál es tu destino?"
 
-        return str(origen).strip(), ""
+        return raw, ""
 
     except Exception as e:
-        logger.error(f"extract_pickup_address error: {e}")
+        logger.error(f"extract_address error: {e}")
         fb = user_text.strip()
-        return (
-            fb if len(fb) >= 4 else None
-        ), "Hubo un problema técnico. Repite tu punto de recogida."
+        if role == "origen":
+            return (fb if len(fb) >= 4 else None), "¿Dónde te recogemos? Dime el barrio o la calle."
+        else:
+            return (fb if len(fb) >= 3 else None), "Repite el destino, por favor."
+
+
+# Mantener compatibilidad con código existente que llame a las funciones anteriores
+async def extract_pickup_address(user_text: str) -> Tuple[Optional[str], str]:
+    return await extract_address(user_text, role="origen")
 
 
 async def extract_destination_address(user_text: str) -> Tuple[Optional[str], str]:
-    """Extrae dirección de destino. Mismo pipeline que origen."""
-    cleaned = _strip_preamble(user_text)
-
-    human_ref = resolve_human_reference(cleaned) or resolve_human_reference(user_text)
-    if human_ref and human_ref.get("canonical"):
-        return human_ref["canonical"], ""
-
-    for candidate in (cleaned, user_text):
-        local = _try_local_match(candidate)
-        if local:
-            logger.info(f"[EXTRACT] Local match dest: {local!r}")
-            return local, ""
-
-    client = _get_async_openai()
-    if not client:
-        fb = user_text.strip()
-        return (fb if len(fb) > 2 else None), "¿A dónde vas en Popayán?"
-
-    model = _get_model()
-    prompt = f"""ROL:
-Eres un motor de resolución de ubicaciones geográficas para Popayán, Colombia. Tu función es idéntica a la de Google Maps: tomar una mención de lugar —exacta, parcial, coloquial o con errores tipográficos— y devolver la ubicación más precisa y específica posible, no una zona general.
-
-(Extrae SOLO el DESTINO del viaje.)
-
-BASE DE CONOCIMIENTO LOCAL OBLIGATORIA (POPAYÁN):
-- Hospital Susana López de Valencia: Cl. 14, 18
-- Valle del ortigal: 2.4603913005798788, -76.63971248137291
-- Sena norte: 2.4829669540145356, -76.56233437579733
-- Sena centro: 2.441584217876181, -76.6028230716416
-
-REGLAS CRÍTICAS:
-
-1. EXACTITUD ANTES QUE GENERALIZACIÓN
-   - Nunca devuelvas una zona genérica ("centro", "norte", "sur") si existe un lugar específico que coincida.
-   - "centro comercial campanario" → Centro Comercial Campanario (Av. Panamericana con Cl 5), NO "zona centro".
-   - "centro comercial terraplaza" → Centro Comercial Teraplaza (Transversal 9, barrio Bolívar), NO "zona centro".
-   - "hospital susana" → Hospital Susana López de Valencia (Cl 24 con Cra 6), NO Hospital San José ni genérico.
-
-2. FUZZY MATCHING CON PRIORIDAD AL NOMBRE MÁS PARECIDO
-   - Compara el input contra tu base de lugares con similitud fonética y de caracteres.
-   - Prioridad: coincidencia de nombre propio > tipo de lugar > zona.
-   - "hospital susana" → score alto para "Susana López" (nombre propio presente), score bajo para "San José".
-   - "campanario" → score alto para "Campanario" (nombre exacto en la cadena), score bajo para genéricos.
-   - Si el input contiene una palabra única y distintiva (nombre propio, marca, apellido), ESA palabra es el identificador principal.
-   - También integra las zonas comunes, como sena centro, sena norte, etc.
-
-3. TIPOS DE LUGAR — NUNCA COLAPSES LA JERARQUÍA
-   - Si el usuario dice "centro comercial X", busca centros comerciales, no el "centro" de la ciudad.
-   - Si el usuario dice "hospital X", busca hospitales/clínicas, no zonas médicas genéricas.
-   - Si el usuario dice "colegio X" o "universidad X", busca instituciones educativas específicas.
-   - El tipo de lugar actúa como filtro duro antes de hacer fuzzy matching.
-
-4. FORMATO DE RESPUESTA
-   Devuelve siempre un objeto JSON con:
-   {{
-     "nombre_oficial": "...",
-     "direccion": "...",
-     "barrio": "...",
-     "latitud": ...,
-     "longitud": ...,
-     "confianza": "alta|media|baja",
-     "input_recibido": "...",
-     "nota": "..."
-   }}
-   Responde ÚNICA Y EXCLUSIVAMENTE con el JSON, sin texto adicional.
-
-5. MANEJO DE AMBIGÜEDAD
-   - Si hay 2 o más matches con confianza similar, devuelve un array con los candidatos ordenados por score.
-   - Nunca elijas silenciosamente el lugar incorrecto. Es mejor retornar candidatos que dar una ubicación equivocada.
-   - Si la confianza es "baja", incluye en "nota" qué información adicional ayudaría a desambiguar.
-
-6. EJEMPLOS DE COMPORTAMIENTO ESPERADO
-   Input: "hospital susana"
-   ✅ Hospital Susana López de Valencia — Cl 24 #6-39
-   ❌ Hospital San José (nombre propio diferente)
-
-   Input: "campanario"
-   ✅ Centro Comercial Campanario — Av. Panamericana
-   ❌ "zona centro de Popayán"
-
-   Input: "terraplaza"
-   ✅ Centro Comercial Teraplaza — Tv 9 # 4N-25
-   ❌ "centro comercial en el centro"
-
-   Input: "la 14 del sur"
-   ✅ Almacenes 14 — Av. Panamericana Sur
-   ❌ "zona sur de Popayán"
-
-INPUT DEL USUARIO:
-"{user_text}"
-"""
-
-    try:
-        result = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            timeout=5.0,
-        )
-        content = result.choices[0].message.content or "{}"
-        
-        content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-        data = json.loads(content)
-        
-        if isinstance(data, list):
-            data = data[0] if len(data) > 0 else {}
-            
-        dest = data.get("nombre_oficial")
-
-        if not dest or str(dest).strip().lower() in ("null", "none", ""):
-            dest = data.get("direccion")
-
-        if not dest or str(dest).strip().lower() in ("null", "none", ""):
-            fb = user_text.strip()
-            return (
-                fb if len(fb) >= 3 else None
-            ), "¿Cuál es tu destino? Calle, barrio o lugar conocido."
-
-        return str(dest).strip(), ""
-
-    except Exception as e:
-        logger.error(f"extract_destination_address error: {e}")
-        fb = user_text.strip()
-        return (fb if len(fb) >= 3 else None), "Repite el destino, por favor."
+    return await extract_address(user_text, role="destino")
 
 
 # ── Backend ───────────────────────────────────────────────────────────────────
@@ -967,24 +899,19 @@ async def _create_service(
     origen: str,
     destino: Optional[str],
     http_client: Optional[httpx.AsyncClient] = None,
+    origen_barrio: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Geocodifica y crea el servicio de taxi en el backend Laravel."""
-    origen_norm = normalize_address(origen)
+    from core.geocoder_service import geocode
+
+    # geocode() ya aplica normalize_colombian_address internamente.
+    # Pasar barrio mejora precisión de Google Maps para nomenclaturas colombianas
+    # (ej: "Cl. 16 # 3CE-41, Santa Teresa" vs solo "Cl. 16 # 3CE-41")
+    g_o = await geocode(origen, barrio=origen_barrio)
 
     if destino:
-        dest_norm = normalize_address(destino)
-        g_o, g_d = await asyncio.gather(
-            _nominatim_geocode_async(origen_norm),
-            _nominatim_geocode_async(dest_norm),
-        )
-        if not g_o:
-            g_o = await _nominatim_geocode_async(origen)
-        if not g_d:
-            g_d = await _nominatim_geocode_async(destino)
+        g_d = await geocode(destino)
     else:
-        g_o = await _nominatim_geocode_async(
-            origen_norm
-        ) or await _nominatim_geocode_async(origen)
         g_d = None
 
     if not g_o:
@@ -1049,10 +976,8 @@ async def _create_service(
             )
 
         return True, (
-            "¡Listo! Ya te estamos buscando un móvil. "
-            "En un momento se comunica el conductor contigo. "
-            "Además, te vamos a enviar un mensaje de confirmación por WhatsApp con los datos de quien tomó tu servicio. "
-            "¡Que tengas un excelente viaje! Fue un placer atenderte."
+            "Listo, ya te busco un taxi. "
+            "El conductor te llama en un momento. ¡Que te vaya bien!"
         )
 
     except httpx.TimeoutException:
@@ -1113,10 +1038,10 @@ async def voice(request: Request):
     )
 
     saludo = (
-        "¡Hola! Recuerda que también puedes solicitar tu servicio a través de WhatsApp en el número. "
-        "3  11... 5  44... 48... 51. ..."
+        #"¡Hola! Recuerda que también puedes solicitar tu servicio a través de WhatsApp en el número. "
+        #"3  11... 5  44... 48... 51. ..."
         "Soy Lyra, tu asistente de TaxBelalcazar. "
-        "Y con gusto te ayudaré a gestionar tu servicio. "
+        #"Y con gusto te ayudaré a gestionar tu servicio. "
         "Cuéntame, ¿en dónde te recogemos hoy?"
     )
     sess.last_message = saludo
@@ -1245,8 +1170,7 @@ async def process_speech(request: Request):
     ):
         return _twiml_response(
             await _twiml_say_hangup(
-                "¡Muchas gracias por comunicarte con TaxBelalcazar! "
-                "Fue un placer atenderte. ¡Que tengas un excelente día!",
+                "¡Gracias por llamar! ¡Que te vaya bien!",
                 action_url,
             )
         )
@@ -1294,9 +1218,12 @@ async def process_speech(request: Request):
             sess.origen_text or "",
             sess.destino_text,
             http_client=http_client,
+            origen_barrio=sess.origen_barrio,
         )
         if not ok:
-            sess.state = STATE_WAITING_DEST_OR_SKIP
+            sess.state = STATE_WAITING_ORIGIN
+            sess.origen_text = None
+            sess.origen_barrio = None
             sess.last_message = closing
             return _twiml_response(
                 await _twiml_gather_adaptive(
@@ -1336,9 +1263,7 @@ async def process_speech(request: Request):
             reset_session(call_sid)
             return _twiml_response(
                 await _twiml_say_hangup(
-                    "Parece que no puedes hablar en este momento. "
-                    "No te preocupes, llámanos cuando gustes, estaremos encantados de atenderte. "
-                    "¡Que tengas un excelente día!",
+                    "No te escucho. Llámanos cuando puedas. ¡Hasta luego!",
                     action_url,
                 )
             )
@@ -1347,11 +1272,15 @@ async def process_speech(request: Request):
             (STATE_WAITING_ORIGIN, 1): "¿Sigues ahí? Dime dónde te recojo.",
             (STATE_WAITING_ORIGIN, 2): "¿Dónde estás en Popayán?",
             (STATE_WAITING_DEST_OR_SKIP, 1): "No te escuché. ¿A dónde vas? O dime no.",
-            (STATE_WAITING_DEST_OR_SKIP, 2): "Dime el destino o dime no.",
+            (STATE_WAITING_DEST_OR_SKIP, 2): "¿A dónde vas? O dime no si le cuentas al conductor.",
             (
                 STATE_CONFIRMING_ORIGIN,
                 1,
             ): f"¿Confirmas {sess.origen_barrio or 'esa zona'}? Di sí o no.",
+            (
+                STATE_CONFIRMING_DEST,
+                1,
+            ): f"¿Confirmas que vas a {sess.destino_text or 'ese destino'}? Di sí o no.",
             (
                 STATE_CONFIRMING_DEST,
                 1,
@@ -1388,6 +1317,12 @@ async def process_speech(request: Request):
         sess.last_message = msg
         return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
 
+    # ── Gate de baja calidad en estados de confirmación ──
+    if speech_quality == "low" and sess.state in (STATE_CONFIRMING_ORIGIN, STATE_CONFIRMING_DEST):
+        msg = "No te escuché bien. ¿Confirmas con sí o no?"
+        sess.last_message = msg
+        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+
     # ── Calidad media: intentar match local agresivo antes de LLM ──
     if speech_quality == "medium" and sess.state in (
         STATE_WAITING_ORIGIN,
@@ -1410,27 +1345,50 @@ async def process_speech(request: Request):
     # ── ESTADO: waiting_origin ────────────────────────────────────
     if sess.state == STATE_WAITING_ORIGIN:
 
+        # Fuente de la extracción: human_ref/local match = confiable (catálogo);
+        # LLM/raw = NO confiable → se valida con looks_like_place antes de aceptar.
+        trusted_origin = False
+
         # 1. Referencia humana ("por el éxito", "frente a la galería")
         human_ref = resolve_human_reference(texto_usuario)
         if human_ref and human_ref.get("canonical"):
             origen = human_ref["canonical"]
+            trusted_origin = True
             logger.info(f"[ORIGIN] Human ref: {origen!r}")
         else:
-            # 2. Local match directo
+            # 2. Local match directo (catálogo de barrios/landmarks)
             local = _try_local_match(texto_usuario)
             if local:
                 origen = local
+                trusted_origin = True
                 logger.info(f"[ORIGIN] Local match: {origen!r}")
             else:
-                # 3. LLM extraction
+                # 3. LLM extraction (NO confiable — puede alucinar)
                 origen_llm, hint = await extract_pickup_address(texto_usuario)
                 origen = (origen_llm or texto_usuario or "").strip()
 
-        # Normalizar
+        # ── Gate anti-basura: si la extracción NO viene del catálogo/referencia,
+        #    exigir que parezca un lugar real (calle/número/barrio/landmark).
+        #    Bloquea alucinaciones del LLM tipo "tu cuenta", "fuerza", "dos".
+        if not trusted_origin and not (
+            looks_like_place(origen) or looks_like_place(texto_usuario)
+        ):
+            logger.info(f"[ORIGIN] Rejected non-place extraction: {origen!r} (raw={texto_usuario!r})")
+            sess.origen_text = None
+            msg = "Perdona, no te capté el lugar. Dime solo el barrio o la dirección donde te recogemos."
+            sess.last_message = msg
+            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+
+        # Normalizar — aplicar normalize_colombian_address para limpiar artefactos STT
+        # (ej: "4a ae" → "4ae", "carrera" → "Cra.", etc.) antes de confirmar
         if origen:
-            norm = normalize_address(origen)
-            if norm and len(norm) > len(origen) * 0.4:
-                origen = norm
+            col_norm = normalize_colombian_address(origen)
+            if col_norm and len(col_norm) >= 3:
+                origen = col_norm
+            else:
+                norm = normalize_address(origen)
+                if norm and len(norm) > len(origen) * 0.4:
+                    origen = norm
 
         sess.origen_text = origen
         sess.memory.add_location_mention(origen)
@@ -1441,55 +1399,74 @@ async def process_speech(request: Request):
             sess.last_message = msg
             return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
 
-        # Determinar si es dirección de calle (requiere confirmación de barrio)
+        # Determinar si es dirección de calle
         is_street = bool(
-            re.search(r"(?:calle|carrera|cl|cra|kr|kra)\s*\d+", origen.lower())
+            re.search(r"(?:calle|carrera|cl|cra|kr|kra|Cra|Cl)\s*\.?\s*\d+", origen)
         )
 
         if is_street:
-            # Buscar barrio más cercano para confirmar
+
+            # Intentar geocodificar con el nuevo pipeline para descubrir barrio
             try:
-                from tools.popayan_geodata import (
-                    geocode_local,
-                    get_nearby_barrios,
-                    ALL_BARRIOS,
-                    _haversine,
-                )
+                geo_result = await run_pipeline(origen, attempt=1)
+                from core.geo_types import ResolutionStatus
 
-                geo = geocode_local(origen)
-                if geo:
-                    nearby = get_nearby_barrios(geo[0], geo[1], radius_km=5.0)
-                    if not nearby:
-                        closest = min(
-                            ALL_BARRIOS.items(),
-                            key=lambda x: _haversine(geo[0], geo[1], x[1][0], x[1][1]),
-                        )
-                        nearby = [{"name": closest[0], "distance_km": 0.0}]
-
-                    if nearby:
-                        barrio_name = nearby[0]["name"]
+                if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                    barrio_name = geo_result.selected.neighborhood
+                    if barrio_name:
                         sess.origen_barrio = barrio_name
+                        sess.geo_origin.reset()
                         sess.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"Entendido, veo que es por la {origen}, en el barrio {barrio_name}. ¿Es correcto?"
+                        msg = f"Te repito: tu dirección es {origen}, barrio {barrio_name}. ¿Me confirmas?"
                         sess.last_message = msg
                         return _twiml_response(
                             await _twiml_gather_adaptive(
                                 msg, action_url, sess, short_answer=True
                             )
                         )
+                    # Resuelto pero sin barrio en metadata → confirmar sin barrio
+                    sess.geo_origin.reset()
+
+                elif geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
+                    sess.geo_origin.pending = geo_result
+                    sess.geo_origin.original_query = origen
+                    sess.geo_origin.attempt = 1
+                    sess.state = STATE_WAITING_GEO_CONTEXT
+                    geo_question = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
+                    msg = geo_question
+                    sess.last_message = msg
+                    return _twiml_response(
+                        await _twiml_gather_adaptive(msg, action_url, sess)
+                    )
+
+                elif geo_result.status == ResolutionStatus.NEEDS_DISAMBIGUATION:
+                    # Google devolvió 2+ opciones reales — preguntar al usuario
+                    sess.geo_origin.pending = geo_result
+                    sess.geo_origin.original_query = origen
+                    sess.geo_origin.attempt = 1
+                    sess.state = STATE_WAITING_GEO_CONTEXT
+                    geo_question = (
+                        geo_result.disambiguation_question
+                        or "¿En cuál barrio queda esa dirección?"
+                    )
+                    msg = geo_question
+                    sess.last_message = msg
+                    return _twiml_response(
+                        await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                    )
 
             except Exception as exc:
-                logger.warning(f"[ORIGIN] Barrio lookup failed: {exc}")
+                logger.warning(f"[ORIGIN] Pipeline geocode failed: {exc}")
 
-            # Sin barrio encontrado: preguntar directamente
+            # Sin barrio encontrado: confirmar de todas formas
             sess.state = STATE_CONFIRMING_ORIGIN
-            msg = f"Perfecto, {origen}. ¿Me podrías indicar en qué barrio queda?"
+            msg = f"te repito: tu dirección es {origen}. ¿Me confirmas?"
             sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
         # Lugar nombrado: ir a confirmación
         sess.state = STATE_CONFIRMING_ORIGIN
-        msg = f"Entendido, te recogemos en {origen}. ¿Es correcto?"
+        msg = f"te repito: el punto de recogida es {origen}. ¿Me confirmas?"
         sess.last_message = msg
         return _twiml_response(
             await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
@@ -1519,30 +1496,35 @@ async def process_speech(request: Request):
                         if dest_llm:
                             dest_candidate = dest_llm
 
-            if dest_candidate:
+            if dest_candidate and ASK_DESTINATION:
                 norm = normalize_address(dest_candidate)
                 if norm and len(norm) > len(dest_candidate) * 0.4:
                     dest_candidate = norm
                 sess.destino_text = dest_candidate
                 sess.memory.add_location_mention(dest_candidate)
-                # Confirm destination before creating service
                 sess.state = STATE_CONFIRMING_DEST
-                msg = f"¿Tu destino es {dest_candidate}? Responde sí o no."
+                msg = f"¿Te llevo a {dest_candidate}? Responde sí o no."
                 sess.last_message = msg
                 logger.info(f"[CONFIRM_ORIGIN] Destination pre-extracted, confirming: {dest_candidate!r}")
                 return _twiml_response(
                     await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
                 )
 
+            if not ASK_DESTINATION:
+                sess.state = STATE_CREATING_SERVICE
+                return _twiml_response(
+                    await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                )
+
             sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = f"¡Perfecto! Te recogemos entonces en {sess.origen_text}. ¿Tienes algún destino para tu viaje o prefieres indicárselo directamente al conductor?"
+            msg = f"Listo {sess.origen_text}. ¿Me dices a dónde vas, o se lo cuentas al conductor?"
             sess.last_message = msg
             return _twiml_response(
                 await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
             )
 
         if is_yes is False:
-            # Extraer corrección inline ("no, en el ortigal")
+            # Extraer corrección inline ("no, calle 16 # 3CE-41")
             rest = re.sub(
                 r"^(?:no|nones|negativo|nop)[,\s]*",
                 "",
@@ -1550,33 +1532,232 @@ async def process_speech(request: Request):
                 flags=re.IGNORECASE,
             ).strip()
             if len(rest) > 4:
+                # Si la corrección es una dirección de calle → re-geocodificar inline
+                rest_is_street = bool(re.search(
+                    r'(?:calle|carrera|cl|cra|kr|kra)\s*[\d]', rest.lower()
+                ))
+                if rest_is_street:
+                    new_origen = normalize_colombian_address(rest)
+                    if not new_origen or len(new_origen) < 3:
+                        new_origen = rest
+                    sess.origen_text   = new_origen
+                    sess.origen_barrio = None
+                    sess.geo_origin.reset()
+                    logger.info(f"[CONFIRM_ORIGIN] Correction detected → re-geocoding: {new_origen!r}")
+                    try:
+                        from core.geo_types import ResolutionStatus
+                        geo_result = await run_pipeline(new_origen, attempt=1)
+                        if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                            barrio_name = geo_result.selected.neighborhood
+                            sess.origen_barrio = barrio_name
+                            barrio_str = f", barrio {barrio_name}" if barrio_name else ""
+                            msg = f"Entendido. ¿La dirección es {new_origen}{barrio_str}? ¿Correcto?"
+                        elif geo_result.status in (
+                            ResolutionStatus.NEEDS_DISAMBIGUATION,
+                            ResolutionStatus.CONTEXT_GATHERING,
+                        ):
+                            sess.geo_origin.pending = geo_result
+                            sess.geo_origin.original_query = new_origen
+                            sess.geo_origin.attempt = 1
+                            sess.state = STATE_WAITING_GEO_CONTEXT
+                            msg = (
+                                geo_result.disambiguation_question
+                                or "¿En qué barrio o sector queda esa dirección?"
+                            )
+                            sess.last_message = msg
+                            return _twiml_response(
+                                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=False)
+                            )
+                        else:
+                            msg = f"Entendido. ¿La dirección es {new_origen}? ¿Correcto?"
+                    except Exception as exc:
+                        logger.warning(f"[CONFIRM_ORIGIN] re-geocode error: {exc}")
+                        msg = f"Entendido. ¿La dirección es {new_origen}? ¿Correcto?"
+                    sess.state    = STATE_CONFIRMING_ORIGIN
+                    sess.last_message = msg
+                    return _twiml_response(
+                        await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                    )
                 texto_usuario = rest
                 # Caemos al match local/LLM abajo
             else:
                 sess.state = STATE_WAITING_ORIGIN
-                msg = "Entendido. ¿En qué barrio te encuentras exactamente para ubicarte mejor?"
+                sess.origen_barrio = None
+                msg = "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección completa."
                 sess.last_message = msg
                 return _twiml_response(
                     await _twiml_gather_adaptive(msg, action_url, sess)
                 )
 
-        # Intentar match local con la respuesta del usuario
+        # ── Respuesta ni sí ni no: el usuario probablemente re-dicta o corrige
+        #    el origen (porque el bot lo había oído mal). Resolvemos contra el
+        #    catálogo local y decidimos: mismo origen → confirmar; distinto →
+        #    re-confirmar el nuevo (no despachar a ciegas).
         local = _try_local_match(texto_usuario)
         if local:
-            sess.origen_text = local
+            _cur = strip_accents((sess.origen_text or "").lower().strip())
+            _new = strip_accents(local.lower().strip())
+            _same = bool(_cur) and (
+                _cur == _new
+                or bool(fuzzy_match_location(_new, [_cur], threshold=0.80))
+            )
+
+            if _same:
+                # Re-statement del mismo origen → confirmación implícita
+                logger.info(f"[CONFIRM_ORIGIN] Restatement of same origin → confirm: {local!r}")
+                sess.memory.last_confirmed_origin = sess.origen_text or local
+                if not ASK_DESTINATION:
+                    sess.state = STATE_CREATING_SERVICE
+                    return _twiml_response(
+                        await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                    )
+                sess.state = STATE_WAITING_DEST_OR_SKIP
+                msg = f"Listo, te recogemos en {sess.origen_text or local}. ¿A dónde vas, o se lo cuentas al conductor?"
+                sess.last_message = msg
+                return _twiml_response(
+                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                )
+
+            # Origen distinto → el bot había oído mal; re-confirmar el corregido
+            logger.info(f"[CONFIRM_ORIGIN] Corrected origin via local match: {sess.origen_text!r} → {local!r}")
+            sess.origen_text   = local
+            sess.origen_barrio = None
+            sess.geo_origin.reset()
             sess.memory.add_location_mention(local)
-            sess.memory.last_confirmed_origin = local
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = f"Listo, te recogemos en {local}. ¿Tienes un destino o prefieres indicárselo al conductor?"
+            sess.state = STATE_CONFIRMING_ORIGIN
+            msg = f"Ah, {local}. ¿Te recogemos ahí? Di sí para confirmar."
             sess.last_message = msg
             return _twiml_response(
                 await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
             )
 
-        # No se pudo parsear: reparación contextual
+        # No se pudo parsear la respuesta: si ya tenemos origen con barrio conocido,
+        # tratar la respuesta ambigua como confirmación implícita para no hacer
+        # repetir al usuario innecesariamente.
+        if sess.origen_text and sess.origen_barrio:
+            logger.info(f"[CONFIRM_ORIGIN] Ambiguous response — accepting implicit confirm: {texto_usuario!r}")
+            sess.memory.last_confirmed_origin = sess.origen_text
+            if not ASK_DESTINATION:
+                sess.state = STATE_CREATING_SERVICE
+                return _twiml_response(
+                    await _twiml_redirect(action_url, "Perfecto, buscando tu taxi...")
+                )
+            sess.state = STATE_WAITING_DEST_OR_SKIP
+            msg = f"Listo, te recogemos en {sess.origen_text}. ¿Me dices a dónde vas, o se lo cuentas al conductor?"
+            sess.last_message = msg
+            return _twiml_response(
+                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+            )
+
         msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
         if sess.origen_barrio:
-            msg = f"Disculpa, no logré escucharte bien. ¿Confirmas que estás por {sess.origen_barrio}? Puedes responderme sí, o indicarme tu barrio."
+            msg = f"¿Confirmas que estás por {sess.origen_barrio}? Di sí, o dime tu barrio."
+        sess.last_message = msg
+        return _twiml_response(
+            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+        )
+
+    # ── ESTADO: waiting_geo_context ──────────────────────────────
+    # Pipeline devolvió CONTEXT_GATHERING — esperando barrio/referencia del usuario
+    if sess.state == STATE_WAITING_GEO_CONTEXT:
+        from core.geo_types import ResolutionStatus
+
+        pending   = sess.geo_origin.pending
+        orig_q    = sess.geo_origin.original_query
+        attempt   = sess.geo_origin.attempt
+
+        # ── Re-statement de dirección ──
+        # Si el usuario vuelve a decir una dirección completa (calle/carrera +
+        # número) en vez de responder el barrio, es una corrección NUEVA — no
+        # hay que enriquecer la query vieja (eso generaba basura tipo
+        # "Cl. 16 # 3C-6, es la calle 16 36"). Re-geocodificamos desde cero el
+        # span limpio de la nueva dirección.
+        restated_is_address = bool(
+            _STREET_KW_RE.search(texto_usuario) and re.search(r"\d", texto_usuario)
+        )
+        if restated_is_address:
+            new_span   = _extract_address_span(_strip_preamble(texto_usuario))
+            new_origen = normalize_colombian_address(new_span) or new_span
+            logger.info(f"[GEO_CONTEXT] Address re-stated → fresh geocode: {new_origen!r}")
+            sess.origen_text   = new_origen
+            sess.origen_barrio = None
+            sess.geo_origin.reset()
+            geo_result = await run_pipeline(new_origen, attempt=1)
+
+            if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                barrio_name = geo_result.selected.neighborhood
+                if barrio_name:
+                    sess.origen_barrio = barrio_name
+                sess.state = STATE_CONFIRMING_ORIGIN
+                barrio_str = f", barrio {barrio_name}" if barrio_name else ""
+                msg = f"te repito: tu dirección es {new_origen}{barrio_str}. ¿Me confirmas?"
+                sess.last_message = msg
+                return _twiml_response(
+                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                )
+
+            if geo_result.status == ResolutionStatus.NEEDS_DISAMBIGUATION:
+                sess.geo_origin.pending = geo_result
+                sess.geo_origin.original_query = new_origen
+                sess.geo_origin.attempt = 1
+                msg = geo_result.disambiguation_question or "¿En cuál barrio queda esa dirección?"
+                sess.last_message = msg
+                return _twiml_response(
+                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                )
+
+            # CONTEXT_GATHERING u otro → seguir pidiendo barrio para la nueva dir.
+            sess.geo_origin.pending = geo_result
+            sess.geo_origin.original_query = new_origen
+            sess.geo_origin.attempt = geo_result.attempt
+            msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
+            sess.last_message = msg
+            return _twiml_response(
+                await _twiml_gather_adaptive(msg, action_url, sess)
+            )
+
+        geo_result = await handle_user_context(
+            user_text=texto_usuario,
+            pending=pending,
+            original_query=orig_q,
+            attempt=attempt,
+        )
+        sess.geo_origin.attempt = geo_result.attempt
+
+        if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+            # Barrio: preferir metadata de Google; si falta, usar la aclaración
+            # del usuario (la cola de la query enriquecida tras el orig_q).
+            barrio_name = geo_result.selected.neighborhood
+            if not barrio_name and geo_result.query and "," in geo_result.query:
+                barrio_name = geo_result.query.rsplit(",", 1)[-1].strip() or None
+            if barrio_name:
+                sess.origen_barrio = barrio_name
+            # origen_text se mantiene como la dirección de calle original limpia
+            # (orig_q). El barrio se muestra/pasa por separado para evitar
+            # duplicarlo en la confirmación.
+            sess.origen_text = orig_q
+            sess.geo_origin.reset()
+            sess.state = STATE_CONFIRMING_ORIGIN
+            barrio_str = f", barrio {barrio_name}" if barrio_name else ""
+            msg = f"te repito: tu dirección es {orig_q}{barrio_str}. ¿Me confirmas?"
+            sess.last_message = msg
+            return _twiml_response(
+                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+            )
+
+        if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
+            sess.geo_origin.pending = geo_result
+            geo_question = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
+            sess.last_message = geo_question
+            return _twiml_response(
+                await _twiml_gather_adaptive(geo_question, action_url, sess)
+            )
+
+        # FAILED o máximo de intentos
+        sess.geo_origin.reset()
+        sess.state = STATE_CONFIRMING_ORIGIN  # confirmar sin coordenadas
+        display = sess.origen_text or orig_q
+        msg = f"te repito: el punto de recogida es {display}. ¿Me confirmas?"
         sess.last_message = msg
         return _twiml_response(
             await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
@@ -1591,7 +1772,7 @@ async def process_speech(request: Request):
             sess.origen_text = None
             sess.origen_barrio = None
             msg = (
-                "¡Claro que sí, corregimos de inmediato! Cuéntame, ¿dónde te recogemos?"
+                "¡Claro, corregimos! Cuéntame, ¿dónde te recogemos?"
             )
             sess.last_message = msg
             return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
@@ -1692,7 +1873,7 @@ async def process_speech(request: Request):
             # User rejected → ask again for destination
             sess.destino_text = None
             sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = "Sin problema. ¿Cuál es tu destino? Dímelo o di no si prefieres contarle al conductor."
+            msg = "Sin problema. ¿Cuál es tu destino? Dímelo o di no si le cuentas al conductor."
             sess.last_message = msg
             return _twiml_response(
                 await _twiml_gather_adaptive(msg, action_url, sess, short_answer=False)
@@ -1736,8 +1917,7 @@ async def process_speech(request: Request):
     # ── Fallback ──────────────────────────────────────────────────
     return _twiml_response(
         await _twiml_say_hangup(
-            "¡Muchas gracias por comunicarte con TaxBelalcazar! "
-            "Fue un placer atenderte. ¡Que tengas un excelente día!",
+            "¡Gracias por llamar! ¡Que te vaya bien!",
             action_url,
         )
     )
@@ -1909,6 +2089,12 @@ async def partial_speech(
     Las acciones reales (ej: cancelar TTS vía Twilio REST API) se harían
     de forma asíncrona en background.
     """
+    # Guard de concurrencia: si los parciales están desactivados (default),
+    # responder de inmediato sin gastar CPU en el event loop. Evita que el
+    # storm de callbacks parciales sature el loop y "pause" otras llamadas.
+    if not _twilio_enable_partial():
+        return Response(content="", media_type="text/xml")
+
     if not UnstableSpeechResult or not CallSid:
         return Response(content="", media_type="text/xml")
 

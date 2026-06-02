@@ -245,10 +245,12 @@ class ConversationRepair:
             "¿Estás por {partial}?",
             "Me parece que dijiste {partial} — ¿correcto?",
         ],
+        # Nunca culpar al usuario ni pedirle que suba la voz / vocalice. El
+        # sistema se adapta al usuario, no al revés. Pedimos un dato más simple.
         "noisy_audio": [
-            "Hay algo de ruido en la llamada. ¿Me repites solo el barrio o la calle?",
-            "No te entendí bien. ¿Solo dime el barrio?",
-            "Se escucha con interferencia. ¿Puedes hablar un poco más fuerte?",
+            "¿Me dices solo el barrio o la calle?",
+            "Para ubicarte mejor, ¿cuál es el barrio?",
+            "¿En qué barrio o calle estás?",
         ],
         "too_fast": [
             "Ibas un poco rápido. ¿Me repites la dirección despacio?",

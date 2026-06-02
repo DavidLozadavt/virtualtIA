@@ -1,8 +1,22 @@
 # core/address_utils.py
 """
-Hardened 'Fast Brain' utilities for address extraction, speech correction, and preamble stripping.
-Consolidates logic from Twilio and WhatsApp routers to ensure deterministic, low-latency performance.
+Utilidades de texto, STT y extracción de direcciones.
+
+Responsabilidades de este módulo:
+  - Normalización de nomenclatura colombiana
+  - Eliminación de preámbulos coloquiales ("hola, me regala un taxi en...")
+  - Corrección de errores STT frecuentes para Popayán
+  - Parsing de intención (sí/no, corrección, repetición)
+  - Extracción básica de dirección desde texto libre
+
+Lo que NO hace este módulo (desde refactor 2026-06-01):
+  - Geocodificación → ver core/geocoder_service.py
+  - Catálogos de barrios → eliminado (era popayan_geodata)
+  - Resolución de nombres canónicos → eliminado
+
+Ver docs/geocoding/04-files-changed.md para detalle de cambios.
 """
+
 import re
 import logging
 import httpx
@@ -18,29 +32,31 @@ from core.config import settings
 
 logger = setup_logger("lyra.core.address_utils")
 
-# ── CONSTANTS ────────────────────────────────────────────────────────────────
+# ── FILLER WORDS & PREAMBLE PATTERNS ─────────────────────────────────────────
 
 _FILLER_WORDS = {
     "me regala", "me daría", "necesito", "por favor", "un taxi", "un móvil",
     "un carro", "para", "en", "desde", "estoy en", "me encuentro en",
     "sería para", "quiero", "podría", "amiga", "amigo", "mija", "mijo",
-    "tío", "tio", "tía", "tia", "vecina", "vecino", "hola", "buenas", "buenos días", "buenas tardes",
-    "buenas noches", "qué hubo", "qhubo", "mira", "vea", "un favor",
+    "tío", "tio", "tía", "tia", "vecina", "vecino", "hola", "buenas",
+    "buenos días", "buenas tardes", "buenas noches", "qué hubo", "qhubo",
+    "mira", "vea", "un favor",
 }
 
 _PREAMBLE_PATTERNS = [
-    # Greetings — LONGER alternatives first so 'buenas noches' beats 'buenas'
     r'^(?:hola\s+)?(?:buenas\s+noches|buenas\s+tardes|buen\s+día|buenas|hola|qhubo|qué\s+hubo|amiga|amigo|vecina|vecino|mija|mijo|señor|señora),?\s*',
     r'^(?:por favor|un favor|oiga|mire|oye|disculpe|disculpa),?\s*',
     r'^(?:me\s+regala|me\s+daría|necesito|quiero|podría\s+solicitar|pídame|pídeme|solicito)\s*(?:un|el)?\s*(?:taxi|móvil|movil|carro|servicio|carrito)\s*',
     r'^(?:por\s+aquí\s+en|aquí\s+en|acá\s+en|estoy\s+en|me\s+encuentro\s+en|ubicad[ao]\s+en|estamos\s+en|en|desde)\s*',
     r'^(?:sería\s+para|es\s+para|para)\s*',
-    # Trailing filler after address
     r'\s+(?:por\s+favor|porfavor|porfa|gracias|please)\.?\s*$',
 ]
 
+# ── CORRECCIONES STT ──────────────────────────────────────────────────────────
+# Solo para corrección de texto transcrito. No son fuentes de geocodificación.
+
 _SPEECH_CORRECTIONS: Dict[str, str] = {
-    # ── "los sauces" misheard as: ──
+    # ── "los sauces" ──
     "entonces": "los sauces",
     "en sauce": "los sauces",
     "en sauces": "los sauces",
@@ -50,7 +66,7 @@ _SPEECH_CORRECTIONS: Dict[str, str] = {
     "el sauce": "los sauces",
     "los sauce": "los sauces",
     "lo sauces": "los sauces",
-    # ── "valle del ortigal" misheard as: ──
+    # ── "valle del ortigal" ──
     "valle vertical": "valle del ortigal",
     "valle del vertical": "valle del ortigal",
     "valle de ortigal": "valle del ortigal",
@@ -61,90 +77,90 @@ _SPEECH_CORRECTIONS: Dict[str, str] = {
     "valle ordinal": "valle del ortigal",
     "valle el ortigal": "valle del ortigal",
     "valle original": "valle del ortigal",
-    # ── "maría oriente" misheard as: ──
+    # ── "maría oriente" ──
     "mari oriente": "maría oriente",
     "maria de oriente": "maría oriente",
     "maria oriente": "maría oriente",
     "maría de oriente": "maría oriente",
     "la maría oriente": "maría oriente",
-    # ── "maría occidente" misheard as: ──
+    # ── "maría occidente" ──
     "maria occidente": "maría occidente",
     "mari occidente": "maría occidente",
     "maría de occidente": "maría occidente",
-    # ── "la esmeralda" misheard as: ──
+    # ── "la esmeralda" ──
     "la esmerada": "la esmeralda",
     "esmerada": "la esmeralda",
     "esmeranda": "la esmeralda",
     "la esmeralda se": "la esmeralda",
-    # ── "pandiguando" misheard as: ──
+    # ── "pandiguando" ──
     "pandi cuando": "pandiguando",
     "pan de cuando": "pandiguando",
     "pandi guando": "pandiguando",
     "pandiguandos": "pandiguando",
-    # ── "yanaconas" misheard as: ──
+    # ── "yanaconas" ──
     "yanaco más": "yanaconas",
     "yanacona": "yanaconas",
     "jana con as": "yanaconas",
     "janacona": "yanaconas",
     "yanacones": "yanaconas",
-    # ── "campanario" misheard as: ──
+    # ── "campanario" ──
     "campana río": "campanario",
     "campana rio": "campanario",
     "el campana rio": "campanario",
     "el campanarios": "campanario",
-    # ── "belalcázar" misheard as: ──
+    # ── "belalcázar" ──
     "bella alcázar": "belalcázar",
     "bella alcazar": "belalcázar",
     "belal cázar": "belalcázar",
     "belga azar": "belalcázar",
-    # ── "los comuneros" misheard as: ──
+    # ── "los comuneros" ──
     "lo comunero": "los comuneros",
     "lo comuneros": "los comuneros",
     "los comunero": "los comuneros",
-    # ── "alfonso lópez" misheard as: ──
+    # ── "alfonso lópez" ──
     "alfonzo lópez": "alfonso lópez",
     "alfonzo lopez": "alfonso lópez",
     "alfonso lope": "alfonso lópez",
     "alfonso lópe": "alfonso lópez",
-    # ── "pueblillo" misheard as: ──
+    # ── "pueblillo" ──
     "pueblo illo": "pueblillo",
     "pueblito": "pueblillo",
     "pueblo ijo": "pueblillo",
-    # ── "yambitará" misheard as: ──
+    # ── "yambitará" ──
     "jambitará": "yambitará",
     "jambitara": "yambitará",
     "jan bitara": "yambitará",
-    # ── "loma de la virgen" misheard as: ──
+    # ── "loma de la virgen" ──
     "forma de la virgen": "loma de la virgen",
     "roma de la virgen": "loma de la virgen",
     "loma la virgen": "loma de la virgen",
-    # ── "terminal" misheard as: ──
+    # ── "terminal" ──
     "la terminal": "terminal",
     "el terminal": "terminal",
-    # ── "lomas de granada" misheard as: ──
+    # ── "lomas de granada" ──
     "loma de granada": "lomas de granada",
     "lomas granada": "lomas de granada",
-    # ── "la sombrilla" misheard as: ──
+    # ── "la sombrilla" ──
     "la sombilla": "la sombrilla",
     "la sombrija": "la sombrilla",
-    # ── "cinco de abril" misheard as: ──
+    # ── "cinco de abril" ──
     "5 de abril": "cinco de abril",
     "sinco de abril": "cinco de abril",
-    # ── "la pamba" misheard as: ──
+    # ── "la pamba" ──
     "la pampa": "la pamba",
     "la bamba": "la pamba",
-    # ── "parque caldas" misheard as: ──
+    # ── "parque caldas" ──
     "parque calda": "parque caldas",
     "parque de caldas": "parque caldas",
-    # ── "valpaíso" / "valparaíso" ──
+    # ── "valparaíso" ──
     "balparaíso": "valparaíso",
     "valpa raíso": "valparaíso",
     "valpariso": "valparaíso",
     # ── "primero de mayo" ──
     "1 de mayo": "primero de mayo",
     "primer de mayo": "primero de mayo",
-    # ── Various ──
-    "kennedy": "kennedy",  # ensure it doesn't get corrected
+    # ── varios ──
+    "kennedy": "kennedy",
     "retiro al sol": "retiro alto",
     "santa en elena": "santa helena",
     "la campiñas": "la campiña",
@@ -152,24 +168,30 @@ _SPEECH_CORRECTIONS: Dict[str, str] = {
     "la florida": "la florida",
 }
 
-# ── GEOCODING (Nominatim) ────────────────────────────────────────────────────
-GEOCODE_SUFFIX = "Popayán, Cauca, Colombia"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# ── NOMINATIM (geocodificación directa — uso limitado) ───────────────────────
+# Estas funciones son wrappers síncronos para casos donde geocoder_service.py
+# no es apropiado (ej. código síncrono en stt_enhancer.py).
+# Para el pipeline principal, usar core/geocoder_service.py.
+
+GEOCODE_SUFFIX       = "Popayán, Cauca, Colombia"
+NOMINATIM_URL        = "https://nominatim.openstreetmap.org/search"
 GEOCODE_COUNTRYCODES = "co"
-GEOCODE_VIEWBOX = "-76.82,2.58,-76.42,2.32"
-GEOCODE_USER_AGENT = "lyra-intellitaxi/1.0 (contact: admin)"
+GEOCODE_VIEWBOX      = "-76.82,2.58,-76.42,2.32"
+GEOCODE_USER_AGENT   = "lyra-intellitaxi/1.0 (contact: admin)"
 
 POPAYAN_MIN_LAT, POPAYAN_MAX_LAT = 2.32, 2.58
 POPAYAN_MIN_LNG, POPAYAN_MAX_LNG = -76.82, -76.42
 
 _GEOCODE_CACHE: OrderedDict = OrderedDict()
 _GEOCODE_CACHE_LOCK = threading.Lock()
-_NOMINATIM_LOCK = threading.Lock()
+_NOMINATIM_LOCK     = threading.Lock()
 _NOMINATIM_LAST_REQ = 0.0
 GEOCODE_MIN_INTERVAL = 1.1
 
+
 def _in_popayan_bbox(lat: float, lng: float) -> bool:
     return POPAYAN_MIN_LAT <= lat <= POPAYAN_MAX_LAT and POPAYAN_MIN_LNG <= lng <= POPAYAN_MAX_LNG
+
 
 def _geocode_cache_get(key: str):
     with _GEOCODE_CACHE_LOCK:
@@ -178,6 +200,7 @@ def _geocode_cache_get(key: str):
             return _GEOCODE_CACHE[key]
     return None
 
+
 def _geocode_cache_set(key: str, val):
     with _GEOCODE_CACHE_LOCK:
         _GEOCODE_CACHE[key] = val
@@ -185,109 +208,100 @@ def _geocode_cache_set(key: str, val):
         while len(_GEOCODE_CACHE) > 256:
             _GEOCODE_CACHE.popitem(last=False)
 
+
 def _nominatim_geocode_raw(query: str) -> Optional[Tuple[float, float, str]]:
-    """Geocode a query via Nominatim only (no fallback)."""
+    """Geocodifica via Nominatim. Sin fallback a catálogos locales."""
     global _NOMINATIM_LAST_REQ
     q = (query or "").strip()
-    if not q: return None
+    if not q:
+        return None
 
     if GEOCODE_SUFFIX and GEOCODE_SUFFIX.lower() not in q.lower():
         q = f"{q}, {GEOCODE_SUFFIX}"
 
     cached = _geocode_cache_get(q)
-    if cached is not None: return cached
+    if cached is not None:
+        return cached
 
     params = {
         "q": q, "format": "json", "limit": 8, "addressdetails": 0,
-        "countrycodes": GEOCODE_COUNTRYCODES, "viewbox": GEOCODE_VIEWBOX, "bounded": "1",
+        "countrycodes": GEOCODE_COUNTRYCODES,
+        "viewbox": GEOCODE_VIEWBOX, "bounded": "1",
     }
     headers = {"User-Agent": GEOCODE_USER_AGENT, "Accept": "application/json"}
 
     try:
         for attempt in range(3):
             with _NOMINATIM_LOCK:
-                now = time.monotonic()
+                now  = time.monotonic()
                 wait = _NOMINATIM_LAST_REQ + GEOCODE_MIN_INTERVAL - now
-                if wait > 0: time.sleep(wait)
+                if wait > 0:
+                    time.sleep(wait)
                 try:
                     r = httpx.get(NOMINATIM_URL, params=params, headers=headers, timeout=5.0)
                 finally:
                     _NOMINATIM_LAST_REQ = time.monotonic()
 
-            if r.status_code == 200: break
+            if r.status_code == 200:
+                break
             if r.status_code == 429 and attempt < 2:
                 time.sleep(min(2.0 ** attempt, 10.0))
                 continue
             return None
 
         data = r.json()
-        if not isinstance(data, list) or not data: return None
+        if not isinstance(data, list) or not data:
+            return None
 
         for row in data:
             lat, lon = float(row.get("lat", 0)), float(row.get("lon", 0))
             if _in_popayan_bbox(lat, lon):
-                name = str(row.get("display_name", ""))
+                name   = str(row.get("display_name", ""))
                 result = (lat, lon, name)
                 _geocode_cache_set(q, result)
                 return result
         return None
+
     except Exception as exc:
         logger.error(f"Geocode error: {exc}")
         return None
 
-def _nominatim_geocode(query: str) -> Optional[Tuple[float, float, str]]:
-    """Geocode with local fallback (Local first, then Nominatim)."""
-    q = (query or "").strip()
-    if not q: return None
-    
-    # 1. Local geodata fallback (Fast & accurate for Popayán)
-    try:
-        from tools.popayan_geodata import geocode_local
-        local = geocode_local(q)
-        if local:
-            _geocode_cache_set(q, local)
-            return local
-    except (ImportError, Exception) as e:
-        logger.warning(f"Local geodata not available or error: {e}")
-
-    # 2. Nominatim API (Fallback for unknown places)
-    result = _nominatim_geocode_raw(q)
-    if result: return result
-
-    return None
-
 
 async def _nominatim_geocode_async(query: str) -> Optional[Tuple[float, float, str]]:
-    """Non-blocking geocode wrapper. Runs the sync geocoder in a thread pool
-    so it doesn't block Uvicorn's event loop with time.sleep() and httpx.get()."""
+    """Wrapper async del geocoder síncrono."""
     import asyncio
-    return await asyncio.to_thread(_nominatim_geocode, query)
+    return await asyncio.to_thread(_nominatim_geocode_raw, query)
+
 
 def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
-    """Reverse geocode coordinates via Nominatim."""
+    """Reverse geocode via Nominatim."""
     global _NOMINATIM_LAST_REQ
-    
+
     cache_key = f"rev_geo_{lat}_{lng}"
     cached = _geocode_cache_get(cache_key)
-    if cached is not None: return cached
+    if cached is not None:
+        return cached
 
-    params = {
-        "lat": lat, "lon": lng, "format": "json", "addressdetails": 0
-    }
+    params  = {"lat": lat, "lon": lng, "format": "json", "addressdetails": 0}
     headers = {"User-Agent": GEOCODE_USER_AGENT, "Accept": "application/json"}
 
     try:
         for attempt in range(3):
             with _NOMINATIM_LOCK:
-                now = time.monotonic()
+                now  = time.monotonic()
                 wait = _NOMINATIM_LAST_REQ + GEOCODE_MIN_INTERVAL - now
-                if wait > 0: time.sleep(wait)
+                if wait > 0:
+                    time.sleep(wait)
                 try:
-                    r = httpx.get("https://nominatim.openstreetmap.org/reverse", params=params, headers=headers, timeout=5.0)
+                    r = httpx.get(
+                        "https://nominatim.openstreetmap.org/reverse",
+                        params=params, headers=headers, timeout=5.0,
+                    )
                 finally:
                     _NOMINATIM_LAST_REQ = time.monotonic()
 
-            if r.status_code == 200: break
+            if r.status_code == 200:
+                break
             if r.status_code == 429 and attempt < 2:
                 time.sleep(min(2.0 ** attempt, 10.0))
                 continue
@@ -296,457 +310,79 @@ def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
         data = r.json()
         if "display_name" in data:
             name = str(data["display_name"])
-            name_short = name.replace(", Popayán, Cauca, Colombia", "").replace(", Centro", "").strip(", ")
+            name_short = (
+                name.replace(", Popayán, Cauca, Colombia", "")
+                    .replace(", Centro", "")
+                    .strip(", ")
+            )
             _geocode_cache_set(cache_key, name_short)
             return name_short
         return None
+
     except Exception as exc:
         logger.error(f"Reverse geocode error: {exc}")
         return None
+
 
 async def _nominatim_reverse_geocode_async(lat: float, lng: float) -> Optional[str]:
     import asyncio
     return await asyncio.to_thread(_nominatim_reverse_geocode_raw, lat, lng)
 
-POPAYAN_PLACES: dict = {
-    # ── Centros Comerciales ──
-    "Centro Comercial Campanario": [
-        "centro comercial campanario", "campanario", "el campanario",
-        "cc campanario", "c.c. campanario", "mall campanario",
-    ],
-    "Centro Comercial Terra Plaza": [
-        "centro comercial terra plaza", "terra plaza", "terraplaza",
-        "cc terra plaza", "terra", "c.c. terra plaza",
-    ],
-    "Centro Comercial Anarkos": [
-        "centro comercial anarkos", "anarkos", "cc anarkos",
-    ],
-    "Centro Comercial Plaza Colonial": [
-        "plaza colonial", "cc plaza colonial", "centro comercial plaza colonial",
-    ],
-    "Éxito": ["éxito", "exito", "almacén éxito", "almacen exito", "el éxito"],
 
-    # ── Centro Histórico y alrededores ──
-    "Centro Histórico": [
-        "centro histórico", "centro historico", "el centro histórico",
-        "el centro historico", "casco histórico", "casco antiguo",
-    ],
-    "Centro": [
-        "el centro", "centro de popayán", "centro de popayan",
-        "centro de la ciudad", "al centro", "por el centro",
-    ],
-    "Parque Caldas": [
-        "parque caldas", "parque de caldas", "el parque caldas",
-        "plaza de caldas", "caldas", "la plaza principal",
-        "el parque principal", "parque central",
-    ],
-    "Torre del Reloj": [
-        "torre del reloj", "la torre del reloj", "el reloj",
-    ],
-    "Puente del Humilladero": [
-        "puente del humilladero", "el humilladero", "puente humilladero",
-        "el puente del humilladero",
-    ],
-    "Iglesia San Francisco": [
-        "iglesia san francisco", "san francisco", "iglesia de san francisco",
-        "templo san francisco",
-    ],
-    "Iglesia Santo Domingo": [
-        "iglesia santo domingo", "santo domingo", "templo santo domingo",
-    ],
-    "Catedral Basílica": [
-        "catedral", "la catedral", "catedral basílica", "catedral basilica",
-        "iglesia catedral",
-    ],
-    "Pandiguando": ["pandiguando", "el pandiguando", "estatua pandiguando"],
-    "Morro de Tulcán": ["morro de tulcán", "morro de tulcan", "el morro", "tulcán", "tulcan"],
-    "Pueblito Patojo": ["pueblito patojo", "el pueblito patojo", "rincón payanés", "rincon payanes"],
+# Alias de compatibilidad (callers antiguos importan _nominatim_geocode)
+_nominatim_geocode = _nominatim_geocode_raw
 
-    # ── Universidades ──
-    "Universidad del Cauca": [
-        "universidad del cauca", "unicauca", "la unicauca",
-        "u del cauca", "la universidad del cauca",
-    ],
-    "Universidad Autónoma": [
-        "universidad autónoma", "universidad autonoma", "uniautónoma",
-        "uniautonoma", "la autónoma", "la autonoma",
-    ],
-    "Fundación Universitaria de Popayán": [
-        "fundación universitaria", "fundacion universitaria", "fup", "la fup",
-    ],
-    "SENA Popayán": ["sena", "el sena", "sena popayán", "sena popayan"],
-    "SENA Norte": ["sena norte", "el sena norte", "sena del norte"],
-    "SENA Centro De Comercio Y Servicios, Cl. 4 #2-80, Centro, Popayán, Cauca": ["sena centro", "el sena centro", "sena del centro"],
-    "Colegio Mayor del Cauca": [
-        "colegio mayor", "colegio mayor del cauca", "unimayor",
-    ],
-    "Universidad Antonio Nariño": [
-        "universidad antonio nariño", "universidad antonio narino",
-        "antonio nariño universidad",
-    ],
-    "Fundación Universitaria María Cano": [
-        "maría cano", "maria cano", "universidad maría cano",
-        "universidad maria cano", "fundación maría cano",
-    ],
 
-    # ── Hospitales / Clínicas ──
-    "Hospital Universitario San José": [
-        "hospital universitario san josé", "hospital universitario san jose",
-        "hospital universitario", "hospital san josé", "hospital san jose",
-        "el hospital", "san josé hospital",
-    ],
-    "Clínica La Estancia": [
-        "clínica la estancia", "clinica la estancia", "la estancia clínica",
-        "clínica estancia",
-    ],
-    "Clínica San Rafael": [
-        "clínica san rafael", "clinica san rafael", "san rafael clínica",
-    ],
-    "Clínica Santa Gracia": [
-        "clínica santa gracia", "clinica santa gracia", "santa gracia",
-    ],
-    "Hospital Susana López de Valencia": [
-        "hospital susana", "hospital susana lópez", "hospital susana lopez",
-        "susana lópez", "susana lopez", "hospital susana lópez de valencia",
-    ],
-    "Hospital María Occidente": [
-        "hospital maría occidente", "hospital maria occidente",
-    ],
-    "Cruz Roja Popayán": ["cruz roja", "la cruz roja"],
+# ── POPAYAN_PLACES — ELIMINADO ────────────────────────────────────────────────
+# Catálogo manual de barrios eliminado en refactor 2026-06-01.
+# Ver docs/geocoding/04-files-changed.md
+# La resolución de nombres de barrios ocurre via Google address_components
+# y via respuestas del usuario en CONTEXT_GATHERING (geocoder_service.py).
 
-    # ── Terminal / Aeropuerto ──
-    "Terminal de Transporte": [
-        "terminal de transporte", "terminal de transportes",
-        "la terminal", "terminal", "el terminal",
-    ],
-    "Aeropuerto Guillermo León Valencia": [
-        "aeropuerto guillermo león valencia", "aeropuerto guillermo leon valencia",
-        "aeropuerto", "el aeropuerto", "aeropuerto de popayán",
-    ],
+POPAYAN_PLACES: dict = {}  # vacío intencionalmente — no añadir entradas
 
-    # ── Parques / Plazas / Ríos ──
-    "Parque de las Aves": ["parque de las aves", "las aves"],
-    "Río Molino": ["río molino", "rio molino", "el río molino", "el rio molino"],
-    "Río Ejido": ["río ejido", "rio ejido"],
-    "Río Cauca": ["río cauca", "rio cauca"],
-    "Estadio Ciro López": [
-        "estadio ciro lópez", "estadio ciro lopez", "el estadio",
-        "estadio", "ciro lópez", "ciro lopez",
-    ],
-    "Coliseo": ["coliseo", "el coliseo", "coliseo de popayán"],
 
-    # ── Galerías / Mercados ──
-    "Galería La Esmeralda": [
-        "galería la esmeralda", "galeria la esmeralda",
-        "galería", "galeria", "la galería", "la galeria",
-        "plaza de mercado", "la plaza de mercado",
-    ],
-    "Galería de Bolívar": [
-        "galería bolívar", "galeria bolivar", "galería de bolívar",
-    ],
-
-    # ── Entidades públicas ──
-    "Gobernación del Cauca": ["gobernación", "gobernacion", "gobernación del cauca"],
-    "Alcaldía de Popayán": ["alcaldía", "alcaldia", "alcaldía de popayán"],
-    "Fiscalía": ["fiscalía", "fiscalia", "la fiscalía"],
-    "Registraduría": ["registraduría", "registraduria"],
-    "Bomberos Popayán": ["bomberos", "los bomberos", "estación de bomberos"],
-
-    # ── Barrios especiales / urbanizaciones ──
-    "Valle del Ortigal": [
-        "valle del ortigal", "el ortigal", "ortigal",
-        "barrio valle del ortigal", "urbanización valle del ortigal",
-        "conjunto valle del ortigal",
-    ],
-    "Villa del Viento": ["villa del viento", "barrio villa del viento", "villas del viento"],
-    "El Jardín": ["el jardín", "el jardin", "barrio el jardín"],
-    "Torres del Río": ["torres del río", "torres del rio", "barrio torres del río"],
-    "Rincón de la Estancia": ["rincón de la estancia", "rincon de la estancia"],
-    "Provitec": ["provitec", "barrio provitec"],
-    "Zaguan": ["zaguan", "barrio zaguan", "el zaguan"],
-
-    # ── BARRIOS COMUNA 1 (Norte / Noroccidente) ──
-    "Modelo": ["modelo", "barrio modelo", "el modelo"],
-    "Loma Linda": ["loma linda", "barrio loma linda"],
-    "Prados del Norte": ["prados del norte", "barrio prados del norte"],
-    "La Cabaña": ["la cabaña", "la cabana", "barrio la cabaña"],
-    "Santa Clara": ["santa clara", "barrio santa clara"],
-    "Casas Fiscales": ["casas fiscales", "barrio casas fiscales"],
-    "Nueva Granada": ["nueva granada", "barrio nueva granada"],
-    "Machángara": ["machángara", "machangara", "barrio machángara"],
-    "La Playa": ["la playa", "barrio la playa"],
-    "Campamento": ["campamento", "barrio campamento"],
-    "Puerta de Hierro": ["puerta de hierro", "barrio puerta de hierro"],
-    "Pubenza": ["pubenza", "barrio pubenza"],
-    "Antonio Nariño": ["antonio nariño", "antonio narino", "barrio antonio nariño"],
-    "Campobello": ["campobello", "barrio campobello"],
-    "El Recuerdo": ["el recuerdo", "barrio el recuerdo"],
-    "Belalcázar": ["belalcázar", "belalcazar", "barrio belalcázar"],
-    "Los Laureles": ["los laureles", "barrio los laureles"],
-    "Los Rosales": ["los rosales", "barrio los rosales"],
-    "Alcalá": ["alcalá", "alcala", "barrio alcalá"],
-    "Monterrosales": ["monterrosales", "barrio monterrosales"],
-    "Ciudad Capri": ["ciudad capri", "capri", "barrio capri"],
-    "Puerta del Sol": ["puerta del sol", "barrio puerta del sol"],
-
-    # ── BARRIOS COMUNA 2 (Norte) ──
-    "Pino Pardo": ["pino pardo", "barrio pino pardo"],
-    "Balcón del Norte": ["balcón del norte", "balcon del norte"],
-    "María Paz": ["maría paz", "maria paz", "barrio maría paz"],
-    "Zuldemaida": ["zuldemaida", "barrio zuldemaida"],
-    "Santiago de Cali": ["santiago de cali", "barrio santiago de cali"],
-    "Morinda": ["morinda", "barrio morinda"],
-    "El Tablazo": ["el tablazo", "barrio el tablazo"],
-    "La Florida": ["la florida", "barrio la florida"],
-    "La Primavera": ["la primavera", "barrio la primavera"],
-    "Villa del Norte": ["villa del norte", "barrio villa del norte"],
-    "El Placer": ["el placer", "barrio el placer"],
-    "Bello Horizonte": ["bello horizonte", "bellohorizonte", "barrio bello horizonte"],
-    "Cruz Roja (barrio)": ["barrio cruz roja", "sector cruz roja"],
-    "El Bambú": ["el bambú", "el bambu", "barrio el bambú"],
-    "Bella Vista": ["bella vista", "barrio bella vista", "bellavista"],
-    "San Ignacio": ["san ignacio", "barrio san ignacio"],
-    "La Arboleda": ["la arboleda", "barrio la arboleda"],
-    "La Esperanza": ["la esperanza", "barrio la esperanza"],
-    "Canterbury": ["canterbury"],
-    "Villa del Viento": ["villa del viento", "barrio villa del viento"],
-    "Los Cámbulos": ["los cámbulos", "los cambulos", "barrio los cámbulos"],
-    "El Pinar": ["el pinar", "barrio el pinar"],
-    "Guayacanes del Río": ["guayacanes del río", "guayacanes del rio", "guayacanes"],
-    "Minuto de Dios": ["minuto de dios", "barrio minuto de dios"],
-    "Chamizal": ["chamizal", "barrio chamizal", "el chamizal"],
-    "Matamoros": ["matamoros", "barrio matamoros"],
-    "Los Ángeles": ["los ángeles", "los angeles", "barrio los ángeles"],
-    "Pinares": ["pinares", "barrio pinares"],
-    "San Fernando": ["san fernando", "barrio san fernando"],
-    "Luna Blanca": ["luna blanca", "barrio luna blanca"],
-    "Urbanización La Aldea": ["la aldea", "urbanización la aldea"],
-
-    # ── BARRIOS COMUNA 3 (Oriente) ──
-    "Bolívar": ["bolívar", "bolivar", "barrio bolívar", "barrio bolivar"],
-    "Ciudad Jardín": ["ciudad jardín", "ciudad jardin", "barrio ciudad jardín"],
-    "Periodistas": ["periodistas", "barrio periodistas"],
-    "Sotará": ["sotará", "sotara", "barrio sotará"],
-    "Deportistas": ["deportistas", "barrio deportistas"],
-    "Los Hoyos": ["los hoyos", "barrio los hoyos"],
-    "Yambitará": ["yambitará", "yambitara", "barrio yambitará"],
-    "Villa Mercedes": ["villa mercedes", "barrio villa mercedes"],
-    "Yanaconas": ["yanaconas", "barrio yanaconas"],
-    "La Ximena": ["la ximena", "barrio la ximena", "ximena"],
-    "Pueblillo": ["pueblillo", "el pueblillo", "barrio pueblillo"],
-    "José Antonio Galán": ["josé antonio galán", "jose antonio galan", "galán", "galan"],
-    "Torres del Río": ["torres del río", "torres del rio"],
-    "Galicia": ["galicia", "barrio galicia"],
-    "La Estancia": ["la estancia", "barrio la estancia", "estancia"],
-    "Moravia": ["moravia", "barrio moravia"],
-    "Alicante": ["alicante", "barrio alicante"],
-    "Acacias": ["acacias", "barrio acacias", "las acacias"],
-
-    # ── BARRIOS COMUNA 4 (Centro) ──
-    "Santa Teresita": ["santa teresita", "barrio santa teresita"],
-    "Vásquez Cobo": ["vásquez cobo", "vasquez cobo", "barrio vásquez cobo"],
-    "El Prado": ["el prado", "barrio el prado"],
-    "Siglo XX": ["siglo veinte", "siglo xx", "barrio siglo xx"],
-    "Los Álamos": ["los álamos", "los alamos", "barrio los álamos"],
-    "San Rafael Viejo": ["san rafael viejo", "barrio san rafael viejo"],
-    "El Refugio": ["el refugio", "barrio el refugio", "refugio"],
-    "Liceo": ["liceo", "barrio liceo", "el liceo"],
-    "La Pamba": ["la pamba", "barrio la pamba", "pamba"],
-    "Loma de Cartagena": ["loma de cartagena", "barrio loma de cartagena"],
-    "El Empedrado": ["el empedrado", "barrio el empedrado", "empedrado"],
-    "San Camilo": ["san camilo", "barrio san camilo"],
-    "Hernando Lora": ["hernando lora", "barrio hernando lora"],
-
-    # ── BARRIOS COMUNA 5 (Oriente / Sur-Oriente) ──
-    "Avelino Ull": ["avelino ull", "barrio avelino ull", "avelino"],
-    "Los Braceros": ["los braceros", "barrio los braceros"],
-    "El Lago": ["el lago", "barrio el lago"],
-    "Berlín": ["berlín", "berlin", "barrio berlín"],
-    "Suizo": ["suizo", "barrio suizo", "el suizo"],
-    "Las Ferias": ["las ferias", "barrio las ferias"],
-    "La Campiña": ["la campiña", "la campina", "barrio la campiña"],
-    "María Oriente": ["maría oriente", "maria oriente", "barrio maría oriente", "barrio maria oriente"],
-    "Los Sauces": ["los sauces", "barrio los sauces", "sauces"],
-    "Santa Mónica": ["santa mónica", "santa monica", "barrio santa mónica"],
-    "La Floresta": ["la floresta", "barrio la floresta", "floresta"],
-    "Los Andes": ["los andes", "barrio los andes"],
-    "La Alameda": ["la alameda", "barrio la alameda", "alameda"],
-    "El Plateado": ["el plateado", "barrio el plateado", "plateado"],
-    "Villa Oriente": ["villa oriente", "barrio villa oriente"],
-    "San Andrés": ["san andrés", "san andres", "barrio san andrés"],
-    "Altos Sauces": ["altos sauces", "poblado de los altos sauces", "altos de los sauces"],
-    "Portal de Santa Mónica": ["portal de santa mónica", "portal de santa monica", "portal santa mónica"],
-
-    # ── BARRIOS COMUNA 6 (Sur / Sur-Occidente) ──
-    "Alfonso López": ["alfonso lópez", "alfonso lopez", "barrio alfonso lópez", "barrio alfonso lopez"],
-    "Valparaíso": ["valparaíso", "valparaiso", "barrio valparaíso"],
-    "Primero de Mayo": ["primero de mayo", "barrio primero de mayo", "1 de mayo"],
-    "Los Comuneros": ["los comuneros", "barrio los comuneros", "comuneros"],
-    "Loma de la Virgen": ["loma de la virgen", "barrio loma de la virgen", "la virgen"],
-    "Sindical": ["sindical", "barrio sindical"],
-    "Calicanto": ["calicanto", "barrio calicanto"],
-    "Deán Bajo": ["deán bajo", "dean bajo", "barrio deán bajo"],
-    "Gabriel García Márquez": [
-        "gabriel garcía márquez", "gabriel garcia marquez",
-        "barrio garcía márquez", "barrio garcia marquez", "garcía márquez",
-    ],
-    "Jorge Eliécer Gaitán": [
-        "jorge eliécer gaitán", "jorge eliecer gaitan",
-        "barrio gaitán", "barrio gaitan", "gaitán", "gaitan",
-    ],
-    "Limonar": ["limonar", "barrio limonar", "el limonar"],
-    "La Paz Sur": ["la paz sur", "barrio la paz sur", "la paz"],
-    "La Gran Victoria": ["la gran victoria", "barrio la gran victoria", "gran victoria"],
-    "Versalles": ["versalles", "barrio versalles"],
-    "La Ladera": ["la ladera", "barrio la ladera", "ladera"],
-    "La Colina": ["la colina", "barrio la colina", "colina"],
-    "Nuevo Japón": ["nuevo japón", "nuevo japon", "barrio nuevo japón"],
-    "Tejares de Otón": ["tejares de otón", "tejares de oton", "barrio tejares"],
-    "Las Veraneras": ["las veraneras", "veraneras", "barrio las veraneras"],
-    "Panamericano": ["panamericano", "barrio panamericano"],
-    "Camino Real": ["camino real", "barrio camino real"],
-
-    # ── BARRIOS COMUNA 7 (Occidente) ──
-    "Nazaret": ["nazaret", "barrio nazaret"],
-    "Isabela": ["isabela", "barrio isabela"],
-    "Las Palmas": ["las palmas", "barrio las palmas"],
-    "Colombia II Etapa": ["colombia segunda etapa", "colombia dos"],
-    "Los Campos": ["los campos", "barrio los campos"],
-    "Treinta y Uno de Marzo": ["treinta y uno de marzo", "31 de marzo"],
-    "El Mirador": ["el mirador", "barrio el mirador", "mirador"],
-    "Las Vegas": ["las vegas", "barrio las vegas"],
-    "Solidaridad": ["solidaridad", "barrio solidaridad"],
-    "Chapinero": ["chapinero", "barrio chapinero"],
-    "Retiro Alto": ["retiro alto", "barrio retiro alto"],
-    "Nuevo Popayán": ["nuevo popayán", "nuevo popayan", "barrio nuevo popayán"],
-    "La Unión": ["la unión", "la union", "barrio la unión"],
-    "La Libertad": ["la libertad", "barrio la libertad"],
-    "La Conquista": ["la conquista", "barrio la conquista"],
-    "Las Brisas": ["las brisas", "barrio las brisas"],
-    "Independencia": ["independencia", "barrio independencia"],
-    "Santa Librada": ["santa librada", "barrio santa librada"],
-    "Corsocial": ["corsocial", "barrio corsocial"],
-    "Villa Occidente": ["villa occidente", "barrio villa occidente"],
-    "Villa España": ["villa españa", "villa espana", "barrio villa españa"],
-
-    # ── BARRIOS COMUNA 8 (Noroccidente) ──
-    "Pandiguando (barrio)": ["barrio pandiguando"],
-    "El Libertador": ["el libertador", "barrio el libertador", "libertador"],
-    "El Triunfo": ["el triunfo", "barrio el triunfo", "triunfo"],
-    "Popular": ["popular", "barrio popular", "el popular"],
-    "La Cañada": ["la cañada", "la canada", "barrio la cañada"],
-    "Llano Largo": ["llano largo", "barrio llano largo"],
-    "José María Obando": ["josé maría obando", "jose maria obando", "obando"],
-    "Guayabal": ["guayabal", "barrio guayabal", "el guayabal"],
-    "La Isla": ["la isla", "barrio la isla"],
-    "Esperanza Sur": ["esperanza sur", "barrio esperanza sur"],
-    "Camilo Torres": ["camilo torres", "barrio camilo torres"],
-    "Junín": ["junín", "junin", "barrio junín"],
-    "Santa Helena": ["santa helena", "barrio santa helena"],
-    "Lomas de Granada": ["lomas de granada", "barrio lomas de granada", "granada"],
-    "Mis Ranchitos": ["mis ranchitos", "barrio mis ranchitos"],
-    "La Capitana": ["la capitana", "barrio la capitana"],
-    "San Antonio de Padua": ["san antonio de padua", "san antonio", "barrio san antonio"],
-    "Kennedy": ["kennedy", "barrio kennedy"],
-    "San José (barrio)": ["barrio san josé", "barrio san jose"],
-    "La Sombrilla": ["la sombrilla", "barrio la sombrilla"],
-    "Carlos Primero": ["carlos primero", "barrio carlos primero"],
-    "Cinco de Abril": ["cinco de abril", "5 de abril", "barrio cinco de abril"],
-    "María Occidente": ["maría occidente", "maria occidente", "barrio maría occidente"],
-    "Los Naranjos": ["los naranjos", "barrio los naranjos"],
-    "Nuevo Hogar": ["nuevo hogar", "barrio nuevo hogar"],
-    "La Esmeralda": ["la esmeralda", "esmeralda", "barrio la esmeralda"],
-    "Santa Lucía": ["santa lucía", "santa lucia", "santa luca", "barrio santa lucía", "urbanización santa lucía", "urbanizacion santa lucia", "organización santa lucía", "organizacion santa lucia"],
-
-    # ── BARRIOS COMUNA 9 (Sur-Occidente) ──
-    "Pomona": ["pomona", "barrio pomona"],
-    "Lomas de Pomona": ["lomas de pomona", "barrio lomas de pomona"],
-    "Bosques de Pomona": ["bosques de pomona", "barrio bosques de pomona"],
-    "El Uvo": ["el uvo", "barrio el uvo"],
-    "Las Américas": ["las américas", "las americas", "barrio las américas"],
-    "Santa Rosa": ["santa rosa", "barrio santa rosa"],
-    "Los Tejares": ["los tejares", "barrio los tejares", "tejares"],
-}
-
-# Add all barrios from geodata if available
-try:
-    from tools.popayan_geodata import ALL_BARRIOS
-    for b in ALL_BARRIOS:
-        if b not in POPAYAN_PLACES:
-            POPAYAN_PLACES[b] = [b.lower(), f"barrio {b.lower()}"]
-except ImportError:
-    pass
-
-# ── BASIC UTILS ─────────────────────────────────────────────────────────────
+# ── BASIC UTILS ───────────────────────────────────────────────────────────────
 
 def _normalize_text(text: str) -> str:
-    """Standard normalization: lowercase, remove accents, strip."""
-    if not text: return ""
+    if not text:
+        return ""
     t = text.lower()
-    t = t.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
-    t = t.replace('ñ', 'n')
-    # Remove punctuation
+    for a, b in [('á','a'),('é','e'),('í','i'),('ó','o'),('ú','u'),('ñ','n')]:
+        t = t.replace(a, b)
     t = re.sub(r'[^\w\s]', '', t)
     return t.strip()
 
+
 def _clean_stt_text(text: str) -> str:
-    """Cleans Twilio/WhatsApp artifacts and filler words."""
-    if not text: return ""
+    if not text:
+        return ""
     t = text.strip()
-    # Remove leading/trailing punctuation
     t = re.sub(r'^[.?!,;:\s]+', '', t)
     t = re.sub(r'[.?!]+$', '', t)
-
-    # Remove common filler words at the beginning
     for filler in sorted(_FILLER_WORDS, key=len, reverse=True):
         pattern = r'^' + re.escape(filler) + r'[,.]?\s*'
         t = re.sub(pattern, '', t, flags=re.IGNORECASE).strip()
-
-    # Remove repeated words ("la la esmeralda" → "la esmeralda")
     t = re.sub(r'\b(\w+)\s+\1\b', r'\1', t, flags=re.IGNORECASE)
-
-    # Normalize whitespace
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
-def _spanish_phonetic_key(text: str) -> str:
-    """Generate a crude Spanish phonetic key for fuzzy matching."""
-    t = _normalize_text(text)
-    t = t.replace('v', 'b')
-    t = re.sub(r'c(?=[ei])', 's', t)
-    t = t.replace('z', 's')
-    t = t.replace('ll', 'y')
-    t = t.replace('h', '')
-    t = re.sub(r'g(?=[ei])', 'j', t)
-    t = t.replace('qu', 'k').replace('q', 'k')
-    t = re.sub(r'(.)\1+', r'\1', t)
-    t = t.replace(' ', '')
-    return t
 
-# ── CORRECTION & PREAMBLE ──────────────────────────────────────────────────
+# ── CORRECTION & PREAMBLE ─────────────────────────────────────────────────────
 
 def _correct_speech(text: str) -> str:
-    """Apply STT corrections and fuzzy matching for Popayán places."""
-    if not text: return text
-    t = _clean_stt_text(text)
+    """Aplica correcciones STT conocidas. No usa catálogos de barrios."""
+    if not text:
+        return text
+    t       = _clean_stt_text(text)
     t_lower = t.lower().strip()
+    return _SPEECH_CORRECTIONS.get(t_lower, t)
 
-    # 1. Exact correction
-    if t_lower in _SPEECH_CORRECTIONS:
-        return _SPEECH_CORRECTIONS[t_lower]
-
-    # 2. Phonetic fuzzy match
-    t_phonetic = _spanish_phonetic_key(t_lower)
-    if len(t_lower) >= 4:
-        for canonical, aliases in POPAYAN_PLACES.items():
-            for alias in aliases:
-                if _spanish_phonetic_key(alias) == t_phonetic:
-                    return canonical
-    return t
 
 def _strip_preamble(text: str) -> str:
-    """Removes 'Hola, me regala un taxi en...' type of headers."""
-    if not text: return ""
+    """Elimina saludos y relleno del inicio/fin del texto."""
+    if not text:
+        return ""
     t = text.strip()
     changed = True
     while changed:
@@ -754,72 +390,50 @@ def _strip_preamble(text: str) -> str:
         for pattern in _PREAMBLE_PATTERNS:
             new_t = re.sub(pattern, '', t, flags=re.IGNORECASE).strip()
             if new_t != t:
-                t = new_t
+                t       = new_t
                 changed = True
     return t if len(t) >= 2 else text.strip()
 
-# ── INTENT PARSING ──────────────────────────────────────────────────────────
+
+# ── INTENT PARSING ────────────────────────────────────────────────────────────
 
 def _parse_si_no(text: str) -> Optional[bool]:
-    """Interprets affirmative/negative response."""
-    t = _normalize_text(text)
-    positivos = {"si", "claro", "exacto", "correcto", "ok", "dale", "yes", "obvio", "afirmativo", "asi", "eso", "bien"}
-    negativos = {"no", "nop", "nel", "nope", "para nada", "negativo", "incorrecto", "tampoco", "nunca", "jamas"}
+    t         = _normalize_text(text)
+    positivos = {"si","claro","exacto","correcto","ok","dale","yes","obvio","afirmativo","asi","eso","bien"}
+    negativos = {"no","nop","nel","nope","para nada","negativo","incorrecto","tampoco","nunca","jamas"}
+
+    uncertainty = {"no lo se","no se","no se bien","nose","no lo sé","no sé"}
+    if t.strip() in uncertainty:
+        return None
+    if re.search(r'\bno\s+s[eé]\b', t):
+        return None
+
     words = set(t.split())
-    if words & positivos: return True
-    if words & negativos: return False
+    if words & positivos:
+        return True
+    if words & negativos:
+        return False
     return None
+
 
 def _is_correction_request(text: str) -> bool:
-    """Detects if user wants to change previous info."""
-    t = text.lower()
-    triggers = ["corregir", "cambiar", "equivoke", "me equivoque", "no es ahi", "esta mal", "error"]
+    t        = text.lower()
+    triggers = ["corregir","cambiar","equivoke","me equivoque","no es ahi","esta mal","error"]
     return any(trigger in t for trigger in triggers)
+
 
 def _is_repeat_request(text: str) -> bool:
-    """Detects if user didn't hear/understand."""
-    t = text.lower()
-    triggers = ["repite", "como", "no escuche", "que dijo", "repitame"]
+    t        = text.lower()
+    triggers = ["repite","como","no escuche","que dijo","repitame"]
     return any(trigger in t for trigger in triggers)
 
-# ── ADDRESS EXTRACTION ──────────────────────────────────────────────────────
 
-def _try_local_match(text: str) -> Optional[str]:
-    """Deterministic local matching using geodata registry and aliases.
-    Returns the CANONICAL place name, not the raw input text."""
-    if not text: return None
-    t_clean = _strip_preamble(text)
-    t_corrected = _correct_speech(t_clean)
-    
-    # If the text contains street/carrera nomenclature with a number, bypass local match to avoid discarding the street number.
-    is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|transversal|tr|diagonal|diag|avenida|av|kr|kra)\s*\d+', t_clean.lower()))
-    if is_street:
-        return None
-    
-    # 1. Alias lookup
-    t_norm = _normalize_text(t_corrected)
-    for canonical, aliases in POPAYAN_PLACES.items():
-        for alias in aliases:
-            if _normalize_text(alias) == t_norm:
-                return canonical
-
-    # 2. Geodata search — return CANONICAL name, not raw text
-    try:
-        from tools.popayan_geodata import geocode_local
-        geo = geocode_local(t_corrected)
-        if geo:
-            # geo = (lat, lng, display_name) where display_name = "Canonical, Popayán, Cauca, Colombia"
-            display_name = geo[2] if len(geo) > 2 else ""
-            canonical = display_name.split(",")[0].strip() if display_name else t_corrected
-            return canonical if len(canonical) >= 2 else t_corrected
-    except ImportError:
-        pass
-
-    return None
+# ── ADDRESS EXTRACTION ────────────────────────────────────────────────────────
 
 def normalize_address(address: str) -> str:
-    """Standardize nomenclature (Calle -> Cl, etc.)"""
-    if not address: return ""
+    """Estandariza nomenclatura (Calle → Cl, etc.)"""
+    if not address:
+        return ""
     replacements = {
         r'\bcl\b': 'Calle', r'\bcra?\b': 'Carrera', r'\bkra?\b': 'Carrera',
         r'\bav\b': 'Avenida', r'\btr\b': 'Transversal', r'\bdiag?\b': 'Diagonal',
@@ -830,83 +444,379 @@ def normalize_address(address: str) -> str:
         result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
     return result.strip()
 
-def extract_pickup_address(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """Primary entry point for origin extraction. Tries local then LLM."""
-    local = _try_local_match(text)
-    if local:
-        return local, None
 
-    # Fallback to simple regex/heuristics before LLM
+def _compound_num_replace(m: re.Match) -> str:
+    """Convierte 'cuarenta y uno' → '41', etc. en el contexto de una dirección."""
+    tens_map  = {"veinte":20,"treinta":30,"cuarenta":40,"cincuenta":50,
+                 "sesenta":60,"setenta":70,"ochenta":80,"noventa":90}
+    units_map = {"un":1,"uno":1,"dos":2,"tres":3,"cuatro":4,"cinco":5,
+                 "seis":6,"siete":7,"ocho":8,"nueve":9}
+    t_val = tens_map.get(m.group(1).lower(), 0)
+    u_val = units_map.get(m.group(2).lower(), 0)
+    return str(t_val + u_val) if t_val else m.group(0)
+
+
+def normalize_colombian_address(address: str) -> str:
+    """
+    Normaliza al formato colombiano estándar.
+    'carrera cuarta a el # 17 b 28' → 'Cra. 4ae # 17B-28'
+    'calle 16 # 3 ce cuarenta y uno' → 'Cl. 16 # 3CE-41'
+    """
+    if not address:
+        return ""
+
+    t = address.strip()
+
+    # 0. Convertir números compuestos STT: "cuarenta y uno" → "41"
+    #    Cubre el caso más común: Twilio STT deletrea el número de casa en palabras.
+    t = re.sub(
+        r'\b(veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)'
+        r'\s+y\s+(un[o]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b',
+        _compound_num_replace,
+        t, flags=re.IGNORECASE,
+    )
+    # Números simples como última parte del número de casa (sin combinación con decenas)
+    _simple_end = [
+        (r'\b(once)\b', '11'), (r'\b(doce)\b', '12'), (r'\b(trece)\b', '13'),
+        (r'\b(catorce)\b', '14'), (r'\b(quince)\b', '15'),
+        (r'\b(diecis[eé]is)\b', '16'), (r'\b(diecisiete)\b', '17'),
+        (r'\b(dieciocho)\b', '18'), (r'\b(diecinueve)\b', '19'),
+    ]
+    for pat, repl in _simple_end:
+        t = re.sub(pat, repl, t, flags=re.IGNORECASE)
+
+    num_words = {
+        "primera":"1","segunda":"2","tercera":"3","cuarta":"4",
+        "quinta":"5","sexta":"6","septima":"7","octava":"8",
+        "novena":"9","decima":"10","once":"11","doce":"12",
+        "trece":"13","catorce":"14","quince":"15","dieciseis":"16",
+        "diecisiete":"17","dieciocho":"18","diecinueve":"19","veinte":"20",
+    }
+
+    for word, digit in num_words.items():
+        t = re.sub(
+            rf'\b(calle|carrera|cl|cra|cr|kr|kra)\s+{word}\b',
+            rf'\1 {digit}', t, flags=re.IGNORECASE,
+        )
+
+    t = re.sub(r'\bn[uú]mero\s*', '# ', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bcarrera\s+(\d)', r'Cra. \1', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bcalle\s+(\d)',   r'Cl. \1',  t, flags=re.IGNORECASE)
+    t = re.sub(r'\bcl\s+(\d)',      r'Cl. \1',  t, flags=re.IGNORECASE)
+    t = re.sub(r'\bcra\s+(\d)',     r'Cra. \1', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bkr\s+(\d)',      r'Cra. \1', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bkra\s+(\d)',     r'Cra. \1', t, flags=re.IGNORECASE)
+
+    t = re.sub(r'(\d+)\s+[aá]\s+el\b', r'\1ae', t, flags=re.IGNORECASE)
+    t = re.sub(r'(\d+)\s+ae\b',         r'\1ae', t, flags=re.IGNORECASE)
+    t = re.sub(r'(\d+)a\s+ae\b',        r'\1ae', t, flags=re.IGNORECASE)
+    t = re.sub(r'(\d+)\s+a\s+b\b',      r'\1ab', t, flags=re.IGNORECASE)
+
+    t = re.sub(
+        r'#\s*(\d+)\s+([a-zA-Z]{1,3})\s*[-–]?\s*(\d+)',
+        lambda m: f"# {m.group(1)}{m.group(2).upper()}-{m.group(3)}",
+        t,
+    )
+    t = re.sub(r'#\s*(\d+)\s+de\s+(\d+)',   r'# \1-\2', t, flags=re.IGNORECASE)
+    t = re.sub(r'#\s*(\d+)\s+(\d+)\s*$',    r'# \1-\2', t, flags=re.IGNORECASE)
+
+    t = re.sub(r'^cra\.', 'Cra.', t)
+    t = re.sub(r'^cl\.',  'Cl.',  t)
+    t = re.sub(r'^calle(?=[.\s])', 'Cl.', t, flags=re.IGNORECASE)
+
+    return t.strip()
+
+
+# ── Resolución local de barrios/landmarks (catálogo popayan_geodata) ──────────
+# Se usan SOLO los nombres/aliases de popayan_geodata (BARRIO_ALIASES, LANDMARKS);
+# las coordenadas de ese módulo NO se usan — la geocodificación real ocurre en
+# geocoder_service.run_pipeline() vía Google sobre el nombre canónico devuelto.
+
+_LOCAL_MATCH_LOCK = threading.Lock()
+_LOCAL_MATCH_INDEX: Optional[Dict[str, str]] = None   # normalized_alias → canonical
+_LOCAL_MATCH_ALIAS_KEYS: Optional[list] = None        # alias keys (>=4 chars) para fuzzy/substring
+
+# Errores STT frecuentes de Twilio/Google para barrios de Popayán que NO se
+# resuelven por fuzzy (distancia fonética muy grande). Se aplican SOLO en
+# contexto de lugar (palabra "barrio" presente o candidato corto ≤2 palabras),
+# para no corromper texto normal (ej: "pueden" como verbo en una frase larga).
+# clave = forma mal-oída (sin tildes, minúscula) → valor = nombre canónico.
+_BARRIO_STT_VARIANTS: Dict[str, str] = {
+    # Pubenza ("pueden", "puden" son los mishears reales observados en prod)
+    "pueden": "Pubenza", "puden": "Pubenza", "puede": "Pubenza",
+    "pubensa": "Pubenza", "pubensa": "Pubenza", "puebenza": "Pubenza",
+    "pubenza": "Pubenza", "la pubenza": "Pubenza",
+    # Yanaconas
+    "anaconas": "Yanaconas", "ianaconas": "Yanaconas", "llanaconas": "Yanaconas",
+    "yanaconaz": "Yanaconas", "yanakonas": "Yanaconas", "yanacones": "Yanaconas",
+    # Campanario
+    "campanaryo": "Campanario", "campanaro": "Campanario", "campana rio": "Campanario",
+    # Pandiguando
+    "pandeguando": "Pandiguando", "pandigando": "Pandiguando", "pandi guando": "Pandiguando",
+    # Belalcázar
+    "belalcasar": "Belalcázar", "belal casar": "Belalcázar",
+    # Alfonso López
+    "alfonso lopes": "Alfonso López", "alfonsol opez": "Alfonso López",
+    # La Esmeralda
+    "esmeraldas": "La Esmeralda", "la esmeraldaa": "La Esmeralda",
+    # Valle del Ortigal
+    "hostigal": "Valle del Ortigal", "ortigan": "Valle del Ortigal",
+    # Otros frecuentes
+    "yambitara": "Yambitará", "yanbitara": "Yambitará",
+    "machagara": "Machángara", "valparaso": "Valparaíso",
+    "berling": "Berlín", "modello": "Modelo",
+}
+
+
+def _build_local_match_index() -> None:
+    global _LOCAL_MATCH_INDEX, _LOCAL_MATCH_ALIAS_KEYS
+    if _LOCAL_MATCH_INDEX is not None:
+        return
+    with _LOCAL_MATCH_LOCK:
+        if _LOCAL_MATCH_INDEX is not None:
+            return
+        try:
+            from tools.popayan_geodata import BARRIO_ALIASES, LANDMARKS
+            from core.stt_enhancer import strip_accents
+        except ImportError:
+            _LOCAL_MATCH_INDEX = {}
+            _LOCAL_MATCH_ALIAS_KEYS = []
+            return
+
+        index: Dict[str, str] = {}
+
+        # BARRIO_ALIASES: {"Canonical": ["alias1", "alias2", ...]}
+        for canonical, aliases in BARRIO_ALIASES.items():
+            key = strip_accents(canonical.lower().strip())
+            if key not in index:
+                index[key] = canonical
+            for alias in aliases:
+                akey = strip_accents(alias.lower().strip())
+                if akey not in index:
+                    index[akey] = canonical
+
+        # LANDMARKS: {"Landmark Name": (lat, lng)} — canonical = la propia clave
+        for name in LANDMARKS:
+            nkey = strip_accents(name.lower().strip())
+            if nkey not in index:
+                index[nkey] = name
+
+        # NOTA: _BARRIO_STT_VARIANTS NO se inyecta aquí a propósito. Esas formas
+        # (ej: "pueden", "puede") son palabras españolas comunes; si entraran al
+        # índice, el match por subcadena/fuzzy las capturaría en frases normales
+        # ("no pueden venir") generando falsos positivos. Se consultan SOLO en el
+        # nivel 0 de _try_local_match, que está gated por contexto de barrio.
+
+        _LOCAL_MATCH_INDEX = index
+        # Solo aliases >=4 chars para fuzzy/substring (evita ruido de "la", "el"…)
+        _LOCAL_MATCH_ALIAS_KEYS = [k for k in index if len(k) >= 4]
+
+
+# Partículas prepositivas/relleno que preceden a un nombre de lugar.
+_PLACE_PREAMBLE_RE = re.compile(
+    r'\b(en|por|al|a\s+la|hacia|cerca\s+de|frente\s+a|junto\s+a|'
+    r'estoy\s+en|estamos\s+en|aqui\s+en|aca\s+en|el|la|los|las|del|de)\b\s*',
+    re.IGNORECASE,
+)
+
+# Señal de que el texto contiene una ubicación procesable (calle/barrio/número…).
+_PLACE_SIGNAL_RE = re.compile(
+    r'\d|#|\b(calle|carrera|cra|cr|cl|kr|kra|diagonal|diag|transversal|tr|'
+    r'avenida|av|barrio|sector|conjunto|urbanizaci[oó]n|manzana|vereda|'
+    r'corregimiento|norte|sur|oriente|occidente)\b',
+    re.IGNORECASE,
+)
+
+
+def _try_local_match(text: str) -> Optional[str]:
+    """
+    Búsqueda local en el catálogo de barrios/landmarks de Popayán
+    (popayan_geodata: BARRIO_ALIASES + LANDMARKS).
+
+    Niveles, en orden de confianza:
+      0. Variantes STT curadas (solo en contexto de lugar) → canónico
+      1. Match exacto del alias normalizado
+      2. Subcadena (alias contenido en el input o viceversa)
+      3. Fuzzy fonético (threshold alto)
+      3b. Fuzzy relajado SOLO cuando hay contexto fuerte de barrio
+
+    Retorna el nombre canónico o None si no hay match confiable.
+    """
+    if not text or len(text.strip()) < 3:
+        return None
+
+    _build_local_match_index()
+    if not _LOCAL_MATCH_INDEX:
+        return None
+
+    from core.stt_enhancer import strip_accents, fuzzy_match_location
+
+    raw = strip_accents(text.lower().strip())
+    has_barrio_kw = bool(re.search(r'\bbarrio\b', raw))
+
+    # Quitar palabra "barrio" + partículas prepositivas para aislar el candidato.
+    cleaned = re.sub(r'\bbarrio\b\s*', '', raw)
+    cleaned = _PLACE_PREAMBLE_RE.sub('', cleaned).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+
+    if not cleaned or len(cleaned) < 3:
+        return None
+
+    word_count = len(cleaned.split())
+    # Las variantes curadas solo aplican cuando es claramente un lugar:
+    # hay palabra "barrio" o el candidato es dominante (≤2 palabras).
+    place_context = has_barrio_kw or word_count <= 2
+
+    # 0. Variantes STT curadas (alta precisión, context-gated)
+    if place_context:
+        if cleaned in _BARRIO_STT_VARIANTS:
+            return _BARRIO_STT_VARIANTS[cleaned]
+        for tok in cleaned.split():
+            if len(tok) >= 4 and tok in _BARRIO_STT_VARIANTS:
+                return _BARRIO_STT_VARIANTS[tok]
+
+    # 1. Exacto
+    if cleaned in _LOCAL_MATCH_INDEX:
+        return _LOCAL_MATCH_INDEX[cleaned]
+
+    # 2. Subcadena — el alias está contenido en el input o viceversa
+    best_key: Optional[str] = None
+    best_len = 0
+    for alias in _LOCAL_MATCH_ALIAS_KEYS:
+        if alias in cleaned and len(alias) > best_len:
+            best_key = alias
+            best_len = len(alias)
+        elif cleaned in alias and len(cleaned) >= 5 and len(alias) > best_len:
+            best_key = alias
+            best_len = len(alias)
+    if best_key and best_len >= 5:
+        return _LOCAL_MATCH_INDEX[best_key]
+
+    # 3. Fuzzy fonético (threshold alto → sin falsos positivos)
+    best = fuzzy_match_location(cleaned, _LOCAL_MATCH_ALIAS_KEYS, threshold=0.65)
+    if best:
+        return _LOCAL_MATCH_INDEX[best]
+
+    # 3b. Fuzzy relajado SOLO con contexto fuerte de barrio ("barrio X") y
+    #     candidato corto — aquí el prior de que es un barrio es alto.
+    if has_barrio_kw and word_count <= 2:
+        best = fuzzy_match_location(cleaned, _LOCAL_MATCH_ALIAS_KEYS, threshold=0.52)
+        if best:
+            return _LOCAL_MATCH_INDEX[best]
+
+    return None
+
+
+def looks_like_place(text: str) -> bool:
+    """
+    Valida que `text` parezca una ubicación real en Popayán, para descartar
+    extracciones basura del LLM (ej: "tu cuenta", "fuerza", "dos").
+
+    True si: tiene señal de dirección (calle/carrera/número/barrio…), resuelve
+    a una referencia humana conocida, o matchea el catálogo local de barrios.
+    """
+    if not text or len(text.strip()) < 3:
+        return False
+
+    t = text.strip()
+
+    # 1. Señal explícita de dirección/lugar (número, calle, barrio, sector…)
+    if _PLACE_SIGNAL_RE.search(t):
+        return True
+
+    # 2. Referencia humana conocida ("por el éxito", "la galería"…)
+    try:
+        from core.stt_enhancer import resolve_human_reference
+        if resolve_human_reference(t):
+            return True
+    except ImportError:
+        pass
+
+    # 3. Match en el catálogo local de barrios/landmarks
+    if _try_local_match(t):
+        return True
+
+    return False
+
+
+def extract_pickup_address(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extrae dirección de recogida del texto libre.
+    Retorna (dirección, None) o (None, None) si no se puede extraer.
+    La geocodificación real ocurre en geocoder_service.run_pipeline().
+    """
     t_stripped = _strip_preamble(text)
-    if len(t_stripped) > 5 and any(kw in t_stripped.lower() for kw in ["calle", "carrera", "cra", "cl", "#"]):
+
+    # Si contiene nomenclatura de calle → retornar normalizado
+    if len(t_stripped) > 5 and any(
+        kw in t_stripped.lower()
+        for kw in ["calle", "carrera", "cra", "cl", "#", "transversal", "diagonal"]
+    ):
+        return normalize_colombian_address(t_stripped), None
+
+    # Texto no vacío sin nomenclatura → posible nombre de lugar o barrio
+    if len(t_stripped) > 3:
         return t_stripped, None
 
-    return None, None # Signal that we need Slow Brain (LLM) or more info
+    return None, None
+
 
 def extract_destination_address(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """Primary entry point for destination extraction."""
-    # Destination is often shorter, try local match first
-    local = _try_local_match(text)
-    if local:
-        return local, None
-    
+    """Extrae dirección de destino del texto libre."""
     t_stripped = _strip_preamble(text)
     if len(t_stripped) > 3:
         return t_stripped, None
-        
     return None, None
 
-# ── DATETIME EXTRACTION ─────────────────────────────────────────────────────
+
+# ── DATETIME EXTRACTION ───────────────────────────────────────────────────────
 
 def extract_datetime_local(text: str) -> Optional[Dict[str, str]]:
-    """Fast brain datetime extraction for common patterns."""
-    t = _normalize_text(text)
-    now = datetime.now(timezone(timedelta(hours=-5))) # Popayán time
-    
-    # Common patterns
+    t   = _normalize_text(text)
+    now = datetime.now(timezone(timedelta(hours=-5)))
+
     if "ahora" in t or "ya" in t:
-        return None # Signal immediate service
-        
-    # "mañana"
+        return None
+
     if "manana" in t:
         target_date = now + timedelta(days=1)
-        # Try to find time: "a las 8", "8:30", "8 y media"
-        time_match = re.search(r'(\d{1,2})(?::(\d{2}))?', t)
+        time_match  = re.search(r'(\d{1,2})(?::(\d{2}))?', t)
         if time_match:
             hh = int(time_match.group(1))
             mm = int(time_match.group(2)) if time_match.group(2) else 0
-            if "tarde" in t or "noche" in t or (hh < 7): hh += 12 # Simple PM heuristic
+            if "tarde" in t or "noche" in t or hh < 7:
+                hh += 12
             return {
                 "fecha_programada": target_date.strftime("%Y-%m-%d"),
-                "hora_programada": f"{hh:02d}:{mm:02d}"
+                "hora_programada":  f"{hh:02d}:{mm:02d}",
             }
-            
-    # "en X minutos"
+
     mins_match = re.search(r'en (\d+) minutos', t)
     if mins_match:
-        delta = int(mins_match.group(1))
+        delta  = int(mins_match.group(1))
         target = now + timedelta(minutes=delta)
         return {
             "fecha_programada": target.strftime("%Y-%m-%d"),
-            "hora_programada": target.strftime("%H:%M")
+            "hora_programada":  target.strftime("%H:%M"),
         }
 
     return None
 
-async def extract_datetime_with_llm(user_text: str) -> dict:
-    """Unified LLM datetime extraction."""
-    # Try Fast Brain first
-    local = extract_datetime_local(user_text)
-    if local: return local
 
-    tz = timezone(timedelta(hours=-5))
+async def extract_datetime_with_llm(user_text: str) -> dict:
+    local = extract_datetime_local(user_text)
+    if local:
+        return local
+
+    tz  = timezone(timedelta(hours=-5))
     now = datetime.now(tz)
-    
-    prompt = f"""Extrae la fecha y hora programada mencionada por el usuario para un servicio de taxi.
-Hoy es {now.strftime('%Y-%m-%d')}, la hora actual es {now.strftime('%H:%M:%S')}.
-Responde SOLO en JSON: {{"fecha_programada": "YYYY-MM-DD", "hora_programada": "HH:MM"}}
-Texto: {user_text}"""
-    
+
+    prompt = (
+        f"Extrae la fecha y hora programada mencionada por el usuario para un servicio de taxi.\n"
+        f"Hoy es {now.strftime('%Y-%m-%d')}, la hora actual es {now.strftime('%H:%M:%S')}.\n"
+        f"Responde SOLO en JSON: {{\"fecha_programada\": \"YYYY-MM-DD\", \"hora_programada\": \"HH:MM\"}}\n"
+        f"Texto: {user_text}"
+    )
     content = await call_llm(prompt, "Output ONLY valid JSON. 24h format.")
     if content:
         res = extract_json_object(content)

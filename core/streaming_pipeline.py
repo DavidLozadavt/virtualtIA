@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from collections import deque
@@ -295,23 +296,28 @@ class AdaptiveEndpointController:
         profile = self._profile
 
         # ── speechTimeout ──
+        # Política (corregida): para captura de direcciones usamos "auto" =
+        # detección adaptativa de fin-de-habla de Twilio. Es lo mejor para habla
+        # natural a ritmo variable con pausas ("calle 16... número 3CE-41...
+        # Santa Teresa"); un timeout fijo corto cortaba al usuario a mitad de
+        # frase. Para sí/no mantenemos un valor numérico para que responda ágil.
+        # Ambos configurables por env sin tocar código.
+        short_to = os.getenv("TWILIO_SPEECH_TIMEOUT_SHORT", "1.5")
+        long_to = os.getenv("TWILIO_SPEECH_TIMEOUT_LONG", "auto")
+
         if short_answer_expected:
-            # Para sí/no: 0.8s es suficiente pero no muy agresivo
-            speech_timeout = "1.2"
+            speech_timeout = short_to
+        elif long_to.lower() == "auto":
+            # Default: Twilio decide el fin de habla (no corta pausas naturales).
+            speech_timeout = "auto"
         elif profile.is_noisy_call:
-            # Audio ruidoso: más tiempo para acumular contexto
             speech_timeout = "3.0"
-        elif profile.is_fast_speaker:
-            # Habla rápida: esperar que termine la ráfaga
-            speech_timeout = "2.5"
-        elif profile.is_slow_speaker:
-            # Habla lenta: pausas largas son parte del habla
+        elif profile.is_fast_speaker or profile.is_slow_speaker:
             speech_timeout = "2.5"
         elif self._consecutive_retries >= 2:
-            # Múltiples reintentos: algo falla, dar más tiempo
             speech_timeout = "2.5"
         else:
-            speech_timeout = "2.0"  # Default mejorado
+            speech_timeout = long_to  # numérico si el env lo fija explícitamente
 
         # ── timeout total ──
         if profile.is_slow_speaker:
@@ -338,7 +344,8 @@ def _get_contextual_hints(state: str) -> str:
     Twilio usa esto para mejorar el reconocimiento de términos esperados.
     """
     base_hints = (
-        "calle,carrera,barrio,con,esquina,norte,sur,número,"
+        "calle,carrera,diagonal,transversal,avenida,bis,barrio,conjunto,"
+        "con,esquina,norte,sur,oriente,occidente,número,manzana,"
         "los sauces,maría oriente,alfonso lópez,pandiguando,yanaconas,"
         "campanario,la esmeralda,belalcázar,los comuneros,pueblillo,yambitará,"
         "camilo torres,valle del ortigal,ortigal,polideportivo,"
