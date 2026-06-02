@@ -1,5 +1,5 @@
 """
-gateway/whatsapp.py — Webhook integration for Meta WhatsApp Cloud API.
+routers/whatsapp.py — Webhook integration for Meta WhatsApp Cloud API.
 """
 
 import logging
@@ -15,12 +15,11 @@ from core.address_utils import (
     _parse_si_no,
     _is_correction_request,
     normalize_address,
-    normalize_colombian_address,
+    _try_local_match,
+    _nominatim_geocode,
     _nominatim_reverse_geocode_async,
     extract_datetime_with_llm,
 )
-from core.geocoder_service import geocode, run_pipeline, handle_user_context
-from core.geo_types import GeoSessionState, ResolutionStatus
 
 logger = logging.getLogger("lyra.whatsapp")
 whatsapp_router = APIRouter(prefix="/wh/whatsapp", tags=["whatsapp"])
@@ -237,17 +236,16 @@ import time
 from typing import Dict, Optional
 import re
 
-STATE_NEW                 = "new"
+STATE_NEW = "new"
 STATE_WAITING_TIPO_SERVICIO = "waiting_tipo_servicio"
-STATE_WAITING_HORA_PROG   = "waiting_hora_prog"
-STATE_WAITING_ORIGIN      = "waiting_origin"
-STATE_WAITING_GEO_CONTEXT = "waiting_geo_context"   # pipeline en CONTEXT_GATHERING
-STATE_CONFIRMING_ORIGIN   = "confirming_origin"
+STATE_WAITING_HORA_PROG = "waiting_hora_prog"
+STATE_WAITING_ORIGIN = "waiting_origin"
+STATE_CONFIRMING_ORIGIN = "confirming_origin"
 STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
-STATE_WAITING_DOM_ORIGIN  = "waiting_dom_origin"
-STATE_WAITING_DOM_DEST    = "waiting_dom_dest"
-STATE_WAITING_DOM_OBS     = "waiting_dom_obs"
-STATE_FINISHED            = "finished"
+STATE_WAITING_DOM_ORIGIN = "waiting_dom_origin"
+STATE_WAITING_DOM_DEST = "waiting_dom_dest"
+STATE_WAITING_DOM_OBS = "waiting_dom_obs"
+STATE_FINISHED = "finished"
 
 def clean_map_location(loc_name: str) -> str:
     """Removes city, country, and zip codes from a map location name for a more natural response."""
@@ -274,8 +272,6 @@ class WpSession:
         self.destino_text: Optional[str] = None
         self.observacion: Optional[str] = None
         self.updated_at: float = time.time()
-        self.geo_origin: GeoSessionState = GeoSessionState()
-        self.geo_dest:   GeoSessionState = GeoSessionState()
 
 _WP_SESSIONS: Dict[str, WpSession] = {}
 
@@ -306,22 +302,37 @@ async def _create_wp_service(
     observacion: Optional[str] = None
 ) -> tuple[bool, str]:
     import re
-
-    async def _resolve_gps_text(lat: float, lng: float) -> str:
-        """Convierte coordenadas GPS a nombre legible via Nominatim reverse."""
-        name = await _nominatim_reverse_geocode_async(lat, lng)
-        if name:
-            return clean_map_location(name)
-        return f"GPS ({lat:.5f},{lng:.5f})"
-
+    from tools.popayan_geodata import get_nearby_landmarks, get_nearby_barrios
+    
     map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", origen)
     if map_match_o:
-        olat_s, olng_s, explicit_name = map_match_o.groups()
-        olat, olng = float(olat_s), float(olng_s)
+        olat, olng, explicit_name = map_match_o.groups()
         if explicit_name:
             origen = clean_map_location(explicit_name)
         else:
-            origen = await _resolve_gps_text(olat, olng)
+            l_info = get_nearby_landmarks(float(olat), float(olng), radius_km=0.3)
+            if l_info:
+                origen = f"{l_info[0]['name']}"
+            else:
+                b_info = get_nearby_barrios(float(olat), float(olng), radius_km=2.0)
+                if b_info:
+                    origen = f"Barrio {b_info[0]['name']}"
+                else:
+                    origen = f"Ubicación compartida GPS (Enlace: https://maps.google.com/?q={olat},{olng})"
+        
+        # Check if the location is Maria Oriente to override coords
+        is_maria_oriente = False
+        if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
+            is_maria_oriente = True
+        else:
+            b_info = get_nearby_barrios(float(olat), float(olng), radius_km=1.5)
+            if b_info and b_info[0]["name"] == "María Oriente":
+                is_maria_oriente = True
+                origen = "Barrio María Oriente"
+
+        if is_maria_oriente:
+            olat, olng = 2.4307, -76.6012
+
         g_o = (olat, olng, origen)
     else:
         origen = normalize_address(origen) or origen
@@ -331,12 +342,32 @@ async def _create_wp_service(
     if destino:
         map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
         if map_match_d:
-            dlat_s, dlng_s, explicit_name = map_match_d.groups()
-            dlat, dlng = float(dlat_s), float(dlng_s)
+            dlat, dlng, explicit_name = map_match_d.groups()
             if explicit_name:
                 destino = clean_map_location(explicit_name)
             else:
-                destino = await _resolve_gps_text(dlat, dlng)
+                l_info = get_nearby_landmarks(float(dlat), float(dlng), radius_km=0.3)
+                if l_info:
+                    destino = f"{l_info[0]['name']}"
+                else:
+                    b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=2.0)
+                    if b_info:
+                        destino = f"Barrio {b_info[0]['name']}"
+                    else:
+                        destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
+            
+            # Check if the destination is Maria Oriente to override coords
+            is_maria_oriente_d = False
+            if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
+                is_maria_oriente_d = True
+            else:
+                b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=1.5)
+                if b_info and b_info[0]["name"] == "María Oriente":
+                    is_maria_oriente_d = True
+                    destino = "Barrio María Oriente"
+
+            if is_maria_oriente_d:
+                dlat, dlng = 2.4307, -76.6012
         else:
             destino = normalize_address(destino) or destino
             dlat, dlng = 0.0, 0.0
@@ -596,20 +627,24 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         if texto_usuario.startswith("Ubicación en mapa:"):
             origen = texto_usuario
             sess.origen_text = origen
-            sess.geo_origin.reset()
             sess.state = STATE_WAITING_DEST_OR_SKIP
-
+            
             map_match_o = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", origen)
             loc_name = "la ubicación compartida"
             if map_match_o and map_match_o.group(1):
                 loc_name = clean_map_location(map_match_o.group(1))
-
+                
             msg = f"Listo, te recogemos en {loc_name}. ¿A dónde te diriges? Envía la ubicación con el botón, escríbela, o dinos NO si prefieres avisarle al conductor."
             await send_whatsapp_location_request(sender_phone, msg)
             return
 
         origen_llm, hint = extract_pickup_address(texto_usuario)
-        origen = normalize_colombian_address((origen_llm or "").strip())
+        origen = (origen_llm or "").strip()
+
+        if origen:
+            normalized = normalize_address(origen)
+            if normalized and len(normalized) > len(origen) * 0.5:
+                origen = normalized
 
         sess.origen_text = origen
 
@@ -618,82 +653,16 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, msg)
             return
 
-        # Intentar geocodificar para obtener barrio y verificar existencia
-        geo_result = await run_pipeline(origen, attempt=1)
-
-        if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
-            barrio = geo_result.selected.neighborhood
-            sess.origen_barrio = barrio
-            sess.geo_origin.reset()
-            sess.state = STATE_CONFIRMING_ORIGIN
-            barrio_str = f", barrio *{barrio}*" if barrio else ""
-            msg = f"Entendemos que tu dirección es: *{origen}*{barrio_str}. ¿Es correcta? Responde SÍ o NO."
-            await send_whatsapp_message(sender_phone, msg)
-            return
-
-        if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
-            sess.geo_origin.pending = geo_result
-            sess.geo_origin.original_query = origen
-            sess.geo_origin.attempt = 1
-            sess.state = STATE_WAITING_GEO_CONTEXT
-            geo_q = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
-            await send_whatsapp_message(sender_phone, geo_q)
-            return
-
-        # Pipeline falló pero tenemos texto → confirmar igual y geocodificar al crear servicio
-        is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\.?\s*\d+', origen.lower()))
+        is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+', origen.lower()))
         if is_street:
             sess.state = STATE_CONFIRMING_ORIGIN
-            msg = f"Entendemos que tu dirección es: *{origen}*. ¿Es correcta? Responde SÍ o NO."
+            msg = f"Entendemos que tu dirección es: {origen}. ¿Es correcta? Responde SÍ o NO."
             await send_whatsapp_message(sender_phone, msg)
             return
 
-        sess.geo_origin.reset()
         sess.state = STATE_WAITING_DEST_OR_SKIP
         msg = f"Listo, te recogemos en {origen}. ¿A dónde te diriges? Envía tu ubicación abajo, escríbela o di NO si prefieres contarle al conductor."
         await send_whatsapp_location_request(sender_phone, msg)
-        return
-
-    # ── STATE: waiting_geo_context (pipeline pidió barrio/referencia) ──
-    if sess.state == STATE_WAITING_GEO_CONTEXT:
-        pending = sess.geo_origin.pending
-        orig_q  = sess.geo_origin.original_query
-        attempt = sess.geo_origin.attempt
-
-        geo_result = await handle_user_context(
-            user_text=texto_usuario,
-            pending=pending,
-            original_query=orig_q,
-            attempt=attempt,
-        )
-        sess.geo_origin.attempt = geo_result.attempt
-
-        if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
-            barrio = geo_result.selected.neighborhood
-            if barrio:
-                sess.origen_barrio = barrio
-            if geo_result.query and len(geo_result.query) > len(orig_q):
-                sess.origen_text = geo_result.query
-            sess.geo_origin.reset()
-            sess.state = STATE_CONFIRMING_ORIGIN
-            display = sess.origen_text or orig_q
-            barrio_str = f", barrio *{barrio}*" if barrio else ""
-            msg = f"Entendemos que tu dirección es: *{display}*{barrio_str}. ¿Es correcta? Responde SÍ o NO."
-            await send_whatsapp_message(sender_phone, msg)
-            return
-
-        if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
-            sess.geo_origin.pending = geo_result
-            geo_q = geo_result.disambiguation_question or "¿Puedes darme más detalles de la ubicación?"
-            await send_whatsapp_message(sender_phone, geo_q)
-            return
-
-        # FAILED — confirmar igual, geocodificar al crear servicio
-        sess.geo_origin.reset()
-        sess.state = STATE_CONFIRMING_ORIGIN
-        display = sess.origen_text or orig_q
-        msg = f"Entendemos que tu dirección es: *{display}*. ¿Es correcta? Responde SÍ o NO."
-        await send_whatsapp_message(sender_phone, msg)
         return
 
     # ── STATE: confirming_origin ──
