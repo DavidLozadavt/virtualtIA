@@ -409,10 +409,13 @@ def _parse_si_no(text: str) -> Optional[bool]:
         return None
 
     words = set(t.split())
-    if words & positivos:
-        return True
+    # Negativos primero: "No, sí Sena Norte" tiene "no" + "sí" → el "no"
+    # inicial es la corrección; "sí" es parte del contenido que sigue.
+    # Evaluar positivos primero hacía que "sí" ganara y confirmara en falso.
     if words & negativos:
         return False
+    if words & positivos:
+        return True
     return None
 
 

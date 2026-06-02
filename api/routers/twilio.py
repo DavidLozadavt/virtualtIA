@@ -1833,6 +1833,7 @@ async def process_speech(request: Request):
                         await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
                     )
                 texto_usuario = rest
+                _explicit_correction = True  # el usuario dijo "No" → nunca restatement
                 # Caemos al match local/LLM abajo
             else:
                 sess.state = STATE_WAITING_ORIGIN
@@ -1842,16 +1843,18 @@ async def process_speech(request: Request):
                 return _twiml_response(
                     await _twiml_gather_adaptive(msg, action_url, sess)
                 )
+        else:
+            _explicit_correction = False  # respuesta ambigua: puede ser restatement
 
-        # ── Respuesta ni sí ni no: el usuario probablemente re-dicta o corrige
-        #    el origen (porque el bot lo había oído mal). Resolvemos contra el
-        #    catálogo local y decidimos: mismo origen → confirmar; distinto →
-        #    re-confirmar el nuevo (no despachar a ciegas).
+        # ── Respuesta ni sí ni no (o corrección inline sin dirección de calle):
+        #    el usuario probablemente re-dicta o corrige el origen.
+        #    Si dijo "No, X" (_explicit_correction=True) → SIEMPRE corrección,
+        #    nunca restatement (aunque X fuzzy-matchee con el origen anterior).
         local = _try_local_match(texto_usuario)
         if local:
             _cur = strip_accents((sess.origen_text or "").lower().strip())
             _new = strip_accents(local.lower().strip())
-            _same = bool(_cur) and (
+            _same = (not _explicit_correction) and bool(_cur) and (
                 _cur == _new
                 or bool(fuzzy_match_location(_new, [_cur], threshold=0.80))
             )
