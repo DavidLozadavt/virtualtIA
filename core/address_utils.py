@@ -399,7 +399,8 @@ def _strip_preamble(text: str) -> str:
 
 def _parse_si_no(text: str) -> Optional[bool]:
     t         = _normalize_text(text)
-    positivos = {"si","claro","exacto","correcto","ok","dale","yes","obvio","afirmativo","asi","eso","bien"}
+    positivos = {"si","claro","exacto","correcto","ok","dale","yes","obvio","afirmativo","asi","eso","bien",
+                 "confirmo","confirma","confirmado","confirmar","confirmamos","listo","perfecto","seguro","vale"}
     negativos = {"no","nop","nel","nope","para nada","negativo","incorrecto","tampoco","nunca","jamas"}
 
     uncertainty = {"no lo se","no se","no se bien","nose","no lo sé","no sé"}
