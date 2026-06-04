@@ -346,6 +346,7 @@ class AdaptiveEndpointController:
 _CAPTURE_HINTS = (
     "Pubenza,Pubensa,Pubencia,"          # Pubenza (el más fallado en prod)
     "Centro,"
+    "SENA,Sena Centro,Sena Norte,"       # SENA — frecuente, STT no lo reconoce solo
     "Campanario,Campanaryo,"
     "Los Sauces,"
     "Yanaconas,Yanakonas,"
@@ -354,7 +355,7 @@ _CAPTURE_HINTS = (
     "Pandiguando,"
     "Belalcázar,"
     "Yambitará"
-)  # ~15 términos
+)  # ~18 términos
 
 
 def _get_contextual_hints(state: str, detected_barrio: Optional[str] = None) -> str:

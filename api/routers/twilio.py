@@ -343,6 +343,7 @@ class CallSession:
     retry_count: int = 0  # Reintentos consecutivos en el mismo estado
     geo_origin: GeoSessionState = field(default_factory=GeoSessionState)
     geo_dest:   GeoSessionState = field(default_factory=GeoSessionState)
+    pending_disambiguation: Optional[str] = None  # "SENA" cuando se espera Norte/Centro
 
     def __post_init__(self):
         self.memory = ConversationMemory(self.call_sid)
@@ -1562,6 +1563,7 @@ async def process_speech(request: Request):
         return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
     # ── Calidad media: intentar match local agresivo antes de LLM ──
+    _medium_local_resolved = False
     if speech_quality == "medium" and sess.state in (
         STATE_WAITING_ORIGIN,
         STATE_WAITING_DEST_OR_SKIP,
@@ -1570,8 +1572,18 @@ async def process_speech(request: Request):
         if not local_try:
             local_try = _try_local_match(preprocess_stt(texto_usuario, confidence))
         if local_try:
-            logger.info(f"[MEDIUM_QUALITY] Resolved via local match: {local_try!r}")
-            texto_usuario = local_try
+            # Si el match infirió una sede SENA específica pero el usuario solo
+            # dijo "sena" (sin "norte"/"centro"), no aceptar — la lógica de
+            # desambiguación lo resolverá correctamente.
+            _tl_orig = strip_accents(texto_usuario.lower())
+            _sena_specific = local_try.upper().startswith("SENA") and local_try not in ("SENA Popayán",)
+            _user_said_which = any(k in _tl_orig for k in ["norte", "centro", "senacentro"])
+            if _sena_specific and not _user_said_which:
+                logger.info(f"[MEDIUM_QUALITY] SENA ambiguous — skipping local match {local_try!r}")
+            else:
+                logger.info(f"[MEDIUM_QUALITY] Resolved via local match: {local_try!r}")
+                texto_usuario = local_try
+                _medium_local_resolved = True
 
     # NOTA: retry_count NO se resetea aquí. Un turno de calidad alta/media puede
     # aún ser rechazado por el gate anti-basura de waiting_origin (extracción que
@@ -1590,23 +1602,57 @@ async def process_speech(request: Request):
         # LLM/raw = NO confiable → se valida con looks_like_place antes de aceptar.
         trusted_origin = False
 
-        # 1. Referencia humana ("por el éxito", "frente a la galería")
-        human_ref = resolve_human_reference(texto_usuario)
-        if human_ref and human_ref.get("canonical"):
-            origen = human_ref["canonical"]
-            trusted_origin = True
-            logger.info(f"[ORIGIN] Human ref: {origen!r}")
-        else:
-            # 2. Local match directo (catálogo de barrios/landmarks)
-            local = _try_local_match(texto_usuario)
-            if local:
-                origen = local
+        # 0. Resolución de ambigüedad pendiente (ej. "SENA" → Norte o Centro)
+        if sess.pending_disambiguation == "SENA":
+            tl_dis = strip_accents(texto_usuario.lower())
+            _centro_kw = ["centro", "del centro", "sena centro", "senacentro", "comercio"]
+            _norte_kw  = ["norte", "del norte", "sena norte"]
+            if any(k in tl_dis for k in _centro_kw):
+                origen = "SENA Centro De Comercio Y Servicios"
                 trusted_origin = True
-                logger.info(f"[ORIGIN] Local match: {origen!r}")
+                sess.pending_disambiguation = None
+                logger.info(f"[ORIGIN] SENA disambiguated → Centro")
+            elif any(k in tl_dis for k in _norte_kw):
+                origen = "SENA Norte"
+                trusted_origin = True
+                sess.pending_disambiguation = None
+                logger.info(f"[ORIGIN] SENA disambiguated → Norte")
             else:
-                # 3. LLM extraction (NO confiable — puede alucinar)
-                origen_llm, hint = await extract_pickup_address(texto_usuario)
-                origen = (origen_llm or texto_usuario or "").strip()
+                msg = "¿Cuál SENA: el del Norte o el del Centro de Comercio?"
+                sess.last_message = msg
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+
+        if not trusted_origin:
+            # 1a. MEDIUM_QUALITY ya resolvió local match — usar directamente sin pasar
+            #     por resolve_human_reference (evita que "sena" como substring del
+            #     nombre completo devuelva "SENA Popayán" en vez del lugar correcto).
+            if _medium_local_resolved:
+                origen = texto_usuario
+                trusted_origin = True
+                logger.info(f"[ORIGIN] Local match (medium pre-resolved): {origen!r}")
+            # 1b. Referencia humana ("por el éxito", "frente a la galería")
+            elif (human_ref := resolve_human_reference(texto_usuario)) and human_ref.get("canonical"):
+                if human_ref.get("needs_disambiguation"):
+                    # "sena" solo → preguntar Norte o Centro
+                    sess.pending_disambiguation = "SENA"
+                    msg = "¿Cuál SENA: el del Norte o el del Centro de Comercio?"
+                    sess.last_message = msg
+                    logger.info(f"[ORIGIN] SENA ambiguous — asking Norte/Centro")
+                    return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                origen = human_ref["canonical"]
+                trusted_origin = True
+                logger.info(f"[ORIGIN] Human ref: {origen!r}")
+            else:
+                # 2. Local match directo (catálogo de barrios/landmarks)
+                local = _try_local_match(texto_usuario)
+                if local:
+                    origen = local
+                    trusted_origin = True
+                    logger.info(f"[ORIGIN] Local match: {origen!r}")
+                else:
+                    # 3. LLM extraction (NO confiable — puede alucinar)
+                    origen_llm, hint = await extract_pickup_address(texto_usuario)
+                    origen = (origen_llm or texto_usuario or "").strip()
 
         # ── Gate anti-basura: si la extracción NO viene del catálogo/referencia,
         #    exigir que parezca un lugar real (calle/número/barrio/landmark).
@@ -1863,7 +1909,8 @@ async def process_speech(request: Request):
         #    el usuario probablemente re-dicta o corrige el origen.
         #    Si dijo "No, X" (_explicit_correction=True) → SIEMPRE corrección,
         #    nunca restatement (aunque X fuzzy-matchee con el origen anterior).
-        local = _try_local_match(texto_usuario)
+        _hr_corr = resolve_human_reference(texto_usuario)
+        local = (_hr_corr["canonical"] if (_hr_corr and _hr_corr.get("canonical")) else None) or _try_local_match(texto_usuario)
         if local:
             _cur = strip_accents((sess.origen_text or "").lower().strip())
             _new = strip_accents(local.lower().strip())
@@ -2090,8 +2137,10 @@ async def process_speech(request: Request):
             dest_text = re.sub(pat, "", dest_text, flags=re.IGNORECASE).strip()
 
         # Referencia humana en destino
-        human_ref = resolve_human_reference(dest_text)
-        if human_ref and human_ref.get("canonical"):
+        if _medium_local_resolved:
+            dest = texto_usuario
+            logger.info(f"[DEST] Local match (medium pre-resolved): {dest!r}")
+        elif (human_ref := resolve_human_reference(dest_text)) and human_ref.get("canonical"):
             dest = human_ref["canonical"]
             logger.info(f"[DEST] Human ref: {dest!r}")
         else:

@@ -248,6 +248,45 @@ STATE_WAITING_DOM_DEST = "waiting_dom_dest"
 STATE_WAITING_DOM_OBS = "waiting_dom_obs"
 STATE_FINISHED = "finished"
 
+# Marcadores de pregunta/charla conversacional — NO son direcciones.
+_QUESTION_MARKERS = (
+    "cuando", "cuándo", "cuanto", "cuánto", "como", "cómo",
+    "por que", "porque", "por qué", "cual", "cuál",
+    "que hora", "qué hora", "a que hora", "a qué hora",
+    "demora", "demoran", "demoro", "tarda", "tardan", "falta", "ya viene",
+    "vale", "cuesta", "precio", "tarifa", "cobran", "valor", "cuanto sale",
+    "cuanto cobran", "donde esta", "dónde está", "donde va", "ya llego", "ya llegó",
+)
+
+
+def is_conversational_query(text: str) -> bool:
+    """
+    True si el texto es una pregunta/charla conversacional y NO una dirección.
+    Ej: 'buenas, el servicio cuándo llega', '¿cuánto vale?', 'ya viene?'.
+    """
+    if "?" in text or "¿" in text:
+        return True
+    t = re.sub(r'[^\w\s]', ' ', text.lower().strip())
+    t = re.sub(r'\s+', ' ', t).strip()
+    if not t:
+        return False
+    return any(m in t for m in _QUESTION_MARKERS)
+
+
+# Señal EXPLÍCITA de dirección (número, nomenclatura de calle, barrio, sector…).
+# A diferencia de looks_like_place(), NO usa fuzzy/catálogo → sin falsos positivos.
+_ADDRESS_SIGNAL_RE = re.compile(
+    r'\d|#|\b(calle|carrera|cra|cr|cl|kr|kra|av|avenida|diagonal|diag|'
+    r'transversal|tr|barrio|sector|vereda|conjunto|urbanizaci[oó]n|manzana|mz)\b',
+    re.IGNORECASE,
+)
+
+
+def _has_address_signal(text: str) -> bool:
+    """True si el texto contiene una señal explícita de dirección/lugar."""
+    return bool(_ADDRESS_SIGNAL_RE.search(text or ""))
+
+
 def clean_map_location(loc_name: str) -> str:
     """Removes city, country, and zip codes from a map location name for a more natural response."""
     if not loc_name:
@@ -533,7 +572,10 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, "¡Hola! ¿En qué dirección debemos recoger el paquete o pedido? (Usa el botón para tu ubicación o escíbela)")
             return
 
-    if is_just_greeting(texto_usuario) and sess.state in (STATE_NEW, STATE_WAITING_ORIGIN, STATE_WAITING_TIPO_SERVICIO):
+    # NOTA: NO incluir STATE_WAITING_ORIGIN aquí. Si el usuario ya eligió tipo de
+    # servicio y está en captura de origen, un saludo NO debe reenviar el menú —
+    # se maneja dentro del estado waiting_origin re-pidiendo el origen.
+    if is_just_greeting(texto_usuario) and sess.state in (STATE_NEW, STATE_WAITING_TIPO_SERVICIO):
         sess.state = STATE_WAITING_TIPO_SERVICIO
         await send_whatsapp_interactive_buttons(
             sender_phone,
@@ -595,7 +637,16 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, "¡Perfecto! Has elegido Domicilio. ¿En qué dirección debemos recoger el paquete o pedido? (Usa el botón para enviar tu ubicación, o escríbela)")
             return
         else:
-            # If they didn't push the button but wrote an address right away, we fall through.
+            # No seleccionó botón. Si escribió saludo/pregunta (no dirección), aún
+            # NO eligió servicio → re-mostrar el menú. Solo si escribió una dirección
+            # real continuamos a la captura de origen (taxi ahora implícito).
+            if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+                await send_whatsapp_interactive_buttons(
+                    sender_phone,
+                    "Para ayudarte necesito que elijas una opción. ¿Qué tipo de servicio necesitas?",
+                    [("taxi_ahora", "Taxi Ahora"), ("taxi_prog", "Taxi Programado"), ("domicilio", "Domicilio")],
+                )
+                return
             sess.state = STATE_WAITING_ORIGIN
 
     # ── STATE: waiting_hora_prog ──
@@ -639,6 +690,13 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, msg)
             return
 
+        # Saludo / pregunta / charla → re-pedir origen, SIN reenviar el menú.
+        # Guard con señal EXPLÍCITA de dirección (número/calle/barrio), no fuzzy:
+        # evita que un falso positivo de looks_like_place deje pasar una pregunta.
+        if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+            await send_whatsapp_location_request(sender_phone, "Para continuar con tu solicitud necesito primero el punto de recogida. ¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
+            return
+
         origen_llm, hint = extract_pickup_address(texto_usuario)
         origen = (origen_llm or "").strip()
 
@@ -647,13 +705,10 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
 
+        # No se pudo extraer un origen válido → re-pedir el origen SIN reenviar el
+        # menú (el usuario ya eligió tipo de servicio; perder eso lo frustra).
         if not origen or len(origen) < 2 or not looks_like_place(origen):
-            sess.state = STATE_WAITING_TIPO_SERVICIO
-            await send_whatsapp_interactive_buttons(
-                sender_phone,
-                "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
-                [("taxi_ahora", "Taxi Ahora"), ("taxi_prog", "Taxi Programado"), ("domicilio", "Domicilio")],
-            )
+            await send_whatsapp_location_request(sender_phone, "No logré identificar el lugar de recogida. ¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
             return
 
         sess.origen_text = origen
@@ -687,6 +742,12 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_message(sender_phone, msg)
             return
 
+        # Saludo/pregunta/charla → re-preguntar la confirmación, sin tomarlo como dirección.
+        if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+            msg = f"¿Confirmas que te recogemos en {sess.origen_text}? Responde SÍ o NO."
+            await send_whatsapp_message(sender_phone, msg)
+            return
+
         # Si responde otra cosa, lo tomamos como corrección directa de la dirección
         sess.origen_text = texto_usuario
         sess.state = STATE_WAITING_DEST_OR_SKIP
@@ -709,6 +770,12 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             if ok:
                 sess.state = STATE_FINISHED
             await send_whatsapp_message(sender_phone, closing)
+            return
+
+        # Saludo/pregunta/charla (no dirección) → re-pedir destino sin extraer.
+        if not texto_usuario.startswith("Ubicación en mapa:") and (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+            msg = "Sigo registrando tu servicio. ¿A dónde te diriges? Envía tu ubicación con el botón, escribe un barrio o calle, o di *NO* si prefieres contarle al conductor."
+            await send_whatsapp_location_request(sender_phone, msg)
             return
 
         if texto_usuario.startswith("Ubicación en mapa:"):
@@ -750,6 +817,11 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, f"Anotado, recogemos en {loc_name}. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
             return
 
+        # Saludo/pregunta/charla (no dirección) → re-pedir origen sin extraer.
+        if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+            await send_whatsapp_location_request(sender_phone, "Para continuar necesito primero el punto de recogida del domicilio. ¿En qué dirección lo recogemos? (Usa el botón o escribe)")
+            return
+
         origen_llm, hint = extract_pickup_address(texto_usuario)
         origen = (origen_llm or "").strip()
 
@@ -771,6 +843,11 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     # ── STATE: waiting_dom_dest ──
     if sess.state == STATE_WAITING_DOM_DEST:
+        # Saludo/pregunta/charla (no dirección) → re-pedir destino sin extraer.
+        if not texto_usuario.startswith("Ubicación en mapa:") and (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
+            await send_whatsapp_location_request(sender_phone, "Sigo registrando tu domicilio. ¿A qué dirección lo llevamos? Envía tu ubicación con el botón o escribe la dirección.")
+            return
+
         if texto_usuario.startswith("Ubicación en mapa:"):
             dest = texto_usuario
         else:
