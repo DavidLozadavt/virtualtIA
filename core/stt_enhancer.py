@@ -393,6 +393,7 @@ HUMAN_REFERENCES: dict[str, dict] = {
         "canonical": "SENA Popayán",
         "lat": 2.4381, "lon": -76.6144,
         "aliases": ["sena", "el sena", "en el sena"],
+        "needs_disambiguation": True,
     },
     "hospital san jose": {
         "canonical": "Hospital San José",
@@ -417,7 +418,7 @@ HUMAN_REFERENCES: dict[str, dict] = {
     "sena centro": {
         "canonical": "SENA Centro De Comercio Y Servicios",
         "lat": 2.441584217876181, "lon": -76.6028230716416,
-        "aliases": ["sena centro", "sena del centro"],
+        "aliases": ["sena centro", "sena del centro", "senacentro", "el senacentro"],
     },
     "la estancia clinica": {
         "canonical": "Clínica La Estancia",
@@ -507,20 +508,30 @@ def resolve_human_reference(text: str) -> Optional[dict]:
                     "lon":       data.get("lon"),
                     "note":      data.get("note"),
                     "matched_alias": alias,
+                    "needs_disambiguation": data.get("needs_disambiguation", False),
                 }
 
-    # 2. Substring match
+    # 2. Substring match — word boundaries + preferir alias más largo (más específico).
+    #    "el sena centro" debe devolver "SENA Centro", no "SENA Popayán".
+    _sub_best: Optional[dict] = None
+    _sub_best_len = 0
     for key, data in HUMAN_REFERENCES.items():
         for alias in data.get("aliases", []):
             alias_norm = strip_accents(alias.lower())
-            if alias_norm in t_lower or t_lower in alias_norm:
-                return {
-                    "canonical": data["canonical"],
-                    "lat":       data.get("lat"),
-                    "lon":       data.get("lon"),
-                    "note":      data.get("note"),
-                    "matched_alias": alias,
-                }
+            escaped = re.escape(alias_norm)
+            if re.search(r"\b" + escaped + r"\b", t_lower) or t_lower in alias_norm:
+                if len(alias_norm) > _sub_best_len:
+                    _sub_best_len = len(alias_norm)
+                    _sub_best = {
+                        "canonical": data["canonical"],
+                        "lat":       data.get("lat"),
+                        "lon":       data.get("lon"),
+                        "note":      data.get("note"),
+                        "matched_alias": alias,
+                        "needs_disambiguation": data.get("needs_disambiguation", False),
+                    }
+    if _sub_best:
+        return _sub_best
 
     # Fuzzy fallback sobre aliases
     all_aliases: list[tuple[str, dict]] = []
@@ -540,6 +551,7 @@ def resolve_human_reference(text: str) -> Optional[dict]:
                 "lon":       data.get("lon"),
                 "note":      data.get("note"),
                 "matched_alias": alias,
+                "needs_disambiguation": data.get("needs_disambiguation", False),
                 "confidence": score,
             }
 
