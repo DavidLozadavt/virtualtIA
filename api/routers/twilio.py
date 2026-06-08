@@ -38,11 +38,17 @@ from core.stt_enhancer import (
     correct_stt_errors,
     expand_number_words_in_streets,
     fuzzy_match_location,
+    repair_location_transcription,
     repair_mangled_street_address,
     resolve_human_reference,
     strip_accents,
     POPAYAN_STT_CORRECTIONS,
 )
+from core.location_match import resolve_location_entity, decide, Decision, is_filler
+
+# Nombres a nivel ciudad/región: NUNCA son un punto de recogida válido. Bloquean
+# el fallback geográfico implícito (ej. LLM que ante un saludo devuelve "Popayán").
+_CITY_LEVEL_NAMES = frozenset({"popayan", "cauca", "colombia"})
 from core.conversation_repair import (
     ConversationMemory,
     BargeInHandler,
@@ -238,7 +244,7 @@ async def _build_dtmf_gather(
     dígito. Si el usuario no marca ni habla, el Redirect re-entra a process_speech.
     """
     params = sess.get_endpoint_params(short_answer=False)
-    hints = _get_contextual_hints(sess.state)
+    hints = _get_contextual_hints(sess.state, model=_twilio_speech_model())
 
     audio_bytes = await _generate_tts_audio(msg)
     base_url = (
@@ -343,7 +349,9 @@ class CallSession:
     retry_count: int = 0  # Reintentos consecutivos en el mismo estado
     geo_origin: GeoSessionState = field(default_factory=GeoSessionState)
     geo_dest:   GeoSessionState = field(default_factory=GeoSessionState)
-    pending_disambiguation: Optional[str] = None  # "SENA" cuando se espera Norte/Centro
+    # Desambiguación pendiente de un grupo multi-sede (data-driven). Dict con
+    # {"candidates": [canónicos], "question": str}. None cuando no hay nada pendiente.
+    pending_disambiguation: Optional[dict] = None
 
     def __post_init__(self):
         self.memory = ConversationMemory(self.call_sid)
@@ -462,7 +470,7 @@ async def _twiml_gather_message(
     - Fallback a Polly <Say> si edge_tts falla
     """
     if hints is None:
-        hints = _get_contextual_hints("waiting_origin")
+        hints = _get_contextual_hints("waiting_origin", model=_twilio_speech_model())
     if enable_partial is None:
         enable_partial = _twilio_enable_partial()
 
@@ -521,7 +529,7 @@ async def _twiml_gather_adaptive(
         detected_barrio = sess.origen_barrio or sess.origen_text
     elif sess.state == STATE_CONFIRMING_DEST:
         detected_barrio = sess.destino_text
-    hints = _get_contextual_hints(sess.state, detected_barrio)
+    hints = _get_contextual_hints(sess.state, detected_barrio, model=_twilio_speech_model())
     return await _twiml_gather_message(
         msg,
         action_url,
@@ -858,8 +866,13 @@ def preprocess_stt(text: str, confidence: float = 1.0) -> str:
     # 4b. Reparar direcciones mangled: "carrera 4 a eb 1728" → "carrera 4a # 17b 28"
     t = repair_mangled_street_address(t)
 
-    # 5. Correcciones STT específicas de Popayán
+    # 5. Correcciones STT específicas de Popayán (dict curado)
     t = correct_stt_errors(t)
+
+    # 5b. Reparación fonética de transcripción contra el catálogo completo
+    #     (generaliza el dict a los ~600 lugares; guardas estrictas, no expande
+    #     ni colisiona — ej. "villa del karmen" → "villa del carmen").
+    t = repair_location_transcription(t)
 
     # 6. Normalizar espacios
     t = re.sub(r"\s+", " ", t).strip()
@@ -934,10 +947,14 @@ def _aggressive_place_recovery(text: str) -> Optional[str]:
 
     Cuando la confianza es razonable pero el texto vino mal transcrito (ej:
     "noches quisiera morir para la fuerza" con conf=0.73), en vez de rechazar el
-    turno en silencio, deslizamos ventanas de 3→2→1 palabras sobre el texto y
-    probamos cada fragmento contra el catálogo local (BARRIO_ALIASES + variantes
-    STT + landmarks) y contra las referencias humanas. Devuelve el primer
-    canónico que matchee, o None si nada parece un lugar real.
+    turno en silencio, deslizamos ventanas de 3→2→1 palabras y probamos cada
+    fragmento contra el resolver tipado.
+
+    Contrato de PRECISIÓN: solo devuelve un canónico para fragmentos que el
+    resolver decide ACCEPT (coincidencia textual/fonética fuerte y NO ambigua).
+    Fragmentos de cortesía/relleno ("buenas", "hola", "gracias") o coincidencias
+    débiles → None (el llamador pide repetir). Nunca acepta AMBIGUOUS ni inventa
+    una sede a partir de un fuzzy débil.
     """
     if not text:
         return None
@@ -951,16 +968,28 @@ def _aggressive_place_recovery(text: str) -> Optional[str]:
             frag = " ".join(words[i : i + size]).strip()
             if len(frag) < 4:
                 continue
-            local = _try_local_match(frag)
-            if local:
-                logger.info(f"[RECOVERY] Fragment {frag!r} → {local!r}")
-                return local
-            human_ref = resolve_human_reference(frag)
-            if human_ref and human_ref.get("canonical"):
-                logger.info(f"[RECOVERY] Fragment {frag!r} → human ref {human_ref['canonical']!r}")
-                return human_ref["canonical"]
+            m = resolve_location_entity(frag)
+            if decide(m) == Decision.ACCEPT and m.canonical:
+                logger.info(f"[RECOVERY] Fragment {frag!r} → {m.canonical!r} [{m.match_type.name}]")
+                return m.canonical
 
     return None
+
+
+def _short_place_name(canonical: str) -> str:
+    """Nombre corto para leer en voz alta (parte antes de la primera coma)."""
+    return (canonical or "").split(",")[0].strip()
+
+
+def _disambiguation_question(candidates: list[str]) -> str:
+    """Construye la pregunta de desambiguación a partir de las sedes reales.
+    Generalizable: no contiene nombres hardcodeados."""
+    names = [_short_place_name(c) for c in candidates if c]
+    if len(names) >= 2:
+        return f"¿Cuál: {', '.join(names[:-1])} o {names[-1]}?"
+    if names:
+        return f"¿Te refieres a {names[0]}?"
+    return "¿Cuál de las opciones?"
 
 
 # ── Extracción de direcciones ─────────────────────────────────────────────────
@@ -1060,7 +1089,13 @@ async def extract_address(user_text: str, role: str = "origen") -> Tuple[Optiona
         )
         raw = (result.choices[0].message.content or "").strip()
 
-        if not raw or raw.lower() in ("null", "none", ""):
+        # Guard anti-default-city: el LLM, ante un saludo o texto sin lugar,
+        # tiende a devolver la ciudad/región del prompt ("Popayán"). Eso NO es
+        # un punto de recogida → tratarlo como sin-resultado. Evita el fallback
+        # geográfico implícito "Hola" → "Popayán".
+        if not raw or strip_accents(raw.lower()) in _CITY_LEVEL_NAMES or raw.lower() in ("null", "none", ""):
+            if raw:
+                logger.info(f"[EXTRACT] LLM devolvió nivel-ciudad/none {raw!r} → sin lugar")
             fb = user_text.strip()
             if role == "origen":
                 return (fb if len(fb) >= 4 else None), "¿Dónde te recogemos? Dime el barrio o la calle."
@@ -1602,64 +1637,93 @@ async def process_speech(request: Request):
         # LLM/raw = NO confiable → se valida con looks_like_place antes de aceptar.
         trusted_origin = False
 
-        # 0. Resolución de ambigüedad pendiente (ej. "SENA" → Norte o Centro)
-        if sess.pending_disambiguation == "SENA":
-            tl_dis = strip_accents(texto_usuario.lower())
-            _centro_kw = ["centro", "del centro", "sena centro", "senacentro", "comercio"]
-            _norte_kw  = ["norte", "del norte", "sena norte"]
-            if any(k in tl_dis for k in _centro_kw):
-                origen = "SENA Centro De Comercio Y Servicios"
+        # 0. Resolución de ambigüedad pendiente (grupo multi-sede, data-driven).
+        #    La respuesta se resuelve contra las sedes del grupo (scope), usando
+        #    sus tokens distintivos — sin reglas hardcodeadas tipo "centro"/"norte".
+        if sess.pending_disambiguation:
+            _pd = sess.pending_disambiguation
+            m_dis = resolve_location_entity(texto_usuario, scope=_pd.get("candidates"))
+            if decide(m_dis) == Decision.ACCEPT and m_dis.canonical:
+                origen = m_dis.canonical
                 trusted_origin = True
                 sess.pending_disambiguation = None
-                logger.info(f"[ORIGIN] SENA disambiguated → Centro")
-            elif any(k in tl_dis for k in _norte_kw):
-                origen = "SENA Norte"
-                trusted_origin = True
-                sess.pending_disambiguation = None
-                logger.info(f"[ORIGIN] SENA disambiguated → Norte")
+                logger.info(f"[ORIGIN] disambiguated → {origen!r}")
             else:
-                msg = "¿Cuál SENA: el del Norte o el del Centro de Comercio?"
+                msg = _pd.get("question") or "¿Cuál de las opciones?"
                 sess.last_message = msg
                 return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
-        if not trusted_origin:
-            # 1a. MEDIUM_QUALITY ya resolvió local match — usar directamente sin pasar
-            #     por resolve_human_reference (evita que "sena" como substring del
-            #     nombre completo devuelva "SENA Popayán" en vez del lugar correcto).
-            if _medium_local_resolved:
-                origen = texto_usuario
+        # 1. MEDIUM_QUALITY ya resolvió local match — usar directamente.
+        if not trusted_origin and _medium_local_resolved:
+            origen = texto_usuario
+            trusted_origin = True
+            logger.info(f"[ORIGIN] Local match (medium pre-resolved): {origen!r}")
+
+        # 2. Resolución tipada central (referencias humanas + barrios + landmarks).
+        #    Una sola política decide; precisión sobre recall.
+        elif not trusted_origin:
+            m = resolve_location_entity(texto_usuario)
+            d = decide(m)
+            if d == Decision.AMBIGUOUS and m.canonical:
+                sess.pending_disambiguation = {
+                    "candidates": list(m.disambiguation_candidates),
+                    "question":   _disambiguation_question(m.disambiguation_candidates),
+                }
+                msg = sess.pending_disambiguation["question"]
+                sess.last_message = msg
+                logger.info(f"[ORIGIN] ambiguous ({m.canonical!r}) — asking options")
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+            elif d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
+                # ACCEPT/CONFIRM: ambos son lugares reales del catálogo; el estado
+                # CONFIRMING_ORIGIN verifica con el usuario antes de crear el viaje.
+                origen = m.canonical
                 trusted_origin = True
-                logger.info(f"[ORIGIN] Local match (medium pre-resolved): {origen!r}")
-            # 1b. Referencia humana ("por el éxito", "frente a la galería")
-            elif (human_ref := resolve_human_reference(texto_usuario)) and human_ref.get("canonical"):
-                if human_ref.get("needs_disambiguation"):
-                    # "sena" solo → preguntar Norte o Centro
-                    sess.pending_disambiguation = "SENA"
-                    msg = "¿Cuál SENA: el del Norte o el del Centro de Comercio?"
-                    sess.last_message = msg
-                    logger.info(f"[ORIGIN] SENA ambiguous — asking Norte/Centro")
-                    return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
-                origen = human_ref["canonical"]
-                trusted_origin = True
-                logger.info(f"[ORIGIN] Human ref: {origen!r}")
+                logger.info(
+                    f"[ORIGIN] matcher=resolver type={m.match_type.name} "
+                    f"score={m.confidence:.3f} decision={d.value} "
+                    f"reason=catalog_match → {origen!r}"
+                )
+            elif is_filler(texto_usuario):
+                # Saludo / cortesía / relleno: NO es una ubicación. No llamar al
+                # LLM (alucina la ciudad). Pedir repetición directamente.
+                logger.info(
+                    f"[ORIGIN] matcher=resolver type=NONE score=0.000 "
+                    f"decision=reject reason=filler/greeting ({texto_usuario!r}) → ask repeat"
+                )
+                sess.retry_count += 1
+                sess.endpoint_ctrl.on_retry()
+                sess.origen_text = None
+                if sess.retry_count >= 2:
+                    sess.last_message = DTMF_MENU_MESSAGE
+                    return _twiml_response(
+                        await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
+                    )
+                msg = "No logré identificar la ubicación. ¿Podrías repetirla?"
+                sess.last_message = msg
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
             else:
-                # 2. Local match directo (catálogo de barrios/landmarks)
-                local = _try_local_match(texto_usuario)
-                if local:
-                    origen = local
-                    trusted_origin = True
-                    logger.info(f"[ORIGIN] Local match: {origen!r}")
-                else:
-                    # 3. LLM extraction (NO confiable — puede alucinar)
-                    origen_llm, hint = await extract_pickup_address(texto_usuario)
-                    origen = (origen_llm or texto_usuario or "").strip()
+                # REJECT (no relleno): puede ser un lugar novel que el catálogo no
+                # tiene. Extracción LLM (con guard anti-ciudad) y, si no parece
+                # lugar, el gate anti-basura lo rechaza (cae a geocoder).
+                origen_llm, hint = await extract_pickup_address(texto_usuario)
+                origen = (origen_llm or texto_usuario or "").strip()
+                logger.info(
+                    f"[ORIGIN] matcher=llm score=n/a decision={d.value} "
+                    f"reason=resolver_reject_nonfiller ({texto_usuario!r}) → {origen!r}"
+                )
 
         # ── Gate anti-basura: si la extracción NO viene del catálogo/referencia,
         #    exigir que parezca un lugar real (calle/número/barrio/landmark).
         #    Bloquea alucinaciones del LLM tipo "tu cuenta", "fuerza", "dos".
-        if not trusted_origin and not (
+        #    También bloquea el nombre de la ciudad/región como "punto de recogida"
+        #    (defensa-en-profundidad contra el fallback geográfico implícito).
+        _origen_is_city = strip_accents((origen or "").lower().strip()) in _CITY_LEVEL_NAMES
+        if not trusted_origin and (_origen_is_city or not (
             looks_like_place(origen) or looks_like_place(texto_usuario)
-        ):
+        )):
+            if _origen_is_city:
+                logger.info(f"[ORIGIN] rejected city-level extraction {origen!r} (no default city)")
+                origen = ""
             # Antes de rechazar: rescate agresivo. El texto puede venir muy mal
             # transcrito (conf alta, palabras erradas). Deslizamos ventanas sobre
             # el texto y el original crudo buscando CUALQUIER fragmento que matchee
@@ -1797,17 +1861,16 @@ async def process_speech(request: Request):
             cleaned_dest_input = re.sub(r'^(?:sí|si|bien|correcto|exacto|ok|dale|claro)[,\s]*(?:y\s+)?', '', texto_usuario, flags=re.IGNORECASE).strip()
             
             if len(cleaned_dest_input) > 2:
-                human_ref = resolve_human_reference(cleaned_dest_input)
-                if human_ref and human_ref.get("canonical"):
-                    dest_candidate = human_ref["canonical"]
+                m_dest = resolve_location_entity(cleaned_dest_input)
+                d_dest = decide(m_dest)
+                if d_dest in (Decision.ACCEPT, Decision.CONFIRM) and m_dest.canonical:
+                    dest_candidate = m_dest.canonical
+                elif d_dest == Decision.AMBIGUOUS:
+                    dest_candidate = None  # se pregunta el destino por el flujo normal
                 else:
-                    local_dest = _try_local_match(cleaned_dest_input)
-                    if local_dest:
-                        dest_candidate = local_dest
-                    else:
-                        dest_llm, _ = await extract_destination_address(cleaned_dest_input)
-                        if dest_llm:
-                            dest_candidate = dest_llm
+                    dest_llm, _ = await extract_destination_address(cleaned_dest_input)
+                    if dest_llm:
+                        dest_candidate = dest_llm
 
             if dest_candidate and ASK_DESTINATION:
                 norm = normalize_address(dest_candidate)
@@ -1951,7 +2014,11 @@ async def process_speech(request: Request):
         # No se pudo parsear la respuesta: si ya tenemos origen con barrio conocido,
         # tratar la respuesta ambigua como confirmación implícita para no hacer
         # repetir al usuario innecesariamente.
-        if sess.origen_text and sess.origen_barrio:
+        # PERO: si el texto parece un lugar/dirección, es una CORRECCIÓN que no
+        # logramos matchear contra el catálogo — nunca una confirmación. Confirmar
+        # aquí producía falsos "sí" (el usuario dijo un lugar, no aceptó el origen).
+        _ambiguous_is_place = looks_like_place(texto_usuario)
+        if sess.origen_text and sess.origen_barrio and not _ambiguous_is_place:
             logger.info(f"[CONFIRM_ORIGIN] Ambiguous response — accepting implicit confirm: {texto_usuario!r}")
             sess.memory.last_confirmed_origin = sess.origen_text
             if not ASK_DESTINATION:
@@ -2083,6 +2150,25 @@ async def process_speech(request: Request):
     # ── ESTADO: waiting_dest_or_skip ─────────────────────────────
     if sess.state == STATE_WAITING_DEST_OR_SKIP:
 
+        # 0. Desambiguación de destino pendiente (grupo multi-sede, data-driven).
+        if sess.pending_disambiguation:
+            _pd = sess.pending_disambiguation
+            m_dis = resolve_location_entity(texto_usuario, scope=_pd.get("candidates"))
+            if decide(m_dis) == Decision.ACCEPT and m_dis.canonical:
+                sess.pending_disambiguation = None
+                dest = m_dis.canonical
+                sess.destino_text = dest
+                sess.memory.add_location_mention(dest)
+                sess.retry_count = 0
+                sess.state = STATE_CONFIRMING_DEST
+                msg = f"¿Te llevamos a {dest}? Responde sí o corriges el destino."
+                sess.last_message = msg
+                logger.info(f"[DEST] disambiguated → {dest!r}")
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+            msg = _pd.get("question") or "¿Cuál de las opciones?"
+            sess.last_message = msg
+            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+
         # Corrección de origen
         if _is_correction_request(texto_usuario):
             sess.state = STATE_WAITING_ORIGIN
@@ -2136,22 +2222,41 @@ async def process_speech(request: Request):
         for pat in dest_preambles:
             dest_text = re.sub(pat, "", dest_text, flags=re.IGNORECASE).strip()
 
-        # Referencia humana en destino
+        # Resolución de destino vía política tipada central.
         if _medium_local_resolved:
             dest = texto_usuario
             logger.info(f"[DEST] Local match (medium pre-resolved): {dest!r}")
-        elif (human_ref := resolve_human_reference(dest_text)) and human_ref.get("canonical"):
-            dest = human_ref["canonical"]
-            logger.info(f"[DEST] Human ref: {dest!r}")
         else:
-            # Local match
-            local_dest = _try_local_match(dest_text)
-            if local_dest:
-                dest = local_dest
-                logger.info(f"[DEST] Local match: {dest!r}")
+            m_dest = resolve_location_entity(dest_text)
+            d_dest = decide(m_dest)
+            if d_dest == Decision.AMBIGUOUS and m_dest.canonical:
+                # Sede multi-opción → preguntar; la respuesta se resuelve arriba (0.)
+                sess.pending_disambiguation = {
+                    "candidates": list(m_dest.disambiguation_candidates),
+                    "question":   _disambiguation_question(m_dest.disambiguation_candidates),
+                }
+                msg = sess.pending_disambiguation["question"]
+                sess.last_message = msg
+                logger.info(f"[DEST] ambiguous ({m_dest.canonical!r}) — asking options")
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+            elif d_dest in (Decision.ACCEPT, Decision.CONFIRM) and m_dest.canonical:
+                dest = m_dest.canonical
+                logger.info(
+                    f"[DEST] matcher=resolver type={m_dest.match_type.name} "
+                    f"score={m_dest.confidence:.3f} decision={d_dest.value} → {dest!r}"
+                )
+            elif is_filler(dest_text):
+                # Saludo / cortesía como "destino": no es ubicación. Pedir repetir.
+                logger.info(f"[DEST] filler/greeting ({dest_text!r}) → ask repeat")
+                msg = "No logré identificar el destino. ¿Podrías repetirlo?"
+                sess.last_message = msg
+                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
             else:
                 dest_llm, _ = await extract_destination_address(dest_text)
                 dest = (dest_llm or dest_text or "").strip()
+                if strip_accents((dest or "").lower().strip()) in _CITY_LEVEL_NAMES:
+                    logger.info(f"[DEST] rejected city-level {dest!r} (no default city)")
+                    dest = ""
 
         if dest:
             norm = normalize_address(dest)

@@ -1,457 +1,417 @@
 {
-  ".claude/settings.local.json": {
-    "mtime": 1780724854.8800108,
-    "ast_hash": "167065c1db6209151c233454e93148da",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\.claude\\settings.local.json": {
+    "mtime": 1780414008.9826014,
+    "ast_hash": "1e271e3217735106b08687728de579f1",
+    "semantic_hash": "1e271e3217735106b08687728de579f1"
   },
-  "api/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\__init__.py": {
     "mtime": 1779904016.4250355,
     "ast_hash": "3eda607090cc43558fe3c1e39183499c",
     "semantic_hash": "3eda607090cc43558fe3c1e39183499c"
   },
-  "api/dependencies.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\dependencies.py": {
     "mtime": 1779904016.4250355,
     "ast_hash": "490b9f0fca603af48bd7f20cea050400",
     "semantic_hash": "490b9f0fca603af48bd7f20cea050400"
   },
-  "api/middleware.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\middleware.py": {
     "mtime": 1779904016.4260254,
     "ast_hash": "a1a88e3de4c7d305b6965f853a81d2ff",
     "semantic_hash": "a1a88e3de4c7d305b6965f853a81d2ff"
   },
-  "api/routers/admin/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\admin\\__init__.py": {
     "mtime": 1779904016.4269714,
     "ast_hash": "0c8f3da8e4b4315a490bd4855e3a1104",
     "semantic_hash": "0c8f3da8e4b4315a490bd4855e3a1104"
   },
-  "api/routers/admin/config.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\admin\\config.py": {
     "mtime": 1779904016.4285717,
     "ast_hash": "e98849a1e805647785b652f93c3b0c2d",
     "semantic_hash": "e98849a1e805647785b652f93c3b0c2d"
   },
-  "api/routers/admin/sessions.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\admin\\sessions.py": {
     "mtime": 1779904016.4285717,
     "ast_hash": "5ce8524b28dd76e0dd2acb1301deffe3",
     "semantic_hash": "5ce8524b28dd76e0dd2acb1301deffe3"
   },
-  "api/routers/admin/stats.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\admin\\stats.py": {
     "mtime": 1779904016.4297237,
     "ast_hash": "2cd18def82f23f1ac31629efe9444037",
     "semantic_hash": "2cd18def82f23f1ac31629efe9444037"
   },
-  "api/routers/browser_voice.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\browser_voice.py": {
     "mtime": 1779904016.4307213,
     "ast_hash": "909148b747e3e31d6ffb5318520ceb22",
     "semantic_hash": "909148b747e3e31d6ffb5318520ceb22"
   },
-  "api/routers/main.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\main.py": {
     "mtime": 1779904016.4307213,
     "ast_hash": "edbcc9b2cbab1f5c105340814298cb92",
     "semantic_hash": "edbcc9b2cbab1f5c105340814298cb92"
   },
-  "api/routers/tts.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\tts.py": {
     "mtime": 1779904016.4317236,
     "ast_hash": "60c444e884e8c31f0d896de9af4cb0f5",
     "semantic_hash": "60c444e884e8c31f0d896de9af4cb0f5"
   },
-  "api/routers/twilio.py": {
-    "mtime": 1780927104.3071322,
-    "ast_hash": "aac8f390da2ca2a392f8da2e722930f2",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\twilio.py": {
+    "mtime": 1780588901.078592,
+    "ast_hash": "9bac343dfbf9f51cc1fd9dceeeedb2d0",
+    "semantic_hash": "9bac343dfbf9f51cc1fd9dceeeedb2d0"
   },
-  "api/routers/whatsapp.py": {
-    "mtime": 1780596631.735397,
-    "ast_hash": "6fb947922ca3fe06b10440635ff3b26e",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\routers\\whatsapp.py": {
+    "mtime": 1780416415.2691653,
+    "ast_hash": "6e22258db46aa9b21db25def96c86048",
+    "semantic_hash": "6e22258db46aa9b21db25def96c86048"
   },
-  "api/schemas/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\schemas\\__init__.py": {
     "mtime": 1779904016.4337213,
     "ast_hash": "55d06f013a26ebf2f89b587477095657",
     "semantic_hash": "55d06f013a26ebf2f89b587477095657"
   },
-  "api/schemas/chat.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\schemas\\chat.py": {
     "mtime": 1779904016.434721,
     "ast_hash": "97b7fac6b70ad04dd6e9f777445aaa94",
     "semantic_hash": "97b7fac6b70ad04dd6e9f777445aaa94"
   },
-  "api/schemas/common.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\api\\schemas\\common.py": {
     "mtime": 1779904016.435724,
     "ast_hash": "ae60c1b6b00ce3c4ede14b380675d804",
     "semantic_hash": "ae60c1b6b00ce3c4ede14b380675d804"
   },
-  "core/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\__init__.py": {
     "mtime": 1779904016.4367235,
     "ast_hash": "45af9352edef4c9c88cf3af23ad23988",
     "semantic_hash": "45af9352edef4c9c88cf3af23ad23988"
   },
-  "core/address_utils.py": {
-    "mtime": 1780923482.626264,
-    "ast_hash": "139a5de691f6a553d966237cf69a53b7",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\address_utils.py": {
+    "mtime": 1780416415.2702003,
+    "ast_hash": "1631eaa9f4cc30a6d4e488bd1120aba1",
+    "semantic_hash": "1631eaa9f4cc30a6d4e488bd1120aba1"
   },
-  "core/config.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\config.py": {
     "mtime": 1780368497.2894816,
     "ast_hash": "d2a3573c610e4042e1930c9ffe75615f",
     "semantic_hash": "d2a3573c610e4042e1930c9ffe75615f"
   },
-  "core/conversation_repair.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\conversation_repair.py": {
     "mtime": 1780368497.2894816,
     "ast_hash": "29b268002019cdb16badeee9cc2d09ea",
     "semantic_hash": "29b268002019cdb16badeee9cc2d09ea"
   },
-  "core/database.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\database.py": {
     "mtime": 1779904016.4397204,
     "ast_hash": "ab4047ff25a988da3f90497564956af4",
     "semantic_hash": "ab4047ff25a988da3f90497564956af4"
   },
-  "core/geo_types.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\geo_types.py": {
     "mtime": 1780368497.291283,
     "ast_hash": "cf4dcc386fefcc757bb9a6882b0ef17f",
     "semantic_hash": "cf4dcc386fefcc757bb9a6882b0ef17f"
   },
-  "core/geocoder_service.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\geocoder_service.py": {
     "mtime": 1780368497.291283,
     "ast_hash": "d6ec02803d0ed077e910f03a1934c431",
     "semantic_hash": "d6ec02803d0ed077e910f03a1934c431"
   },
-  "core/llm_engine.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\llm_engine.py": {
     "mtime": 1779904016.4397204,
     "ast_hash": "7f1f737f36a186ccc371a8aae180b415",
     "semantic_hash": "7f1f737f36a186ccc371a8aae180b415"
   },
-  "core/llm_utils.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\llm_utils.py": {
     "mtime": 1779904016.440721,
     "ast_hash": "84c466d5cacc52194d4615c95c58f304",
     "semantic_hash": "84c466d5cacc52194d4615c95c58f304"
   },
-  "core/logger.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\logger.py": {
     "mtime": 1779904016.441721,
     "ast_hash": "8b87c165cda112f90c156ee44b3814d3",
     "semantic_hash": "8b87c165cda112f90c156ee44b3814d3"
   },
-  "core/pusher.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\pusher.py": {
     "mtime": 1779904016.441721,
     "ast_hash": "58332a225e3d86032d7f2d6af71fa61b",
     "semantic_hash": "58332a225e3d86032d7f2d6af71fa61b"
   },
-  "core/streaming_pipeline.py": {
-    "mtime": 1780925595.2903602,
-    "ast_hash": "2296543c382cd9f9754787de4de88013",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\streaming_pipeline.py": {
+    "mtime": 1780368497.2928073,
+    "ast_hash": "dc5542b14f94fac25706cb8a2672552c",
+    "semantic_hash": "dc5542b14f94fac25706cb8a2672552c"
   },
-  "core/stt_enhancer.py": {
-    "mtime": 1780925501.3438303,
-    "ast_hash": "23fbb741887a6d62f0704474341910f2",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\stt_enhancer.py": {
+    "mtime": 1780368497.2940776,
+    "ast_hash": "6c34531277f665fbf3e9767fb234b30b",
+    "semantic_hash": "6c34531277f665fbf3e9767fb234b30b"
   },
-  "core/voice_engine.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\core\\voice_engine.py": {
     "mtime": 1779994869.3723662,
     "ast_hash": "87dac422007e3206d4a5c64ce689c539",
     "semantic_hash": "87dac422007e3206d4a5c64ce689c539"
   },
-  "main.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\main.py": {
     "mtime": 1779986413.8860955,
     "ast_hash": "deee91b0d727615de2795046f4950e93",
     "semantic_hash": "deee91b0d727615de2795046f4950e93"
   },
-  "migrations/001_initial.sql": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\migrations\\001_initial.sql": {
     "mtime": 1779904016.446721,
     "ast_hash": "d58d945e85519f7c9ee693c996a45a2a",
     "semantic_hash": "d58d945e85519f7c9ee693c996a45a2a"
   },
-  "migrations/002_admin_tables.sql": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\migrations\\002_admin_tables.sql": {
     "mtime": 1779904016.4477208,
     "ast_hash": "a0576b205655d6876cca3c9122f183fd",
     "semantic_hash": "a0576b205655d6876cca3c9122f183fd"
   },
-  "migrations/003_location_cache.sql": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\migrations\\003_location_cache.sql": {
     "mtime": 1780368497.2992399,
     "ast_hash": "6612f03f18ef26ad5a69b31de65b57f3",
     "semantic_hash": "6612f03f18ef26ad5a69b31de65b57f3"
   },
-  "migrations/004_geo_aliases.sql": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\migrations\\004_geo_aliases.sql": {
     "mtime": 1780368497.29975,
     "ast_hash": "545b83edabd083cdf2f40ba9b0a643e5",
     "semantic_hash": "545b83edabd083cdf2f40ba9b0a643e5"
   },
-  "orchestrator/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\__init__.py": {
     "mtime": 1779904016.448721,
     "ast_hash": "d636cb07a3fcd86e33810bef6113e96a",
     "semantic_hash": "d636cb07a3fcd86e33810bef6113e96a"
   },
-  "orchestrator/context_builder.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\context_builder.py": {
     "mtime": 1779904016.449725,
     "ast_hash": "f7710daa7f0919d7778a6d4987acd87a",
     "semantic_hash": "f7710daa7f0919d7778a6d4987acd87a"
   },
-  "orchestrator/intent_router.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\intent_router.py": {
     "mtime": 1779904016.4507215,
     "ast_hash": "7b6c64b2d0e9be3d811b25f6fe66b083",
     "semantic_hash": "7b6c64b2d0e9be3d811b25f6fe66b083"
   },
-  "orchestrator/interceptors/helpers.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\interceptors\\helpers.py": {
     "mtime": 1779904016.4517224,
     "ast_hash": "9cbdbadb62b95591e3ef84b9152c8a44",
     "semantic_hash": "9cbdbadb62b95591e3ef84b9152c8a44"
   },
-  "orchestrator/interceptors/manager.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\interceptors\\manager.py": {
     "mtime": 1779904016.4517224,
     "ast_hash": "3c470a06f858c3aa3b48eaafdab755ef",
     "semantic_hash": "3c470a06f858c3aa3b48eaafdab755ef"
   },
-  "orchestrator/interceptors/nexiservice.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\interceptors\\nexiservice.py": {
     "mtime": 1779904016.452722,
     "ast_hash": "c23328f9e557e8228f892274cde4a662",
     "semantic_hash": "c23328f9e557e8228f892274cde4a662"
   },
-  "orchestrator/interceptors/schoolsena.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\interceptors\\schoolsena.py": {
     "mtime": 1779904016.4537225,
     "ast_hash": "63f765dacc3acac42e8352fa886d5a65",
     "semantic_hash": "63f765dacc3acac42e8352fa886d5a65"
   },
-  "orchestrator/memory_manager.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\memory_manager.py": {
     "mtime": 1779904016.4547205,
     "ast_hash": "d5a11edb73b2b1449a6631b1dfbd0306",
     "semantic_hash": "d5a11edb73b2b1449a6631b1dfbd0306"
   },
-  "orchestrator/response_engine.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\response_engine.py": {
     "mtime": 1779904016.4547205,
     "ast_hash": "9b9621a5e8208d929cba6020b2db9988",
     "semantic_hash": "9b9621a5e8208d929cba6020b2db9988"
   },
-  "orchestrator/tool_adapter.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\tool_adapter.py": {
     "mtime": 1779904016.4557216,
     "ast_hash": "045e4e039def80dcfac47f6ff4410bdb",
     "semantic_hash": "045e4e039def80dcfac47f6ff4410bdb"
   },
-  "orchestrator/tool_registry.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\tool_registry.py": {
     "mtime": 1779904016.4557216,
     "ast_hash": "f2d7aa864c215833f5d8f22d243de529",
     "semantic_hash": "f2d7aa864c215833f5d8f22d243de529"
   },
-  "orchestrator/tool_runner.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\orchestrator\\tool_runner.py": {
     "mtime": 1779904016.4567242,
     "ast_hash": "ec6a45ac4255eea004e8a3b4a341e754",
     "semantic_hash": "ec6a45ac4255eea004e8a3b4a341e754"
   },
-  "scripts/cleanup_backend_rentus.ps1": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\scripts\\cleanup_backend_rentus.ps1": {
     "mtime": 1779904016.4657216,
     "ast_hash": "a96485cf9e0b915c7ae34cacead669cb",
     "semantic_hash": "a96485cf9e0b915c7ae34cacead669cb"
   },
-  "services/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\__init__.py": {
     "mtime": 1779904016.4667215,
     "ast_hash": "f5b086cfea13ad6c092f8f8c8f964071",
     "semantic_hash": "f5b086cfea13ad6c092f8f8c8f964071"
   },
-  "services/chat_service.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\chat_service.py": {
     "mtime": 1779904016.4677212,
     "ast_hash": "f497b51af7ae64359afd8e3c9f55233d",
     "semantic_hash": "f497b51af7ae64359afd8e3c9f55233d"
   },
-  "services/geo.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\geo.py": {
     "mtime": 1779904016.4677212,
     "ast_hash": "8f611c06817f3ad52544e494dda67fd5",
     "semantic_hash": "8f611c06817f3ad52544e494dda67fd5"
   },
-  "services/twilio/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\twilio\\__init__.py": {
     "mtime": 1779904016.4687243,
     "ast_hash": "14c467d06a231454a1cbbc9d119545a0",
     "semantic_hash": "14c467d06a231454a1cbbc9d119545a0"
   },
-  "services/twilio/constants.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\twilio\\constants.py": {
     "mtime": 1779904016.4697218,
     "ast_hash": "edf62a6a3436e9e6bb1b032ba2cda07a",
     "semantic_hash": "edf62a6a3436e9e6bb1b032ba2cda07a"
   },
-  "services/twilio/navigation.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\twilio\\navigation.py": {
     "mtime": 1779904016.470725,
     "ast_hash": "9105a7ac83a84ec26c0fc553b0a4804a",
     "semantic_hash": "9105a7ac83a84ec26c0fc553b0a4804a"
   },
-  "services/twilio/speech_processor.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\services\\twilio\\speech_processor.py": {
     "mtime": 1780416415.2712312,
     "ast_hash": "5efc6fbb00df060d2348d850139a40bf",
     "semantic_hash": "5efc6fbb00df060d2348d850139a40bf"
   },
-  "test_geodata.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\test_geodata.py": {
     "mtime": 1780094148.2100842,
     "ast_hash": "567cc3c0d17aef0062c1d35bcef111c2",
     "semantic_hash": "567cc3c0d17aef0062c1d35bcef111c2"
   },
-  "tests/test_booking_flow.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tests\\test_booking_flow.py": {
     "mtime": 1779904016.4737208,
     "ast_hash": "5c8dd19f5ff6718f1be9e2b03367606a",
     "semantic_hash": "5c8dd19f5ff6718f1be9e2b03367606a"
   },
-  "tools/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\__init__.py": {
     "mtime": 1779904016.474975,
     "ast_hash": "84d363ae3fa990efd569e40a02e99302",
     "semantic_hash": "84d363ae3fa990efd569e40a02e99302"
   },
-  "tools/intellitaxi.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\intellitaxi.py": {
     "mtime": 1779996139.5737994,
     "ast_hash": "d2fcefcce9a13f790838a79a7dd9f7a3",
     "semantic_hash": "d2fcefcce9a13f790838a79a7dd9f7a3"
   },
-  "tools/navigation.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\navigation.py": {
     "mtime": 1779904016.4759767,
     "ast_hash": "ca63e79515c5b8a20d23ff162ebc4b1f",
     "semantic_hash": "ca63e79515c5b8a20d23ff162ebc4b1f"
   },
-  "tools/nexiservice.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\nexiservice.py": {
     "mtime": 1779904016.4769752,
     "ast_hash": "f40e17dbc72da12c2704a0b76bc0f0be",
     "semantic_hash": "f40e17dbc72da12c2704a0b76bc0f0be"
   },
-  "tools/popayan_geodata.py": {
-    "mtime": 1780925656.4777334,
-    "ast_hash": "8145b1ecaf36dc6f203d676722779a87",
-    "semantic_hash": ""
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\popayan_geodata.py": {
+    "mtime": 1780368497.301267,
+    "ast_hash": "a77d1216ca3f2f0949906ee497b0059a",
+    "semantic_hash": "a77d1216ca3f2f0949906ee497b0059a"
   },
-  "tools/rentus.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\rentus.py": {
     "mtime": 1779904016.4789789,
     "ast_hash": "4850bea114aa4ec2e9c3e59c8bed3085",
     "semantic_hash": "4850bea114aa4ec2e9c3e59c8bed3085"
   },
-  "tools/schoolsena.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\schoolsena.py": {
     "mtime": 1779904016.479975,
     "ast_hash": "b7bafaaa764faaf7d5e623c32ed89254",
     "semantic_hash": "b7bafaaa764faaf7d5e623c32ed89254"
   },
-  "tools/shared/__init__.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\shared\\__init__.py": {
     "mtime": 1779904016.479975,
     "ast_hash": "803610da930ab7b6c14c226146c62a5a",
     "semantic_hash": "803610da930ab7b6c14c226146c62a5a"
   },
-  "tools/shared/utils.py": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\tools\\shared\\utils.py": {
     "mtime": 1779904016.4809759,
     "ast_hash": "3a078402a28eec8e6b296885bd3e80ac",
     "semantic_hash": "3a078402a28eec8e6b296885bd3e80ac"
   },
-  "ARCHITECTURE.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\ARCHITECTURE.md": {
     "mtime": 1779904016.4221466,
     "ast_hash": "a40fb6d16a2f247ad8320953dac95177",
     "semantic_hash": "a40fb6d16a2f247ad8320953dac95177"
   },
-  "CONTRIBUTING.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\CONTRIBUTING.md": {
     "mtime": 1779904016.4221466,
     "ast_hash": "2d210642c8f67abf6fe586e6a6460042",
     "semantic_hash": "2d210642c8f67abf6fe586e6a6460042"
   },
-  "README.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\README.md": {
     "mtime": 1779904016.424012,
     "ast_hash": "41b4ccc604ac526fbbd469c4d2514c1c",
     "semantic_hash": "41b4ccc604ac526fbbd469c4d2514c1c"
   },
-  "docs/geocoding/00-overview.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\geocoding\\00-overview.md": {
     "mtime": 1780368497.2940776,
     "ast_hash": "81c2de2857862a1085dfab22a19ae6d2",
     "semantic_hash": "81c2de2857862a1085dfab22a19ae6d2"
   },
-  "docs/geocoding/01-architecture.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\geocoding\\01-architecture.md": {
     "mtime": 1780368497.2955956,
     "ast_hash": "e44047443b41c9d9d796363708f14bae",
     "semantic_hash": "e44047443b41c9d9d796363708f14bae"
   },
-  "docs/geocoding/02-phase1-plan.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\geocoding\\02-phase1-plan.md": {
     "mtime": 1780368497.2955956,
     "ast_hash": "438e84c281cd7c124528993fc7290204",
     "semantic_hash": "438e84c281cd7c124528993fc7290204"
   },
-  "docs/geocoding/03-phase2-deferred.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\geocoding\\03-phase2-deferred.md": {
     "mtime": 1780368497.2971146,
     "ast_hash": "33927496c3f13bf9728697eee3eaa46e",
     "semantic_hash": "33927496c3f13bf9728697eee3eaa46e"
   },
-  "docs/geocoding/04-files-changed.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\geocoding\\04-files-changed.md": {
     "mtime": 1780368497.2971146,
     "ast_hash": "46f1e9a174adc8534879e0ba33d48f4e",
     "semantic_hash": "46f1e9a174adc8534879e0ba33d48f4e"
   },
-  "docs/voice/01-speech-recognition-tuning.md": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\docs\\voice\\01-speech-recognition-tuning.md": {
     "mtime": 1780368497.2983665,
     "ast_hash": "ab93e3cbe503dac39601463c947410da",
     "semantic_hash": "ab93e3cbe503dac39601463c947410da"
   },
-  "projects/intellitaxi.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\intellitaxi.yaml": {
     "mtime": 1779994869.3734002,
     "ast_hash": "54bfdb0932401f1ff10d3c71c6c6f341",
     "semantic_hash": "54bfdb0932401f1ff10d3c71c6c6f341"
   },
-  "projects/nexiservice.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\nexiservice.yaml": {
     "mtime": 1779904016.4607198,
     "ast_hash": "546329e49f4b703f390d72606961ac2c",
     "semantic_hash": "546329e49f4b703f390d72606961ac2c"
   },
-  "projects/personalities.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\personalities.yaml": {
     "mtime": 1779904016.4617217,
     "ast_hash": "49d44ae3c2c6295084318792fa674a26",
     "semantic_hash": "49d44ae3c2c6295084318792fa674a26"
   },
-  "projects/personalities_schoolsena.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\personalities_schoolsena.yaml": {
     "mtime": 1779904016.4617217,
     "ast_hash": "6b57523e7812939301f4a5e69916a01a",
     "semantic_hash": "6b57523e7812939301f4a5e69916a01a"
   },
-  "projects/rentus.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\rentus.yaml": {
     "mtime": 1779904016.462721,
     "ast_hash": "6281be0f0634d412556ccbb650947d76",
     "semantic_hash": "6281be0f0634d412556ccbb650947d76"
   },
-  "projects/response_templates.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\response_templates.yaml": {
     "mtime": 1779904016.4637218,
     "ast_hash": "35ef1fbd146c65b7a6f42f3b9bdf5e8e",
     "semantic_hash": "35ef1fbd146c65b7a6f42f3b9bdf5e8e"
   },
-  "projects/schoolsena.yaml": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\projects\\schoolsena.yaml": {
     "mtime": 1779904016.4637218,
     "ast_hash": "4b59dba9a2608c8997c2b85ca1655958",
     "semantic_hash": "4b59dba9a2608c8997c2b85ca1655958"
   },
-  "requirements.txt": {
+  "C:\\xampp\\htdocs\\VT_PROJECTS\\virtualtIA\\requirements.txt": {
     "mtime": 1779904016.464722,
     "ast_hash": "8436099bf3f3161870662eb87d7c343c",
     "semantic_hash": "8436099bf3f3161870662eb87d7c343c"
-  },
-  ".claude/settings.json": {
-    "mtime": 1780596631.7311363,
-    "ast_hash": "af5683cedca023035194f9ad92eb0eef",
-    "semantic_hash": ""
-  },
-  "services/twilio/twilio_service.py": {
-    "mtime": 1780591915.1330004,
-    "ast_hash": "eedfbf528a782a1a4048e8c77cc727f8",
-    "semantic_hash": ""
-  },
-  "services/twilio/twiml_utils.py": {
-    "mtime": 1780591917.092831,
-    "ast_hash": "6bbfce8ba2547984faffd9cb8a69a0f7",
-    "semantic_hash": ""
-  },
-  "services/whatsapp_service.py": {
-    "mtime": 1780591912.6514459,
-    "ast_hash": "0f084438009f56aeb0fcd0f4bd6b4486",
-    "semantic_hash": ""
-  },
-  "CLAUDE.md": {
-    "mtime": 1780724980.20641,
-    "ast_hash": "1d6b072359bdae1952c41506ec997039",
-    "semantic_hash": ""
-  },
-  "core/location_match.py": {
-    "mtime": 1780927186.0530407,
-    "ast_hash": "7ac9dacfc2ad54ec59cae48b2fe15b1b",
-    "semantic_hash": ""
-  },
-  "tests/test_location_match.py": {
-    "mtime": 1780926384.467825,
-    "ast_hash": "fb72ed06ca5b06c78f6a3f6b8d7d7b5f",
-    "semantic_hash": ""
-  },
-  "tests/test_stt_repair.py": {
-    "mtime": 1780927161.8150406,
-    "ast_hash": "de059ffe4f3368620b3fe85780098c6d",
-    "semantic_hash": ""
   }
 }
