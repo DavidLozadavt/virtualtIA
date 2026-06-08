@@ -338,35 +338,139 @@ class AdaptiveEndpointController:
         }
 
 
-# Hints FOCALIZADOS. Twilio diluye el boost fonético cuando la lista es larga
-# (50+ términos): cada hint compite y el peso por término cae. Mantener ≤15
-# términos ALTAMENTE relevantes maximiza el boost de los barrios que el STT
-# falla. Para los barrios problemáticos se incluyen variantes fonéticas (varias
-# grafías) para dar al motor más superficie de match sobre audio PSTN degradado.
-_CAPTURE_HINTS = (
-    "Pubenza,Pubensa,Pubencia,"          # Pubenza (el más fallado en prod)
-    "Centro,"
-    "SENA,Sena Centro,Sena Norte,"       # SENA — frecuente, STT no lo reconoce solo
-    "Campanario,Campanaryo,"
-    "Los Sauces,"
-    "Yanaconas,Yanakonas,"
-    "Valle del Ortigal,El Ortigal,"
-    "María Oriente,"
-    "Pandiguando,"
-    "Belalcázar,"
-    "Yambitará"
-)  # ~18 términos
+# ── Generación de hints (phrase/keyword boosting) desde catálogos ──────────────
+#
+# El vocabulario de boost se DERIVA de los catálogos (BARRIO_ALIASES, LANDMARKS,
+# HUMAN_REFERENCES), no de una lista hand-picked. Es model-aware:
+#
+#   - Deepgram (default, deepgram_nova-2): `hints` → keywords de Deepgram, que
+#     boostea PALABRAS SUELTAS poco comunes. Emitimos tokens propios distintivos
+#     (Pubenza, Yanaconas, Ortigal, Campanario…), sin palabras genéricas
+#     (centro, norte, villa, del…) que diluyen el boost. Cap ~100.
+#   - googlev2 / otros: `hints` → frases de Google Speech Adaptation. Emitimos
+#     los nombres canónicos completos. Cap ~200.
+#
+# Twilio admite hasta 500 entradas; el cap es por relevancia (Deepgram degrada
+# con demasiadas keywords), no por límite de Twilio.
+
+# Palabras genéricas que NO sirven como keyword distintiva (se filtran en modo
+# Deepgram para no diluir el boost de los nombres propios).
+_HINT_STOPWORDS = frozenset({
+    "el", "la", "los", "las", "de", "del", "san", "santa", "villa", "ciudad",
+    "centro", "norte", "sur", "oriente", "occidente", "este", "oeste",
+    "alto", "alta", "bajo", "baja", "nuevo", "nueva", "barrio", "sector",
+    "conjunto", "urbanizacion", "parque", "plaza", "plazuela", "calle",
+    "carrera", "avenida", "comercio", "servicios", "popayan", "cauca",
+    "colombia", "real", "grande", "loma", "prados", "campo", "torres",
+    "portal", "jardin", "jardines", "vista", "altos", "colina", "colinas",
+    "hospital", "clinica", "edificio", "conjunto",
+})
+
+# Lugares más solicitados / que el STT más falla → al frente de la prioridad.
+_PRIORITY_HINTS = (
+    "Pubenza", "Campanario", "Yanaconas", "Valle del Ortigal", "Pandiguando",
+    "Belalcázar", "Yambitará", "Los Sauces", "María Oriente", "Comfacauca",
+    "Éxito Popayán", "SENA", "Universidad del Cauca", "Terminal de Transportes",
+    "Villa del Carmen", "Villa del Viento",
+)
+
+# Variantes fonéticas reales del STT que conviene boostear como keywords sueltas.
+_PHONETIC_VARIANT_KEYWORDS = (
+    "Pubensa", "Pubencia", "Campanaryo", "Yanakonas", "Pandeguando",
+    "Belalcasar", "Yambitara",
+)
+
+_HINT_CAP_DEEPGRAM = 100
+_HINT_CAP_PHRASE = 200
+
+# Cache por régimen de modelo ("dg" | "phrase").
+_HINT_VOCAB_CACHE: dict[str, str] = {}
 
 
-def _get_contextual_hints(state: str, detected_barrio: Optional[str] = None) -> str:
+def _prioritized_canonical_names() -> list[str]:
+    """Nombres canónicos del catálogo, con los más relevantes al frente."""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def _add(nm: str) -> None:
+        if not nm:
+            return
+        k = strip_accents(nm.lower())
+        if k not in seen:
+            seen.add(k)
+            names.append(nm)
+
+    for nm in _PRIORITY_HINTS:
+        _add(nm)
+    try:
+        from tools.popayan_geodata import BARRIO_ALIASES, LANDMARKS
+        for nm in BARRIO_ALIASES:
+            _add(nm)
+        for nm in LANDMARKS:
+            _add(nm)
+    except ImportError:
+        pass
+    try:
+        from core.stt_enhancer import HUMAN_REFERENCES
+        for data in HUMAN_REFERENCES.values():
+            _add(data.get("canonical", ""))
+    except ImportError:
+        pass
+    return names
+
+
+def _build_hint_vocab(model: str) -> str:
+    """Construye la cadena de hints model-aware desde los catálogos (cacheada)."""
+    regime = "dg" if (model or "").startswith("deepgram") else "phrase"
+    cached = _HINT_VOCAB_CACHE.get(regime)
+    if cached is not None:
+        return cached
+
+    names = _prioritized_canonical_names()
+
+    if regime == "dg":
+        # Tokens propios distintivos (palabras sueltas poco comunes).
+        tokens: list[str] = []
+        tseen: set[str] = set()
+
+        def _add_tok(tok: str) -> bool:
+            t = tok.strip(" ,.")
+            tl = strip_accents(t.lower())
+            if len(tl) < 4 or tl in _HINT_STOPWORDS or tl in tseen:
+                return False
+            tseen.add(tl)
+            tokens.append(t)
+            return True
+
+        for v in _PHONETIC_VARIANT_KEYWORDS:
+            _add_tok(v)
+        for nm in names:
+            for tok in re.split(r"[\s,]+", nm):
+                _add_tok(tok)
+                if len(tokens) >= _HINT_CAP_DEEPGRAM:
+                    break
+            if len(tokens) >= _HINT_CAP_DEEPGRAM:
+                break
+        result = ",".join(tokens[:_HINT_CAP_DEEPGRAM])
+    else:
+        # Frases canónicas completas.
+        result = ",".join(names[:_HINT_CAP_PHRASE])
+
+    _HINT_VOCAB_CACHE[regime] = result
+    return result
+
+
+def _get_contextual_hints(
+    state: str,
+    detected_barrio: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     """
-    Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos).
+    Genera hints de vocabulario según el estado y el modelo STT.
 
-    - Estados de captura (waiting_origin / waiting_dest_or_skip): los 10-12
-      barrios más solicitados de Popayán + variantes fonéticas de los que el STT
-      nunca reconoce (Pubenza, Campanario, Yanaconas, Ortigal…).
-    - Estados de confirmación: solo sí/no/correcto/exacto + el barrio ya
-      detectado en sesión (para reforzar su reconocimiento si lo re-dicta).
+    - Captura (waiting_origin / waiting_dest_or_skip): vocabulario del catálogo
+      (model-aware) — keywords sueltas para Deepgram, frases para googlev2.
+    - Confirmación: sí/no/correcto/exacto + el nombre ya detectado (refuerzo).
     """
     if state in ("confirming_origin", "confirming_destination", "confirming_dest"):
         base = "sí,no,correcto,exacto"
@@ -374,12 +478,10 @@ def _get_contextual_hints(state: str, detected_barrio: Optional[str] = None) -> 
             return f"{base},{detected_barrio.strip()}"
         return base
 
+    vocab = _build_hint_vocab(model or "")
     if state == "waiting_dest_or_skip":
-        # Captura de destino: mismos barrios + "no" (declinar destino).
-        return _CAPTURE_HINTS + ",no"
-
-    # waiting_origin y default
-    return _CAPTURE_HINTS
+        return vocab + ",no"
+    return vocab
 
 
 # ── Pipeline de procesamiento de turno ───────────────────────────────────────

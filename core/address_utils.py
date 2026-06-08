@@ -399,9 +399,14 @@ def _strip_preamble(text: str) -> str:
 
 def _parse_si_no(text: str) -> Optional[bool]:
     t         = _normalize_text(text)
-    positivos = {"si","claro","exacto","correcto","ok","dale","yes","obvio","afirmativo","asi","eso","bien",
-                 "confirmo","confirma","confirmado","confirmar","confirmamos","listo","perfecto","seguro","vale"}
-    negativos = {"no","nop","nel","nope","para nada","negativo","incorrecto","tampoco","nunca","jamas"}
+    # Positivos FUERTES: confirman aunque vengan en una frase más larga.
+    positivos = {"si","claro","exacto","correcto","ok","okey","dale","yes","obvio","afirmativo",
+                 "confirmo","confirma","confirmado","confirmar","confirmamos","listo","perfecto"}
+    # Positivos DÉBILES: palabras que también aparecen en frases que NO confirman
+    # ("eso queda en el norte", "así por la galería"). Solo cuentan como "sí" en
+    # una respuesta corta y sin señal de lugar/dirección.
+    positivos_debiles = {"asi","eso","bien","seguro","vale","bueno"}
+    negativos = {"no","nop","nel","nope","negativo","incorrecto","tampoco","nunca","jamas"}
 
     uncertainty = {"no lo se","no se","no se bien","nose","no lo sé","no sé"}
     if t.strip() in uncertainty:
@@ -413,9 +418,13 @@ def _parse_si_no(text: str) -> Optional[bool]:
     # Negativos primero: "No, sí Sena Norte" tiene "no" + "sí" → el "no"
     # inicial es la corrección; "sí" es parte del contenido que sigue.
     # Evaluar positivos primero hacía que "sí" ganara y confirmara en falso.
-    if words & negativos:
+    if (words & negativos) or "para nada" in t:
         return False
     if words & positivos:
+        return True
+    # Débiles: solo si la respuesta es corta (≤2 palabras) y no parece un lugar.
+    # Evita falsos "sí" cuando el usuario en realidad nombra/corrige un destino.
+    if (words & positivos_debiles) and len(words) <= 2 and not _PLACE_SIGNAL_RE.search(t):
         return True
     return None
 
@@ -653,7 +662,7 @@ def _try_local_match(text: str) -> Optional[str]:
     if not _LOCAL_MATCH_INDEX:
         return None
 
-    from core.stt_enhancer import strip_accents, fuzzy_match_location
+    from core.stt_enhancer import strip_accents
 
     raw = strip_accents(text.lower().strip())
     has_barrio_kw = bool(re.search(r'\bbarrio\b', raw))
@@ -679,34 +688,16 @@ def _try_local_match(text: str) -> Optional[str]:
             if len(tok) >= 4 and tok in _BARRIO_STT_VARIANTS:
                 return _BARRIO_STT_VARIANTS[tok]
 
-    # 1. Exacto
-    if cleaned in _LOCAL_MATCH_INDEX:
-        return _LOCAL_MATCH_INDEX[cleaned]
+    # 1-3. Resolución tipada central (exacto / alias / substring / fonético /
+    #      fuzzy con cobertura por token y umbrales por tipo). _try_local_match
+    #      mantiene un contrato de ALTA precisión: solo devuelve un canónico para
+    #      decisiones ACCEPT. Las coincidencias de confianza media (CONFIRM) las
+    #      maneja el flujo de Twilio vía resolve_location_entity directamente.
+    from core.location_match import resolve_location_entity, decide, Decision
 
-    # 2. Subcadena — el alias está contenido en el input o viceversa
-    best_key: Optional[str] = None
-    best_len = 0
-    for alias in _LOCAL_MATCH_ALIAS_KEYS:
-        if alias in cleaned and len(alias) > best_len:
-            best_key = alias
-            best_len = len(alias)
-        elif cleaned in alias and len(cleaned) >= 5 and len(alias) > best_len:
-            best_key = alias
-            best_len = len(alias)
-    if best_key and best_len >= 5:
-        return _LOCAL_MATCH_INDEX[best_key]
-
-    # 3. Fuzzy fonético (threshold alto → sin falsos positivos)
-    best = fuzzy_match_location(cleaned, _LOCAL_MATCH_ALIAS_KEYS, threshold=0.65)
-    if best:
-        return _LOCAL_MATCH_INDEX[best]
-
-    # 3b. Fuzzy relajado SOLO con contexto fuerte de barrio ("barrio X") y
-    #     candidato corto — aquí el prior de que es un barrio es alto.
-    if has_barrio_kw and word_count <= 2:
-        best = fuzzy_match_location(cleaned, _LOCAL_MATCH_ALIAS_KEYS, threshold=0.52)
-        if best:
-            return _LOCAL_MATCH_INDEX[best]
+    m = resolve_location_entity(cleaned)
+    if decide(m) == Decision.ACCEPT and m.canonical:
+        return m.canonical
 
     return None
 
