@@ -12,6 +12,7 @@ Resuelve:
 from __future__ import annotations
 
 import re
+import threading
 import unicodedata
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -484,78 +485,242 @@ HUMAN_REFERENCES: dict[str, dict] = {
     },
 }
 
+# Grupos de desambiguación: una entidad "base" ambigua → sus sedes concretas.
+# Las claves y valores son claves de HUMAN_REFERENCES. Data-driven: agregar una
+# entidad multi-sede futura es solo añadir aquí (sin tocar el flujo de Twilio).
+DISAMBIGUATION_GROUPS: dict[str, list[str]] = {
+    "sena": ["sena norte", "sena centro"],
+}
+
+
+# Partículas de relleno que NO aportan identidad de lugar. Si tras quitar el
+# alias matcheado y estas partículas todavía queda una palabra de contenido
+# (≥4 chars), el alias NO cubre el input → es OTRO lugar más específico.
+# Ej: "el parque de las garzas" ≠ "el parque" (Parque Caldas).
+_COVERAGE_STOPWORDS = frozenset({
+    "el", "la", "los", "las", "un", "una", "unos", "unas",
+    "de", "del", "en", "por", "al", "a", "y", "o", "para", "pa",
+    "hacia", "cerca", "frente", "junto", "sobre", "aqui", "aca",
+    "alla", "alli", "ahi", "estoy", "estamos", "esta", "queda", "es",
+    "voy", "vamos", "me", "mi", "barrio", "sector", "que",
+})
+
+
+def _alias_covers_input(alias_norm: str, input_norm: str) -> bool:
+    """True si el alias cubre el input sin dejar palabras de contenido sueltas.
+
+    Solo aplica cuando el input tiene MÁS palabras que el alias (caso "palabra
+    extra"). Para misspellings de igual longitud ("campanaryo"→"campanario")
+    devuelve True y no interfiere con el fuzzy.
+    """
+    alias_tokens = alias_norm.split()
+    input_tokens = input_norm.split()
+    if len(input_tokens) <= len(alias_tokens):
+        return True
+    alias_set = set(alias_tokens)
+    leftover = [
+        tok for tok in input_tokens
+        if tok not in alias_set
+        and tok not in _COVERAGE_STOPWORDS
+        and len(tok) >= 4
+    ]
+    return not leftover
+
 
 def resolve_human_reference(text: str) -> Optional[dict]:
     """
     Convierte una referencia humana informal a datos estructurados.
     Retorna dict con canonical, lat, lon o None.
 
+    Adaptador de compatibilidad sobre el resolver tipado
+    (core.location_match.resolve_location_entity). Solo devuelve un dict cuando
+    la decisión es ACCEPT o AMBIGUOUS (needs_disambiguation); para coincidencias
+    de confianza media (CONFIRM) o nulas devuelve None — los callers que
+    requieran la lógica CONFIRM deben usar el resolver directamente.
+
     Ejemplos:
       "frente a la galería" → Galería Centenario (2.4440, -76.6090)
-      "subiendo al morro"   → Morro de Tulcán (2.4453, -76.6064)
       "por el éxito"        → Éxito Popayán (2.4448, -76.6072)
+      "en el"               → None  (relleno puro, ya no mapea a SENA)
     """
-    t_lower = strip_accents(text.lower().strip())
+    from core.location_match import resolve_location_entity, decide, Decision
 
-    # 1. Exact match first
-    for key, data in HUMAN_REFERENCES.items():
-        for alias in data.get("aliases", []):
-            alias_norm = strip_accents(alias.lower())
-            if alias_norm == t_lower:
-                return {
-                    "canonical": data["canonical"],
-                    "lat":       data.get("lat"),
-                    "lon":       data.get("lon"),
-                    "note":      data.get("note"),
-                    "matched_alias": alias,
-                    "needs_disambiguation": data.get("needs_disambiguation", False),
-                }
+    m = resolve_location_entity(text)
+    d = decide(m)
+    if d not in (Decision.ACCEPT, Decision.AMBIGUOUS) or not m.canonical:
+        return None
 
-    # 2. Substring match — word boundaries + preferir alias más largo (más específico).
-    #    "el sena centro" debe devolver "SENA Centro", no "SENA Popayán".
-    _sub_best: Optional[dict] = None
-    _sub_best_len = 0
-    for key, data in HUMAN_REFERENCES.items():
-        for alias in data.get("aliases", []):
-            alias_norm = strip_accents(alias.lower())
-            escaped = re.escape(alias_norm)
-            if re.search(r"\b" + escaped + r"\b", t_lower) or t_lower in alias_norm:
-                if len(alias_norm) > _sub_best_len:
-                    _sub_best_len = len(alias_norm)
-                    _sub_best = {
-                        "canonical": data["canonical"],
-                        "lat":       data.get("lat"),
-                        "lon":       data.get("lon"),
-                        "note":      data.get("note"),
-                        "matched_alias": alias,
-                        "needs_disambiguation": data.get("needs_disambiguation", False),
-                    }
-    if _sub_best:
-        return _sub_best
+    note = None
+    for data in HUMAN_REFERENCES.values():
+        if data.get("canonical") == m.canonical:
+            note = data.get("note")
+            break
 
-    # Fuzzy fallback sobre aliases
-    all_aliases: list[tuple[str, dict]] = []
-    for key, data in HUMAN_REFERENCES.items():
-        for alias in data.get("aliases", []):
-            all_aliases.append((alias, data))
+    return {
+        "canonical":             m.canonical,
+        "lat":                   m.lat,
+        "lon":                   m.lon,
+        "note":                  note,
+        "matched_alias":         m.evidence,
+        "needs_disambiguation":  m.needs_disambiguation,
+        "disambiguation_candidates": list(m.disambiguation_candidates),
+        "confidence":            m.confidence,
+        "match_type":            m.match_type.name,
+        "decision":              d.value,
+    }
 
-    best_score  = 0.0
-    best_result = None
-    for alias, data in all_aliases:
-        score = combined_score(t_lower, strip_accents(alias.lower()))
-        if score > best_score and score > 0.60:
-            best_score  = score
-            best_result = {
-                "canonical": data["canonical"],
-                "lat":       data.get("lat"),
-                "lon":       data.get("lon"),
-                "note":      data.get("note"),
-                "matched_alias": alias,
-                "needs_disambiguation": data.get("needs_disambiguation", False),
-                "confidence": score,
-            }
 
-    return best_result
+# ── Reparación fonética de transcripción de ubicaciones ────────────────────────
+#
+# Capa ANTERIOR al resolver. Repara la GRAFÍA de nombres de lugar mal transcritos
+# por el STT usando los catálogos (BARRIO_ALIASES, LANDMARKS, HUMAN_REFERENCES),
+# para que el resolver reciba texto limpio y matchee a EXACT/ALIAS (alta
+# precisión). NO relaja el resolver: ataca el problema en la etapa de
+# transcripción. Generaliza el dict literal POPAYAN_STT_CORRECTIONS a los ~600
+# lugares del catálogo sin enumerarlos a mano.
+#
+# Guardas estrictas para no corromper texto normal ni colisionar lugares
+# parecidos (ej. "valle"↔"villa"): snap SOLO si la similitud fonética ≥ 0.90 Y
+# el match apunta a UNA sola entidad (sin ambigüedad).
+
+_REPAIR_MIN_SIM = 0.90       # similitud fonética mínima para reparar
+_REPAIR_MIN_LEN = 4          # longitud mínima (sin espacios) del span candidato
+
+_PHON_REPAIR_LOCK = threading.Lock()
+# bucket por primer char de la clave fonética → [(phon_key, alias_norm, canonical)]
+_PHON_REPAIR_INDEX: Optional[dict] = None
+
+
+def _build_phonetic_repair_index() -> None:
+    global _PHON_REPAIR_INDEX
+    if _PHON_REPAIR_INDEX is not None:
+        return
+    with _PHON_REPAIR_LOCK:
+        if _PHON_REPAIR_INDEX is not None:
+            return
+
+        # bucket → [(phon_key, alias_norm, canonical, word_count)]
+        index: dict[str, list[tuple[str, str, str, int]]] = {}
+
+        def _add(alias: str, canonical: str) -> None:
+            a = strip_accents(alias.lower().strip())
+            if len(a.replace(" ", "")) < _REPAIR_MIN_LEN:
+                return
+            pk = phonetic_key(a)
+            if not pk:
+                return
+            wc = len(a.split())
+            index.setdefault(pk[0], []).append((pk, a, canonical, wc))
+
+        # HUMAN_REFERENCES (canónico + aliases)
+        for data in HUMAN_REFERENCES.values():
+            canonical = data["canonical"]
+            _add(canonical, canonical)
+            for alias in data.get("aliases", []):
+                _add(alias, canonical)
+
+        # Catálogo local de barrios + landmarks
+        try:
+            from tools.popayan_geodata import BARRIO_ALIASES, LANDMARKS
+            for canonical, aliases in BARRIO_ALIASES.items():
+                _add(canonical, canonical)
+                for alias in aliases:
+                    _add(alias, canonical)
+            for name in LANDMARKS:
+                _add(name, name)
+        except ImportError:
+            pass
+
+        _PHON_REPAIR_INDEX = index
+
+
+def _best_catalog_snap(span_norm: str) -> Optional[str]:
+    """Devuelve la grafía CORRECTA del alias (mismo número de palabras) si
+    `span_norm` matchea fonéticamente, de forma ALTA y ÚNICA, una entidad del
+    catálogo. None si no hay match seguro, si es ambiguo entre entidades
+    distintas, o si el span ya está bien escrito.
+
+    Repara la GRAFÍA preservando el número de palabras (no expande un token a un
+    nombre completo — de eso ya se encarga el resolver vía alias→canónico). Así
+    'villa del karmen' → 'villa del carmen', pero 'carmen' dentro de 'villa del
+    carmen' no se toca (ya es un alias correcto)."""
+    pk = phonetic_key(span_norm)
+    if not pk:
+        return None
+    span_wc = len(span_norm.split())
+    bucket = _PHON_REPAIR_INDEX.get(pk[0], ())
+    best_sim = 0.0
+    best_alias = None
+    entities: set[str] = set()
+    for cand_pk, alias_norm, canonical, wc in bucket:
+        # Solo alias del MISMO número de palabras: evita que un token suelto
+        # ("carmen") matchee un sub-fragmento de un alias largo y se duplique.
+        if wc != span_wc:
+            continue
+        sim = bigram_similarity(pk, cand_pk)
+        if sim >= _REPAIR_MIN_SIM:
+            entities.add(canonical)
+            if sim > best_sim:
+                best_sim, best_alias = sim, alias_norm
+    if not best_alias or len(entities) != 1:
+        return None  # sin match o ambiguo entre entidades → no reparar
+    if span_norm == best_alias:
+        return None  # ya está bien escrito
+    return best_alias
+
+
+def repair_location_transcription(text: str) -> str:
+    """Repara la grafía de nombres de lugar en `text` usando el catálogo, vía
+    similitud fonética con guardas estrictas. Reemplaza spans (n-gramas 3→2→1,
+    sin solapamiento, más largos primero) que matcheen una entidad de forma alta
+    y única. Devuelve el texto reparado (o el original si no hay reparación
+    segura)."""
+    if not text:
+        return text
+    _build_phonetic_repair_index()
+    if not _PHON_REPAIR_INDEX:
+        return text
+
+    words = text.split()
+    n = len(words)
+    if n == 0:
+        return text
+    norm_words = [strip_accents(w.lower()) for w in words]
+
+    used = [False] * n
+    # start → (size, canonical)
+    repls: dict[int, tuple[int, str]] = {}
+
+    for size in (3, 2, 1):
+        for start in range(0, n - size + 1):
+            if any(used[start:start + size]):
+                continue
+            span_norm = " ".join(norm_words[start:start + size]).strip()
+            if len(span_norm.replace(" ", "")) < _REPAIR_MIN_LEN:
+                continue
+            # No tocar spans que son puro relleno (sin token de contenido).
+            if all(tok in _COVERAGE_STOPWORDS for tok in span_norm.split()):
+                continue
+            corrected = _best_catalog_snap(span_norm)
+            if corrected:
+                repls[start] = (size, corrected)
+                for k in range(start, start + size):
+                    used[k] = True
+
+    if not repls:
+        return text
+
+    out: list[str] = []
+    i = 0
+    while i < n:
+        if i in repls:
+            size, corrected = repls[i]
+            out.append(corrected)
+            i += size
+        else:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
 
 
 # ── Expansión de número-palabras ──────────────────────────────────────────────

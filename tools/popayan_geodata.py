@@ -243,6 +243,7 @@ BARRIO_ALIASES: Dict[str, List[str]] = {
     "Versalles": ["versalles", "versales", "barrio versalles", "el versalles"],
     "Ladera": ["ladera", "la ladera", "barrio ladera", "sector ladera"],
     "Villa del Carmen": ["villa del carmen", "villa carmen", "villacarmen", "carmen"],
+    "Villa del Viento": ["villa del viento", "villa viento", "villadelviento"],
     "La Colina": ["la colina", "colina", "barrio colina", "la colina sur"],
     "Nuevo Japón": ["nuevo japon", "nuevo japón", "japon", "barrio japon"],
     "Nuevo País": ["nuevo pais", "nuevo país", "nuevopais", "barrio pais"],
