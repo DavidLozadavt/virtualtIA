@@ -7,6 +7,7 @@ Archivos de ejemplo con **placeholders**. No contienen credenciales ni URLs de p
 | Archivo | Descripción |
 |---------|-------------|
 | `sip_profiles/external/emtel.xml.example` | Gateway SIP (EMTEL) |
+| `sip_profiles/external/twilio_ia.xml.example` | Gateway SIP Twilio Elastic Trunk |
 | `dialplan/public/intellitaxi.xml.example` | Llamada entrante → WebSocket IA |
 
 ## WebSocket de audio (placeholder)

@@ -1,0 +1,20 @@
+<!--
+  Gateway SIP Twilio Elastic Trunk — PLANTILLA (register=false).
+  En el VPS: copiar a sip_profiles/external/twilio_ia.xml y reemplazar placeholders.
+  NO commitear con credenciales reales.
+-->
+<include>
+  <gateway name="twilio_ia">
+    <param name="username" value="${SIP_USERNAME}"/>
+    <param name="auth-username" value="${SIP_USERNAME}"/>
+    <param name="password" value="${SIP_PASSWORD}"/>
+    <param name="realm" value="${SIP_DOMAIN}"/>
+    <param name="proxy" value="${SIP_DOMAIN}"/>
+    <param name="register" value="false"/>
+    <param name="caller-id-in-from" value="true"/>
+    <param name="from-domain" value="${SIP_DOMAIN}"/>
+    <param name="from-user" value="${SIP_EXTENSION}"/>
+    <param name="extension" value="${SIP_EXTENSION}"/>
+    <param name="context" value="public"/>
+  </gateway>
+</include>
