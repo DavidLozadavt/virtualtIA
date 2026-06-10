@@ -1,0 +1,21 @@
+<!--
+  Dialplan entrante → Lyra IA vía mod_audio_stream.
+  Requiere: load mod_audio_stream
+
+  Reemplazar WS_URL_PLACEHOLDER antes de reloadxml.
+  Ejemplo: ws://CONTAINER_NAME:8000/freeswitch/audio
+-->
+<include>
+  <extension name="intellitaxi_inbound">
+    <condition field="destination_number" expression="^(.*)$">
+      <action application="answer"/>
+      <action application="sleep" data="500"/>
+      <action application="set" data="STREAM_PLAYBACK=true"/>
+      <!-- Variables útiles para metadata hacia la IA (si mod_audio_stream las reenvía) -->
+      <action application="export" data="caller_id_number=${caller_id_number}"/>
+      <action application="export" data="destination_number=${destination_number}"/>
+      <action application="audio_stream" data="start WS_URL_PLACEHOLDER mono 8000"/>
+      <action application="park"/>
+    </condition>
+  </extension>
+</include>

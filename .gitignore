@@ -1,6 +1,15 @@
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+*.log
+
 __pycache__/
 venv/
+.venv/
 *.pyc
 .DS_Store
 logs/*

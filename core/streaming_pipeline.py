@@ -302,8 +302,8 @@ class AdaptiveEndpointController:
         # Santa Teresa"); un timeout fijo corto cortaba al usuario a mitad de
         # frase. Para sí/no mantenemos un valor numérico para que responda ágil.
         # Ambos configurables por env sin tocar código.
-        short_to = os.getenv("TWILIO_SPEECH_TIMEOUT_SHORT", "1.5")
-        long_to = os.getenv("TWILIO_SPEECH_TIMEOUT_LONG", "auto")
+        short_to = os.getenv("FS_SPEECH_TIMEOUT_SHORT", "1.5")
+        long_to = os.getenv("FS_SPEECH_TIMEOUT_LONG", "auto")
 
         if short_answer_expected:
             speech_timeout = short_to

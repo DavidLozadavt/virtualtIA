@@ -3,7 +3,6 @@ from core.database import get_connection
 from core.config import settings, Settings
 from services.chat_service import ChatService
 from services.whatsapp_service import WhatsappService
-from services.twilio import TwilioService
 
 def get_db():
     try:
@@ -34,11 +33,3 @@ async def get_whatsapp_service(
     config: Settings = Depends(get_settings)
 ) -> WhatsappService:
     return WhatsappService(db, config)
-
-async def get_twilio_service(
-    db=Depends(get_db),
-    config: Settings = Depends(get_settings),
-    llm=Depends(get_llm),
-    registries=Depends(get_tool_registries)
-) -> TwilioService:
-    return TwilioService(db, config, llm, registries)

@@ -112,7 +112,7 @@ def test_llm_never_returns_default_city(monkeypatch, greeting):
     """'Hola' (u otro saludo) jamás debe convertirse en 'Popayán' aunque el LLM
     alucine la ciudad: el guard anti-nivel-ciudad lo bloquea."""
     import asyncio
-    import api.routers.twilio as tw
+    import services.telephony.conversation_engine as tw
     monkeypatch.setattr(tw, "_get_async_openai", lambda: _stub_openai("Popayán"))
     monkeypatch.setattr(tw, "_get_model", lambda: "stub")
     name, _ = asyncio.run(tw.extract_address(greeting, "origen"))

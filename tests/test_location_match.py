@@ -152,7 +152,7 @@ def test_long_phrase_without_place_rejects():
 
 
 def test_aggressive_recovery_rejects_filler():
-    from api.routers.twilio import _aggressive_place_recovery
+    from services.telephony.conversation_engine import _aggressive_place_recovery
     for t in ["buenas", "hola", "gracias", "por favor", "muy buenas tardes"]:
         assert _aggressive_place_recovery(t) is None
 

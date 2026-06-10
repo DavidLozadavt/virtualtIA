@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    APP_ENV: str = "production"
+
+    # Telefonía (FreeSWITCH — sin Twilio en esta rama)
+    TELEPHONY_PROVIDER: str = "freeswitch"
+    FREESWITCH_WS_HOST: str = "0.0.0.0"
+    FREESWITCH_WS_PORT: int = 8081
+    FREESWITCH_AUDIO_WS_PATH: str = "/freeswitch/audio"
+    FREESWITCH_ESL_HOST: str = ""
+    FREESWITCH_ESL_PORT: int = 8021
+    FREESWITCH_ESL_PASSWORD: str = ""
+    LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
 
     # Rentus backend
     RENTUS_API_BASE: str = "http://localhost/backend-rentus/public/api"

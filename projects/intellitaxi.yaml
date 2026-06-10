@@ -1,9 +1,9 @@
 # ── IntelliTaxi Project Configuration for Lyra ──
-# Mode: Telephony (Twilio voice, NOT chat)
-# Backend: Laravel (http://127.0.0.1:8000/api)
-# Flow: Twilio → Laravel proxy → Lyra /voice, /process_speech → TwiML
+# Mode: Telephony (FreeSWITCH WebSocket, NOT chat)
+# Backend: Laravel INTELLITAXI_API_BASE → POST /taxi/solicitud-telefonica
+# Flow: SIP/EMTEL → FreeSWITCH → Lyra WS /freeswitch/audio → STT/TTS → backend
 #
-# The voice gateway (gateway/twilio_voice.py) handles the state machine directly.
+# Motor conversacional: services/telephony/conversation_engine.py
 # Tools in tools/intellitaxi.py provide geocoding and backend POST support.
 # NO LLM agent loop is used for voice — address extraction uses direct OpenAI calls.
 
@@ -27,7 +27,7 @@ boundaries: >
   Si te preguntan por un tema ajeno al servicio de transporte, responde brevemente que
   te especializas en gestionar solicitudes de TaxBelalcazar.
 
-# Voice gateway settings (used by gateway/twilio_voice.py)
+# Voice gateway settings (used by services/telephony/)
 voice:
   greeting: >
     ¡Hola, muy buenas! Soy Lyra, tu asistente de TaxBelalcazar.

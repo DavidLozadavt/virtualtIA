@@ -1,0 +1,19 @@
+<!--
+  Gateway SIP EMTEL — PLANTILLA con placeholders.
+  En el VPS: reemplazar ${SIP_*} con valores reales desde archivo privado.
+  NO commitear este archivo con credenciales reales.
+-->
+<include>
+  <gateway name="emtel">
+    <param name="username" value="${SIP_USERNAME}"/>
+    <param name="password" value="${SIP_PASSWORD}"/>
+    <param name="proxy" value="${SIP_GATEWAY_HOST}"/>
+    <param name="realm" value="${SIP_DOMAIN}"/>
+    <param name="register" value="true"/>
+    <param name="register-transport" value="${SIP_TRANSPORT}"/>
+    <param name="caller-id-in-from" value="true"/>
+    <param name="expire-seconds" value="3600"/>
+    <param name="retry-seconds" value="30"/>
+    <param name="extension" value="${SIP_EXTENSION}"/>
+  </gateway>
+</include>

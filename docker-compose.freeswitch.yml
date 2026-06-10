@@ -1,0 +1,29 @@
+services:
+  intellitaxi-ia-freeswitch:
+    build:
+      context: .
+      dockerfile: Dockerfile.freeswitch
+    container_name: intellitaxi-ia-freeswitch
+    restart: unless-stopped
+    env_file:
+      - ${LYRA_ENV_FILE:-.env}
+    ports:
+      - "${AI_SERVICE_PORT:-8000}:8000"
+    networks:
+      - telephony_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/freeswitch/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+networks:
+  telephony_net:
+    name: telephony_net
+    driver: bridge

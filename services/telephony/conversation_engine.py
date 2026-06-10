@@ -1,38 +1,20 @@
 """
-routers/twilio.py — Gateway de voz Twilio para Lyra/IntelliTaxi.
-VERSIÓN MEJORADA: streaming, tolerancia STT, adaptación dinámica, reparación conversacional.
-
-Mejoras integradas:
-1. Streaming incremental + partial transcripts
-2. Corrección fonética y fuzzy matching de barrios de Popayán
-3. Adaptación dinámica de VAD/endpointing por perfil de usuario
-4. Reparación conversacional inteligente (sin "No entendí")
-5. Resolución de referencias humanas ("por el éxito", "frente a la galería")
-6. Memoria contextual de ubicaciones mencionadas
-7. Manejo de barge-in / interrupciones
-8. Robustez para audio telefónico degradado (PSTN, ruido vehicular, manos libres)
-9. Detección de intención con frases incompletas
-10. Latencia optimizada: local match primero, LLM solo como fallback
+Motor conversacional IntelliTaxi / Lyra — telefonía FreeSWITCH (sin Twilio).
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 import re
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, Form, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
 
-# ── Módulos de mejora ─────────────────────────────────────────────────────────
+from services.telephony.types import TurnResult
 from core.stt_enhancer import (
     AudioQualityProfile,
     correct_stt_errors,
@@ -46,8 +28,6 @@ from core.stt_enhancer import (
 )
 from core.location_match import resolve_location_entity, decide, Decision, is_filler
 
-# Nombres a nivel ciudad/región: NUNCA son un punto de recogida válido. Bloquean
-# el fallback geográfico implícito (ej. LLM que ante un saludo devuelve "Popayán").
 _CITY_LEVEL_NAMES = frozenset({"popayan", "cauca", "colombia"})
 from core.conversation_repair import (
     ConversationMemory,
@@ -59,13 +39,8 @@ from core.conversation_repair import (
 from core.streaming_pipeline import (
     AdaptiveEndpointController,
     PartialIntentDetector,
-    StreamingSTTBuffer,
     TurnProcessor,
-    _get_contextual_hints,
-    generate_contextual_response,
 )
-
-# ── Módulos originales ────────────────────────────────────────────────────────
 from core.address_utils import (
     _strip_preamble,
     _parse_si_no,
@@ -83,9 +58,7 @@ from core.llm_utils import (
     get_model as _get_model,
 )
 
-logger = logging.getLogger("lyra.twilio_voice")
-voice_router = APIRouter()
-
+logger = logging.getLogger("lyra.telephony.engine")
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
@@ -98,112 +71,6 @@ def _cfg_int(key: str, default: int = 0) -> int:
     return int(os.getenv(key, str(default)))
 
 
-def _twilio_voice() -> str:
-    """Fallback Polly voice (solo se usa si edge_tts falla)."""
-    return _cfg("TWILIO_VOICE", "Polly.Lupe-Neural")
-
-
-def _lyra_tts_voice() -> str:
-    """Voz principal de Lyra via edge_tts (Azure Neural)."""
-    return _cfg("LYRA_TTS_VOICE", "es-BO-SofiaNeural")
-
-
-# ── Cache de audio TTS para Twilio ────────────────────────────────────────────
-_TTS_AUDIO_CACHE: Dict[str, bytes] = {}
-_TTS_CACHE_LOCK = threading.Lock()
-_TTS_CACHE_MAX = 200  # Máximo de audios en cache
-
-
-def _cache_audio(audio_bytes: bytes) -> str:
-    """Almacena audio en cache y retorna un ID único."""
-    audio_id = uuid.uuid4().hex[:12]
-    with _TTS_CACHE_LOCK:
-        # Limpiar cache si excede el máximo
-        if len(_TTS_AUDIO_CACHE) >= _TTS_CACHE_MAX:
-            keys = list(_TTS_AUDIO_CACHE.keys())
-            for k in keys[: len(keys) // 2]:
-                _TTS_AUDIO_CACHE.pop(k, None)
-        _TTS_AUDIO_CACHE[audio_id] = audio_bytes
-    return audio_id
-
-
-def _get_cached_audio(audio_id: str) -> Optional[bytes]:
-    """Recupera audio del cache."""
-    with _TTS_CACHE_LOCK:
-        return _TTS_AUDIO_CACHE.get(audio_id, None)
-
-
-def _twilio_speech_timeout() -> str:
-    return _cfg("TWILIO_SPEECH_TIMEOUT", "2.0")  # Mejorado: 1.5 → 2.0
-
-
-def _twilio_gather_timeout() -> int:
-    return _cfg_int("TWILIO_GATHER_TIMEOUT", 25)
-
-
-# ── Configuración de reconocimiento de voz (Twilio Speech) ────────────────────
-# Optimizado para audio telefónico colombiano. Todo configurable por env para
-# poder ajustar el modelo en producción SIN tocar código (solo .env + reinicio).
-#
-# Modelos disponibles en Twilio <Gather speechModel=...>:
-#   deepgram_nova-2/-3     → DEFAULT. Maneja MUCHO mejor el audio PSTN degradado
-#                            (µ-law 8kHz, ruido de línea, eco) y el español LATAM
-#                            que googlev2. Idioma: Deepgram nova-2 SOLO acepta
-#                            "es" / "es-419" — NO "es-CO". Se mapea automáticamente
-#                            (ver _build_speech_attrs / _deepgram_language).
-#   googlev2               → premium, soporta es-CO, robusto en ruido. Fallback si
-#                            se revierte TWILIO_SPEECH_MODEL=googlev2.
-#   phone_call             → modelo telefónico (requiere enhanced="true"); en
-#                            español usar language es-US (es-CO NO está en la
-#                            lista enhanced).
-#   experimental_conversations → legacy; peor en audio telefónico real
-#
-# `enhanced="true"` SOLO aplica a phone_call (Google STT V1). Para los demás se
-# omite. NO existe atributo enhancedAudioQuality en <Gather> (verificado contra
-# la spec de TwiML) → no se emite.
-
-def _twilio_speech_model() -> str:
-    return _cfg("TWILIO_SPEECH_MODEL", "deepgram_nova-2")
-
-
-def _twilio_speech_language() -> str:
-    return _cfg("TWILIO_SPEECH_LANGUAGE", "es-CO")
-
-
-def _deepgram_language() -> str:
-    """
-    Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo
-    "es" y "es-419" (español LATAM). es-419 es el mejor match para acento
-    payanés/caucano. Configurable sin tocar código.
-    """
-    return _cfg("TWILIO_DEEPGRAM_LANGUAGE", "es-419")
-
-
-def _twilio_speech_enhanced() -> bool:
-    # Solo relevante para phone_call. Acepta "true"/"false".
-    return _cfg("TWILIO_SPEECH_ENHANCED", "true").lower() in ("true", "1", "yes")
-
-
-def _build_speech_attrs() -> str:
-    """
-    Construye los atributos de reconocimiento de voz del <Gather>.
-
-    Centraliza modelo/idioma/enhanced para que TODOS los Gather usen la misma
-    config telefónica óptima.
-    - Deepgram: el idioma se mapea a un código que el modelo acepta (es-419),
-      porque es-CO produciría error/fallback en Deepgram.
-    - phone_call: emite enhanced="true".
-    - Cualquier otro (googlev2…): usa TWILIO_SPEECH_LANGUAGE tal cual (es-CO).
-    """
-    model = _twilio_speech_model()
-    if model.startswith("deepgram"):
-        lang = _deepgram_language()
-    else:
-        lang = _twilio_speech_language()
-    attrs = f' language="{lang}" speechModel="{model}"'
-    if model == "phone_call" and _twilio_speech_enhanced():
-        attrs += ' enhanced="true"'
-    return attrs
 
 
 # ── Fallback DTMF (teclado) ───────────────────────────────────────────────────
@@ -230,74 +97,12 @@ DTMF_MENU_MESSAGE = (
 )
 
 
-async def _build_dtmf_gather(
-    msg: str,
-    action_url: str,
-    sess: "CallSession",
-) -> str:
-    """
-    Construye un <Gather input="dtmf speech"> con menú numérico de barrios.
-
-    Acepta tanto dígitos (numDigits=1) como voz (mismo motor/idioma que el resto),
-    para que el usuario pueda marcar O hablar. El <Gather> de Twilio soporta
-    input combinado "dtmf speech"; numDigits termina la captura DTMF al primer
-    dígito. Si el usuario no marca ni habla, el Redirect re-entra a process_speech.
-    """
-    params = sess.get_endpoint_params(short_answer=False)
-    hints = _get_contextual_hints(sess.state, model=_twilio_speech_model())
-
-    audio_bytes = await _generate_tts_audio(msg)
-    base_url = (
-        action_url.rsplit("/process_speech", 1)[0]
-        if "/process_speech" in action_url
-        else action_url.rsplit("/", 1)[0]
-    )
-    if audio_bytes:
-        audio_id = _cache_audio(audio_bytes)
-        play_or_say = _generate_play_twiml(audio_id, base_url)
-    else:
-        play_or_say = _generate_say_twiml(msg)
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f'<Gather input="dtmf speech"'
-        f"{_build_speech_attrs()}"
-        f' numDigits="1"'
-        f' speechTimeout="{params["speech_timeout"]}"'
-        f' timeout="{params["gather_timeout"]}"'
-        f' action="{action_url}" method="POST"'
-        f' profanityFilter="false"'
-        f' hints="{hints}">'
-        f"{play_or_say}"
-        "</Gather>"
-        f'<Redirect method="POST">{action_url}</Redirect>'
-        "</Response>"
-    )
 
 
 def _max_silence() -> int:
     return _cfg_int("MAX_SILENCE_BEFORE_HANGUP", 3)
 
 
-def _gather_action_url() -> str:
-    return _cfg("TWILIO_GATHER_ACTION_URL", "")
-
-
-def _twilio_enable_partial() -> bool:
-    """
-    partialResultCallback (/partial_speech) — DESACTIVADO por defecto.
-
-    Razón: cada turno dispara ~15-20 callbacks parciales; cada uno corre trabajo
-    CPU SÍNCRONO en el event loop (correct_stt_errors ordena ~150 entradas,
-    resolve_human_reference hace fuzzy sobre todos los landmarks, infer_intent).
-    Con 2+ llamadas simultáneas satura el único event loop → una llamada "pausa"
-    a la otra. Además hoy es funcionalmente inerte (solo loguea INTERRUPT; el
-    barge-in real vía Twilio REST no está implementado).
-
-    Reactivar SOLO cuando se implemente barge-in real: TWILIO_ENABLE_PARTIAL=true
-    """
-    return _cfg("TWILIO_ENABLE_PARTIAL", "false").lower() in ("true", "1", "yes")
 
 
 # ── Estados de la máquina de estados ─────────────────────────────────────────
@@ -399,241 +204,6 @@ def get_session(call_sid: str) -> CallSession:
 def reset_session(call_sid: str) -> None:
     with _SESSION_LOCK:
         _SESSIONS.pop(call_sid, None)
-
-
-# ── TwiML helpers mejorados ───────────────────────────────────────────────────
-
-
-def _xml_escape(s: str) -> str:
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;")
-    )
-
-
-def _tts_expand(text: str) -> str:
-    """Expands street abbreviations so TTS reads full words instead of letters."""
-    if not text:
-        return text
-    t = re.sub(r'\bCra\.\s*', 'Carrera ', text)
-    t = re.sub(r'\bCl\.\s*',  'Calle ',   t)
-    t = re.sub(r'\bAv\.\s*',  'Avenida ', t)
-    t = re.sub(r'\bTr\.\s*',  'Transversal ', t)
-    t = re.sub(r'\bDiag\.\s*','Diagonal ', t)
-    t = re.sub(r'#\s*',        'número ',  t)
-    return re.sub(r'\s+', ' ', t).strip()
-
-
-def _generate_say_twiml(msg: str) -> str:
-    """Fallback: genera <Say> con voz Polly (si edge_tts no está disponible)."""
-    voice = _twilio_voice()
-    return f'<Say voice="{voice}" language="es-MX">{_xml_escape(_tts_expand(msg))}</Say>'
-
-
-async def _generate_tts_audio(msg: str) -> Optional[bytes]:
-    """Genera audio MP3 con la voz de Lyra usando edge_tts."""
-    try:
-        from core.voice_engine import get_voice_engine
-
-        engine = get_voice_engine()
-        audio_bytes = await engine.synthesize_to_bytes(_tts_expand(msg), voice=_lyra_tts_voice())
-        if audio_bytes and len(audio_bytes) > 100:
-            return audio_bytes
-    except Exception as e:
-        logger.warning(f"[TTS] edge_tts falló, se usará Polly fallback: {e}")
-    return None
-
-
-def _generate_play_twiml(audio_id: str, base_url: str) -> str:
-    """Genera <Play> apuntando al audio cacheado."""
-    audio_url = f"{base_url}/voice/audio/{audio_id}"
-    return f"<Play>{audio_url}</Play>"
-
-
-async def _twiml_gather_message(
-    msg: str,
-    action_url: str,
-    speech_timeout: str = "1.5",
-    gather_timeout: int = 25,
-    hints: Optional[str] = None,
-    enable_partial: Optional[bool] = None,
-) -> str:
-    """
-    Construye TwiML <Gather> con:
-    - Audio de Lyra generado via edge_tts (voz es-BO-SofiaNeural)
-    - speechTimeout adaptativo por perfil de usuario
-    - partialResultCallback para detección temprana de intención
-    - hints contextuales para mejorar reconocimiento STT
-    - Fallback a Polly <Say> si edge_tts falla
-    """
-    if hints is None:
-        hints = _get_contextual_hints("waiting_origin", model=_twilio_speech_model())
-    if enable_partial is None:
-        enable_partial = _twilio_enable_partial()
-
-    # Intentar generar audio con la voz real de Lyra
-    audio_bytes = await _generate_tts_audio(msg)
-    base_url = (
-        action_url.rsplit("/process_speech", 1)[0]
-        if "/process_speech" in action_url
-        else action_url.rsplit("/", 1)[0]
-    )
-
-    if audio_bytes:
-        audio_id = _cache_audio(audio_bytes)
-        play_or_say = _generate_play_twiml(audio_id, base_url)
-    else:
-        play_or_say = _generate_say_twiml(msg)
-
-    partial_attr = (
-        f' partialResultCallback="{action_url.replace("process_speech", "partial_speech")}"'
-        f' partialResultCallbackMethod="POST"'
-        if enable_partial
-        else ""
-    )
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f'<Gather input="speech"'
-        f"{_build_speech_attrs()}"
-        f' speechTimeout="{speech_timeout}"'
-        f' timeout="{gather_timeout}"'
-        f' action="{action_url}" method="POST"'
-        f"{partial_attr}"
-        f' profanityFilter="false"'
-        f' hints="{hints}">'
-        f"{play_or_say}"
-        "</Gather>"
-        f'<Redirect method="POST">{action_url}</Redirect>'
-        "</Response>"
-    )
-
-
-async def _twiml_gather_adaptive(
-    msg: str,
-    action_url: str,
-    sess: CallSession,
-    short_answer: bool = False,
-) -> str:
-    """
-    Wrapper que usa los parámetros adaptativos de la sesión.
-    """
-    params = sess.get_endpoint_params(short_answer)
-    # En confirmación, reforzar el reconocimiento del barrio/destino ya detectado.
-    detected_barrio = None
-    if sess.state == STATE_CONFIRMING_ORIGIN:
-        detected_barrio = sess.origen_barrio or sess.origen_text
-    elif sess.state == STATE_CONFIRMING_DEST:
-        detected_barrio = sess.destino_text
-    hints = _get_contextual_hints(sess.state, detected_barrio, model=_twilio_speech_model())
-    return await _twiml_gather_message(
-        msg,
-        action_url,
-        speech_timeout=params["speech_timeout"],
-        gather_timeout=params["gather_timeout"],
-        hints=hints,
-    )
-
-
-async def _twiml_say_hangup(msg: str, action_url: str = "") -> str:
-    """TwiML que reproduce mensaje y cuelga, usando voz de Lyra."""
-    audio_bytes = await _generate_tts_audio(msg)
-    base_url = (
-        action_url.rsplit("/process_speech", 1)[0]
-        if "/process_speech" in action_url
-        else action_url.rsplit("/", 1)[0] if action_url else ""
-    )
-
-    if audio_bytes and base_url:
-        audio_id = _cache_audio(audio_bytes)
-        play_or_say = _generate_play_twiml(audio_id, base_url)
-    else:
-        play_or_say = _generate_say_twiml(msg)
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f"{play_or_say}"
-        "<Hangup/>"
-        "</Response>"
-    )
-
-
-async def _twiml_redirect(action_url: str, say_msg: Optional[str] = None) -> str:
-    """Redirect con audio opcional (para transiciones de estado)."""
-    if say_msg:
-        audio_bytes = await _generate_tts_audio(say_msg)
-        base_url = (
-            action_url.rsplit("/process_speech", 1)[0]
-            if "/process_speech" in action_url
-            else action_url.rsplit("/", 1)[0]
-        )
-        if audio_bytes:
-            audio_id = _cache_audio(audio_bytes)
-            play_or_say = _generate_play_twiml(audio_id, base_url)
-        else:
-            voice = _twilio_voice()
-            play_or_say = (
-                f'<Say voice="{voice}" language="es-MX">{_xml_escape(say_msg)}</Say>'
-            )
-    else:
-        play_or_say = ""
-
-    return (
-        f'<?xml version="1.0" encoding="UTF-8"?>\n'
-        f"<Response>\n"
-        f"    {play_or_say}\n"
-        f'    <Redirect method="POST">{action_url}</Redirect>\n'
-        f"</Response>"
-    )
-
-
-def _twiml_response(xml: str) -> Response:
-    return Response(content=xml, media_type="text/xml; charset=utf-8")
-
-
-from urllib.parse import urlencode
-from html import escape
-
-def _get_process_speech_url(request: Request, telefono_cliente: str = "", telefono_source: str = "") -> str:
-    action = _gather_action_url()
-    base_process_url = action
-
-    if not base_process_url:
-        forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get(
-            "host", ""
-        )
-        forwarded_proto = request.headers.get("x-forwarded-proto", "https")
-
-        if forwarded_host and "trycloudflare.com" in forwarded_host:
-            base_process_url = f"{forwarded_proto}://{forwarded_host}/process_speech"
-        elif forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
-            host_no_port = (
-                forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
-            )
-            if not host_no_port.replace(".", "").isdigit():
-                base_process_url = f"{forwarded_proto}://{forwarded_host}/process_speech"
-
-        if not base_process_url:
-            base = str(request.base_url).rstrip("/")
-            if base.startswith("http://"):
-                base = "https://" + base[len("http://") :]
-            base_process_url = base + "/process_speech"
-            
-    if telefono_cliente or telefono_source:
-        params = urlencode({
-            "telefono_cliente": telefono_cliente or "",
-            "telefono_source": telefono_source or "not_found"
-        })
-        separator = "&" if "?" in base_process_url else "?"
-        final_url = f"{base_process_url}{separator}{params}"
-        return escape(final_url)
-
-    return escape(base_process_url)
 
 
 # ── Procesamiento de texto STT ────────────────────────────────────────────────
@@ -1131,9 +701,18 @@ async def _create_service(
     destino: Optional[str],
     http_client: Optional[httpx.AsyncClient] = None,
     origen_barrio: Optional[str] = None,
+    call_id: str = "",
 ) -> Tuple[bool, str]:
     """Geocodifica y crea el servicio de taxi en el backend Laravel."""
+    from core.config import settings
     from core.geocoder_service import geocode
+    from services.telephony.log_utils import mask_payload_phones, mask_phone, telephony_log_prefix
+
+    prefix = telephony_log_prefix()
+    api_base = (settings.INTELLITAXI_API_BASE or "").strip().rstrip("/")
+    if not api_base:
+        logger.error(f"{prefix} backend_error call_id={call_id} reason=INTELLITAXI_API_BASE_not_configured")
+        return False, "Problema de configuración del servidor. Intenta más tarde."
 
     # geocode() ya aplica normalize_colombian_address internamente.
     # Pasar barrio mejora precisión de Google Maps para nomenclaturas colombianas
@@ -1180,15 +759,23 @@ async def _create_service(
         "destino_lng": float(dlng),
     }
 
-    try:
-        from core.config import settings
+    url = f"{api_base}/taxi/solicitud-telefonica"
+    logger.info(
+        f"{prefix} backend_request_started call_id={call_id} "
+        f"url={url} celular={mask_phone(celular)} origen={origen[:80]!r}"
+    )
+    logger.info(
+        f"{prefix} backend_request_payload call_id={call_id} "
+        f"payload={mask_payload_phones(payload)}"
+    )
 
+    try:
         client = http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=2.0, read=8.0, write=5.0, pool=5.0)
         )
         try:
             resp = await client.post(
-                f"{settings.INTELLITAXI_API_BASE}/taxi/solicitud-telefonica",
+                url,
                 json=payload,
                 headers={
                     "Content-Type": "application/json",
@@ -1200,12 +787,20 @@ async def _create_service(
                 await client.aclose()
 
         if resp.status_code >= 400:
-            logger.error(f"Backend {resp.status_code}: {resp.text[:300]}")
+            logger.error(
+                f"{prefix} backend_error call_id={call_id} "
+                f"status={resp.status_code} body={resp.text[:200]!r}"
+            )
             return (
                 False,
                 "Tuvimos un problema registrando tu servicio. Inténtalo de nuevo.",
             )
 
+        logger.info(
+            f"{prefix} backend_response call_id={call_id} "
+            f"status={resp.status_code} ok=true"
+        )
+        logger.info(f"{prefix} service_created call_id={call_id}")
         return True, (
             "Te enviaremos los datos del conductor por WhatsApp "
             "y en un momento él se comunica contigo. "
@@ -1213,145 +808,74 @@ async def _create_service(
         )
 
     except httpx.TimeoutException:
+        logger.error(f"{prefix} backend_error call_id={call_id} reason=timeout")
         return False, "Se demoró el servidor. Inténtalo de nuevo, porfa."
     except Exception as e:
-        logger.error(f"Backend POST error: {e}")
+        logger.error(f"{prefix} backend_error call_id={call_id} reason={e!r}")
         return False, "Problemita técnico. Intenta de nuevo o pide el taxi por la app."
 
 
-# ── Rutas ─────────────────────────────────────────────────────────────────────
 
 
-@voice_router.get("/voice/audio/{audio_id}")
-async def serve_voice_audio(audio_id: str):
-    """Sirve los audios de TTS cacheados en memoria para Twilio."""
-    audio_bytes = _get_cached_audio(audio_id)
-    if not audio_bytes:
-        logger.warning(f"[TTS] Audio ID {audio_id} no encontrado en cache.")
-        return Response(status_code=404)
-    return Response(
-        content=audio_bytes,
-        media_type="audio/mpeg",
-        headers={"Cache-Control": "no-store"},
+def _r(speak: str, listen: bool = True, hangup: bool = False, short: bool = False, dtmf: bool = False, proc: str = "") -> TurnResult:
+    return TurnResult(
+        speak=speak,
+        listen=listen,
+        hangup=hangup,
+        short_answer=short,
+        dtmf_mode=dtmf,
+        processing_message=proc,
     )
 
 
-@voice_router.api_route("/voice", methods=["GET", "POST"])
-async def voice(request: Request):
-    """
-    Webhook inicial de Twilio. Saluda y comienza a escuchar.
-    """
-    form = await request.form()
-    call_sid = str(
-        form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
-    )
-    telefono_cliente, source = obtener_telefono_cliente(form)
-    
-    logger.info({
-        "event": "twilio_incoming_call",
-        "call_sid": call_sid,
-        "from": form.get("From"),
-        "caller": form.get("Caller"),
-        "original_caller": form.get("SipHeader_X-Original-Caller"),
-        "telefono_cliente_final": telefono_cliente,
-        "source": source
-    })
+GREETING_MESSAGE = (
+    "Soy Lyra, tu asistente de TaxBelalcazar. "
+    "Cuéntame, ¿en dónde te recogemos hoy?"
+)
 
-    sess = get_session(call_sid)
-    sess.caller_phone = telefono_cliente
+
+async def handle_call_start(call_id: str, caller_phone: Optional[str] = None) -> TurnResult:
+    sess = get_session(call_id)
+    sess.caller_phone = caller_phone
     sess.state = STATE_WAITING_ORIGIN
+    sess.last_message = GREETING_MESSAGE
+    logger.info({"event": "call_started", "call_id": call_id, "caller_phone": caller_phone})
+    return _r(GREETING_MESSAGE)
 
-    # Log headers para debugging de tunnel/proxy
-    logger.info(
-        f"[VOICE] CallSid={call_sid} "
-        f"host={request.headers.get('host','?')} "
-        f"x-fwd-host={request.headers.get('x-forwarded-host','?')} "
-        f"x-fwd-proto={request.headers.get('x-forwarded-proto','?')}"
+
+async def process_turn(
+    call_id: str,
+    texto_usuario: str = "",
+    confidence: float = 1.0,
+    digits: str = "",
+    caller_id: Optional[str] = None,
+    caller_source: str = "session",
+    http_client=None,
+) -> TurnResult:
+    return await _process_turn_impl(
+        call_sid=call_id,
+        texto_usuario=texto_usuario,
+        confidence=confidence,
+        digits=digits,
+        caller_id=caller_id,
+        source=caller_source,
+        http_client=http_client,
     )
 
-    saludo = (
-        #"¡Hola! Recuerda que también puedes solicitar tu servicio a través de WhatsApp en el número. "
-        #"3  11... 5  44... 48... 51. ..."
-        "Soy Lyra, tu asistente de TaxBelalcazar. "
-        #"Y con gusto te ayudaré a gestionar tu servicio. "
-        "Cuéntame, ¿en dónde te recogemos hoy?"
-    )
-    sess.last_message = saludo
 
-    action_url = _get_process_speech_url(request, telefono_cliente, source)
-    logger.info(f"[VOICE] action_url={action_url}")
-
-    xml = await _twiml_gather_adaptive(saludo, action_url, sess, short_answer=False)
-    return _twiml_response(xml)
-
-
-@voice_router.api_route("/process_speech", methods=["GET", "POST"])
-async def process_speech(request: Request):
-    """
-    Webhook principal. Procesa cada turno de la conversación.
-    Integra todos los módulos de mejora.
-    """
-    form = await request.form()
-    call_sid = str(
-        form.get("CallSid") or request.query_params.get("CallSid") or "unknown"
-    )
-    
+async def _process_turn_impl(
+    call_sid: str,
+    texto_usuario: str,
+    confidence: float,
+    digits: str,
+    caller_id: Optional[str],
+    source: str,
+    http_client=None,
+) -> TurnResult:
     sess = get_session(call_sid)
-    
-    telefono_cliente = None
-    source = "not_found"
-    
-    # 1. Recuperar de query params
-    q_phone = request.query_params.get("telefono_cliente")
-    q_source = request.query_params.get("telefono_source", "query_param")
-    
-    if q_phone and not es_numero_troncal_o_empresa(q_phone):
-        telefono_cliente = q_phone
-        source = q_source
-    # 2. Recuperar de Memoria
-    elif sess.caller_phone and not es_numero_troncal_o_empresa(sess.caller_phone):
-        telefono_cliente = sess.caller_phone
-        source = "session.caller_phone"
-    # 3. Payload actual
-    else:
-        t_form, s_form = obtener_telefono_cliente(form)
-        if t_form:
-            telefono_cliente = t_form
-            source = s_form
-
-    sess.caller_phone = telefono_cliente
-    
-    logger.info({
-        "event": "telefono_cliente_resolved_process_speech",
-        "telefono_cliente_final": telefono_cliente,
-        "source": source,
-        "call_sid": call_sid
-    })
-    
-    caller_id = telefono_cliente
-    action_url = _get_process_speech_url(request, telefono_cliente, source)
-
-    # ── Extraer resultado STT de Twilio ──
-    texto_usuario = ""
-    for key in ("SpeechResult", "StableSpeechResult", "UnstableSpeechResult"):
-        v = str(form.get(key) or "").strip()
-        if v:
-            texto_usuario = v
-            break
-
-    # ── DTMF: dígito del teclado (menú fallback de barrios) ──
-    digits = str(form.get("Digits") or "").strip()
-
-    try:
-        confidence = float(form.get("Confidence") or 0.0)
-    except (ValueError, TypeError):
-        confidence = 0.0
-
-    if texto_usuario:
-        logger.info(f"[RAW_STT] conf={confidence:.2f} text={texto_usuario!r}")
-
-    sess = get_session(call_sid)
-    action_url = _get_process_speech_url(request, telefono_cliente, source)
+    telefono_cliente = caller_id
+    if telefono_cliente and not es_numero_troncal_o_empresa(telefono_cliente):
+        sess.caller_phone = telefono_cliente
 
     # ── Pipeline de pre-procesamiento STT ──
     texto_original = texto_usuario
@@ -1395,7 +919,7 @@ async def process_speech(request: Request):
             texto_usuario = "__GREETING__"
 
     logger.info(
-        f"[SPEECH] CallSid={call_sid} state={sess.state} "
+        f"[SPEECH] call_id={call_sid} state={sess.state} "
         f"quality={speech_quality} text={texto_usuario[:100]!r}"
     )
 
@@ -1403,14 +927,9 @@ async def process_speech(request: Request):
     if sess.state == STATE_FINISHED or (
         sess.service_created and sess.state == STATE_SERVICE_CREATED
     ):
-        return _twiml_response(
-            await _twiml_say_hangup(
-                "¡Gracias por llamar! ¡Que te vaya bien!",
-                action_url,
-            )
-        )
+        return _r("¡Gracias por llamar! ¡Que te vaya bien!", listen=False, hangup=True)
 
-    http_client = getattr(request.app.state, "http_client", None)
+    # http_client from parameter
 
     # ── Creación de servicio (estado de transición) ──
     if sess.state == STATE_CREATING_SERVICE:
@@ -1418,12 +937,15 @@ async def process_speech(request: Request):
         source_final = source
         
         if es_numero_troncal_o_empresa(telefono_final):
+            from services.telephony.log_utils import mask_phone, telephony_log_prefix
+
             logger.error({
                 "event": "blocked_trunk_number_as_customer",
                 "call_sid": call_sid,
-                "telefono_detectado": telefono_final,
-                "from_original": form.get("From"),
-                "original_caller": form.get("SipHeader_X-Original-Caller")
+                "telefono_detectado": mask_phone(telefono_final),
+                "from_original": None,
+                "original_caller": None,
+                "prefix": telephony_log_prefix(),
             })
             telefono_final = None
             source_final = "not_found"
@@ -1431,7 +953,7 @@ async def process_speech(request: Request):
         log_data = {
             "event": "sending_service_to_laravel",
             "call_sid": call_sid,
-            "from_original": form.get("From"),
+            "from_original": None,
             "payload_field": "celular"
         }
         
@@ -1454,22 +976,19 @@ async def process_speech(request: Request):
             sess.destino_text,
             http_client=http_client,
             origen_barrio=sess.origen_barrio,
+            call_id=call_sid,
         )
         if not ok:
             sess.state = STATE_WAITING_ORIGIN
             sess.origen_text = None
             sess.origen_barrio = None
             sess.last_message = closing
-            return _twiml_response(
-                await _twiml_gather_adaptive(
-                    closing, action_url, sess, short_answer=True
-                )
-            )
+            return _r(closing, short=True)
 
         sess.service_created = True
         sess.state = STATE_FINISHED
         reset_session(call_sid)
-        return _twiml_response(await _twiml_say_hangup(closing, action_url))
+        return _r(closing, listen=False, hangup=True)
 
     # ── DTMF: el usuario marcó un dígito en el menú fallback de barrios ──
     # Se procesa ANTES del silencio (un DTMF llega con SpeechResult vacío y, sin
@@ -1492,20 +1011,18 @@ async def process_speech(request: Request):
             sess.state = STATE_CONFIRMING_ORIGIN
             msg = f"Perfecto, {canonical}. ¿Te recogemos ahí? Di sí para confirmar."
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
         # "8" (otro barrio) o dígito no mapeado → volver a captura por voz
         sess.state = STATE_WAITING_ORIGIN
         msg = "Listo. Dime el nombre del barrio o la dirección donde te recogemos."
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+        return _r(msg)
 
     # ── Detección de "repite" ──
     if texto_usuario and _is_repeat_request(texto_usuario):
         logger.info("[SPEECH] Repeat request detected.")
         replay = sess.last_message or "¿En qué parte de Popayán te recogemos?"
-        return _twiml_response(await _twiml_gather_adaptive(replay, action_url, sess))
+        return _r(replay)
 
     # ── Saludo sin dirección ──
     if texto_usuario == "__GREETING__":
@@ -1516,7 +1033,7 @@ async def process_speech(request: Request):
         }
         msg = msgs.get(sess.state, "¡Hola! Soy Lyra, ¿en qué puedo ayudarte?")
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+        return _r(msg)
 
     # ── Silencio ──
     if not texto_usuario:
@@ -1526,12 +1043,7 @@ async def process_speech(request: Request):
 
         if sess.silence_count >= _max_silence():
             reset_session(call_sid)
-            return _twiml_response(
-                await _twiml_say_hangup(
-                    "No te escucho. Llámanos cuando puedas. ¡Hasta luego!",
-                    action_url,
-                )
-            )
+            return _r("No te escucho. Llámanos cuando puedas. ¡Hasta luego!", listen=False, hangup=True)
 
         silence_msgs = {
             (STATE_WAITING_ORIGIN, 1): "¿Sigues ahí? Dime dónde te recojo.",
@@ -1556,7 +1068,7 @@ async def process_speech(request: Request):
             (sess.state, min(sess.silence_count, 2)), "¿Me escuchas? Háblame."
         )
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+        return _r(msg)
 
     # ── Reset contador de silencio ──
     sess.silence_count = 0
@@ -1574,9 +1086,7 @@ async def process_speech(request: Request):
         if sess.state == STATE_WAITING_ORIGIN and sess.retry_count >= 2:
             logger.info(f"[LOW_QUALITY] Retry #{sess.retry_count} → DTMF fallback menu")
             sess.last_message = DTMF_MENU_MESSAGE
-            return _twiml_response(
-                await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
-            )
+            return _r(DTMF_MENU_MESSAGE, dtmf=True)
 
         msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
 
@@ -1589,13 +1099,13 @@ async def process_speech(request: Request):
 
         logger.info(f"[LOW_QUALITY] Retry #{sess.retry_count}: {msg!r}")
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+        return _r(msg)
 
     # ── Gate de baja calidad en estados de confirmación ──
     if speech_quality == "low" and sess.state in (STATE_CONFIRMING_ORIGIN, STATE_CONFIRMING_DEST):
         msg = "No te escuché bien. ¿Confirmas con sí o no?"
         sess.last_message = msg
-        return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+        return _r(msg, short=True)
 
     # ── Calidad media: intentar match local agresivo antes de LLM ──
     _medium_local_resolved = False
@@ -1651,7 +1161,7 @@ async def process_speech(request: Request):
             else:
                 msg = _pd.get("question") or "¿Cuál de las opciones?"
                 sess.last_message = msg
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                return _r(msg, short=True)
 
         # 1. MEDIUM_QUALITY ya resolvió local match — usar directamente.
         if not trusted_origin and _medium_local_resolved:
@@ -1672,7 +1182,7 @@ async def process_speech(request: Request):
                 msg = sess.pending_disambiguation["question"]
                 sess.last_message = msg
                 logger.info(f"[ORIGIN] ambiguous ({m.canonical!r}) — asking options")
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                return _r(msg, short=True)
             elif d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
                 # ACCEPT/CONFIRM: ambos son lugares reales del catálogo; el estado
                 # CONFIRMING_ORIGIN verifica con el usuario antes de crear el viaje.
@@ -1695,12 +1205,10 @@ async def process_speech(request: Request):
                 sess.origen_text = None
                 if sess.retry_count >= 2:
                     sess.last_message = DTMF_MENU_MESSAGE
-                    return _twiml_response(
-                        await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
-                    )
+                    return _r(DTMF_MENU_MESSAGE, dtmf=True)
                 msg = "No logré identificar la ubicación. ¿Podrías repetirla?"
                 sess.last_message = msg
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+                return _r(msg)
             else:
                 # REJECT (no relleno): puede ser un lugar novel que el catálogo no
                 # tiene. Extracción LLM (con guard anti-ciudad) y, si no parece
@@ -1745,12 +1253,10 @@ async def process_speech(request: Request):
                 )
                 if sess.retry_count >= 2:
                     sess.last_message = DTMF_MENU_MESSAGE
-                    return _twiml_response(
-                        await _build_dtmf_gather(DTMF_MENU_MESSAGE, action_url, sess)
-                    )
+                    return _r(DTMF_MENU_MESSAGE, dtmf=True)
                 msg = "Perdona, no te capté el lugar. Dime solo el barrio o la dirección donde te recogemos."
                 sess.last_message = msg
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+                return _r(msg)
 
         # Origen aceptado (confiable o recuperado/validado) → éxito: resetear el
         # contador de fallos para que el fallback DTMF parta de cero la próxima vez.
@@ -1774,7 +1280,7 @@ async def process_speech(request: Request):
         if not origen or len(origen) < 2:
             msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
             sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+            return _r(msg)
 
         # Determinar si es dirección de calle
         is_street = bool(
@@ -1796,11 +1302,7 @@ async def process_speech(request: Request):
                         sess.state = STATE_CONFIRMING_ORIGIN
                         msg = f"Te repito: tu dirección es {origen}, barrio {barrio_name}. ¿Me confirmas?"
                         sess.last_message = msg
-                        return _twiml_response(
-                            await _twiml_gather_adaptive(
-                                msg, action_url, sess, short_answer=True
-                            )
-                        )
+                        return _r(msg, short=True)
                     # Resuelto pero sin barrio en metadata → confirmar sin barrio
                     sess.geo_origin.reset()
 
@@ -1812,9 +1314,7 @@ async def process_speech(request: Request):
                     geo_question = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
                     msg = geo_question
                     sess.last_message = msg
-                    return _twiml_response(
-                        await _twiml_gather_adaptive(msg, action_url, sess)
-                    )
+                    return _r(msg)
 
                 elif geo_result.status == ResolutionStatus.NEEDS_DISAMBIGUATION:
                     # Google devolvió 2+ opciones reales — preguntar al usuario
@@ -1828,9 +1328,7 @@ async def process_speech(request: Request):
                     )
                     msg = geo_question
                     sess.last_message = msg
-                    return _twiml_response(
-                        await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                    )
+                    return _r(msg, short=True)
 
             except Exception as exc:
                 logger.warning(f"[ORIGIN] Pipeline geocode failed: {exc}")
@@ -1839,15 +1337,13 @@ async def process_speech(request: Request):
             sess.state = STATE_CONFIRMING_ORIGIN
             msg = f"te repito: tu dirección es {origen}. ¿Me confirmas?"
             sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+            return _r(msg, short=True)
 
         # Lugar nombrado: ir a confirmación
         sess.state = STATE_CONFIRMING_ORIGIN
         msg = f"te repito: el punto de recogida es {origen}. ¿Me confirmas?"
         sess.last_message = msg
-        return _twiml_response(
-            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-        )
+        return _r(msg, short=True)
 
     # ── ESTADO: confirming_origin ─────────────────────────────────
     if sess.state == STATE_CONFIRMING_ORIGIN:
@@ -1882,22 +1378,16 @@ async def process_speech(request: Request):
                 msg = f"¿Te llevo a {dest_candidate}? Responde sí o no."
                 sess.last_message = msg
                 logger.info(f"[CONFIRM_ORIGIN] Destination pre-extracted, confirming: {dest_candidate!r}")
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                )
+                return _r(msg, short=True)
 
             if not ASK_DESTINATION:
                 sess.state = STATE_CREATING_SERVICE
-                return _twiml_response(
-                    await _twiml_redirect(action_url, "Un momento por favor...")
-                )
+                return _r("", listen=False, proc="Un momento por favor...")
 
             sess.state = STATE_WAITING_DEST_OR_SKIP
             msg = f"Listo {sess.origen_text}. ¿Me dices a dónde vas, o se lo cuentas al conductor?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
 
         if is_yes is False:
             # Extraer corrección inline ("no, calle 16 # 3CE-41")
@@ -1941,9 +1431,7 @@ async def process_speech(request: Request):
                                 or "¿En qué barrio o sector queda esa dirección?"
                             )
                             sess.last_message = msg
-                            return _twiml_response(
-                                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=False)
-                            )
+                            return _r(msg, short=False)
                         else:
                             msg = f"Entendido. ¿La dirección es {new_origen}? ¿Correcto?"
                     except Exception as exc:
@@ -1951,9 +1439,7 @@ async def process_speech(request: Request):
                         msg = f"Entendido. ¿La dirección es {new_origen}? ¿Correcto?"
                     sess.state    = STATE_CONFIRMING_ORIGIN
                     sess.last_message = msg
-                    return _twiml_response(
-                        await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                    )
+                    return _r(msg, short=True)
                 texto_usuario = rest
                 _explicit_correction = True  # el usuario dijo "No" → nunca restatement
                 # Caemos al match local/LLM abajo
@@ -1962,9 +1448,7 @@ async def process_speech(request: Request):
                 sess.origen_barrio = None
                 msg = "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección completa."
                 sess.last_message = msg
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess)
-                )
+                return _r(msg)
         else:
             _explicit_correction = False  # respuesta ambigua: puede ser restatement
 
@@ -1988,15 +1472,11 @@ async def process_speech(request: Request):
                 sess.memory.last_confirmed_origin = sess.origen_text or local
                 if not ASK_DESTINATION:
                     sess.state = STATE_CREATING_SERVICE
-                    return _twiml_response(
-                        await _twiml_redirect(action_url, "Un momento por favor...")
-                    )
+                    return _r("", listen=False, proc="Un momento por favor...")
                 sess.state = STATE_WAITING_DEST_OR_SKIP
                 msg = f"Listo, te recogemos en {sess.origen_text or local}. ¿A dónde vas, o se lo cuentas al conductor?"
                 sess.last_message = msg
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                )
+                return _r(msg, short=True)
 
             # Origen distinto → el bot había oído mal; re-confirmar el corregido
             logger.info(f"[CONFIRM_ORIGIN] Corrected origin via local match: {sess.origen_text!r} → {local!r}")
@@ -2007,9 +1487,7 @@ async def process_speech(request: Request):
             sess.state = STATE_CONFIRMING_ORIGIN
             msg = f"Ah, {local}. ¿Te recogemos ahí? Di sí para confirmar."
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
 
         # No se pudo parsear la respuesta: si ya tenemos origen con barrio conocido,
         # tratar la respuesta ambigua como confirmación implícita para no hacer
@@ -2023,23 +1501,17 @@ async def process_speech(request: Request):
             sess.memory.last_confirmed_origin = sess.origen_text
             if not ASK_DESTINATION:
                 sess.state = STATE_CREATING_SERVICE
-                return _twiml_response(
-                    await _twiml_redirect(action_url, "Un momento por favor...")
-                )
+                return _r("", listen=False, proc="Un momento por favor...")
             sess.state = STATE_WAITING_DEST_OR_SKIP
             msg = f"Listo, te recogemos en {sess.origen_text}. ¿Me dices a dónde vas, o se lo cuentas al conductor?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
 
         msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
         if sess.origen_barrio:
             msg = f"¿Confirmas que estás por {sess.origen_barrio}? Di sí, o dime tu barrio."
         sess.last_message = msg
-        return _twiml_response(
-            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-        )
+        return _r(msg, short=True)
 
     # ── ESTADO: waiting_geo_context ──────────────────────────────
     # Pipeline devolvió CONTEXT_GATHERING — esperando barrio/referencia del usuario
@@ -2076,9 +1548,7 @@ async def process_speech(request: Request):
                 barrio_str = f", barrio {barrio_name}" if barrio_name else ""
                 msg = f"te repito: tu dirección es {new_origen}{barrio_str}. ¿Me confirmas?"
                 sess.last_message = msg
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                )
+                return _r(msg, short=True)
 
             if geo_result.status == ResolutionStatus.NEEDS_DISAMBIGUATION:
                 sess.geo_origin.pending = geo_result
@@ -2086,9 +1556,7 @@ async def process_speech(request: Request):
                 sess.geo_origin.attempt = 1
                 msg = geo_result.disambiguation_question or "¿En cuál barrio queda esa dirección?"
                 sess.last_message = msg
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                )
+                return _r(msg, short=True)
 
             # CONTEXT_GATHERING u otro → seguir pidiendo barrio para la nueva dir.
             sess.geo_origin.pending = geo_result
@@ -2096,9 +1564,7 @@ async def process_speech(request: Request):
             sess.geo_origin.attempt = geo_result.attempt
             msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess)
-            )
+            return _r(msg)
 
         geo_result = await handle_user_context(
             user_text=texto_usuario,
@@ -2125,17 +1591,13 @@ async def process_speech(request: Request):
             barrio_str = f", barrio {barrio_name}" if barrio_name else ""
             msg = f"te repito: tu dirección es {orig_q}{barrio_str}. ¿Me confirmas?"
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
 
         if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
             sess.geo_origin.pending = geo_result
             geo_question = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
             sess.last_message = geo_question
-            return _twiml_response(
-                await _twiml_gather_adaptive(geo_question, action_url, sess)
-            )
+            return _r(geo_question)
 
         # FAILED o máximo de intentos
         sess.geo_origin.reset()
@@ -2143,9 +1605,7 @@ async def process_speech(request: Request):
         display = sess.origen_text or orig_q
         msg = f"te repito: el punto de recogida es {display}. ¿Me confirmas?"
         sess.last_message = msg
-        return _twiml_response(
-            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-        )
+        return _r(msg, short=True)
 
     # ── ESTADO: waiting_dest_or_skip ─────────────────────────────
     if sess.state == STATE_WAITING_DEST_OR_SKIP:
@@ -2164,10 +1624,10 @@ async def process_speech(request: Request):
                 msg = f"¿Te llevamos a {dest}? Responde sí o corriges el destino."
                 sess.last_message = msg
                 logger.info(f"[DEST] disambiguated → {dest!r}")
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                return _r(msg, short=True)
             msg = _pd.get("question") or "¿Cuál de las opciones?"
             sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+            return _r(msg, short=True)
 
         # Corrección de origen
         if _is_correction_request(texto_usuario):
@@ -2178,7 +1638,7 @@ async def process_speech(request: Request):
                 "¡Claro, corregimos! Cuéntame, ¿dónde te recogemos?"
             )
             sess.last_message = msg
-            return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess))
+            return _r(msg)
 
         # Declinar destino
         is_no = _parse_si_no(texto_usuario)
@@ -2205,9 +1665,7 @@ async def process_speech(request: Request):
 
         if is_no is False or indirect_decline:
             sess.state = STATE_CREATING_SERVICE
-            return _twiml_response(
-                await _twiml_redirect(action_url, "Un momento por favor...")
-            )
+            return _r("", listen=False, proc="Un momento por favor...")
 
         # Tratar como destino
         dest_preambles = [
@@ -2238,7 +1696,7 @@ async def process_speech(request: Request):
                 msg = sess.pending_disambiguation["question"]
                 sess.last_message = msg
                 logger.info(f"[DEST] ambiguous ({m_dest.canonical!r}) — asking options")
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                return _r(msg, short=True)
             elif d_dest in (Decision.ACCEPT, Decision.CONFIRM) and m_dest.canonical:
                 dest = m_dest.canonical
                 logger.info(
@@ -2250,7 +1708,7 @@ async def process_speech(request: Request):
                 logger.info(f"[DEST] filler/greeting ({dest_text!r}) → ask repeat")
                 msg = "No logré identificar el destino. ¿Podrías repetirlo?"
                 sess.last_message = msg
-                return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
+                return _r(msg, short=True)
             else:
                 dest_llm, _ = await extract_destination_address(dest_text)
                 dest = (dest_llm or dest_text or "").strip()
@@ -2271,17 +1729,13 @@ async def process_speech(request: Request):
         if not dest or len(dest) < 2:
             msg = get_repair_message(texto_usuario, confidence, sess.state, sess.memory)
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-            )
+            return _r(msg, short=True)
 
         # Confirm destination before creating service
         sess.state = STATE_CONFIRMING_DEST
         msg = f"¿Te llevamos a {dest}? Responde sí o corriges el destino."
         sess.last_message = msg
-        return _twiml_response(
-            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-        )
+        return _r(msg, short=True)
 
     # ── ESTADO: confirming_dest ─────────────────────────────────────
     if sess.state == STATE_CONFIRMING_DEST:
@@ -2290,9 +1744,7 @@ async def process_speech(request: Request):
         if is_yes is True:
             # User confirmed destination → create service
             sess.state = STATE_CREATING_SERVICE
-            return _twiml_response(
-                await _twiml_redirect(action_url, "Un momento por favor...")
-            )
+            return _r("", listen=False, proc="Un momento por favor...")
 
         if is_yes is False:
             # User rejected → ask again for destination
@@ -2300,9 +1752,7 @@ async def process_speech(request: Request):
             sess.state = STATE_WAITING_DEST_OR_SKIP
             msg = "Sin problema. ¿Cuál es tu destino? Dímelo o di no si le cuentas al conductor."
             sess.last_message = msg
-            return _twiml_response(
-                await _twiml_gather_adaptive(msg, action_url, sess, short_answer=False)
-            )
+            return _r(msg, short=False)
 
         # Try to match a correction inline (e.g. "no, al ortigal")
         rest = re.sub(
@@ -2327,321 +1777,18 @@ async def process_speech(request: Request):
                 sess.memory.add_location_mention(dest_corr)
                 msg = f"¿Te llevamos a {dest_corr}? Di sí para confirmar o corriges de nuevo."
                 sess.last_message = msg
-                return _twiml_response(
-                    await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-                )
+                return _r(msg, short=True)
 
         # Could not parse: ask again
         dest_name = sess.destino_text or "ese destino"
         msg = f"Disculpa, no logré entenderte. ¿Confirmas que vas a {dest_name}? Di sí o no."
         sess.last_message = msg
-        return _twiml_response(
-            await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
-        )
+        return _r(msg, short=True)
 
     # ── Fallback ──────────────────────────────────────────────────
-    return _twiml_response(
-        await _twiml_say_hangup(
-            "¡Gracias por llamar! ¡Que te vaya bien!",
-            action_url,
-        )
-    )
+    return _r("¡Gracias por llamar! ¡Que te vaya bien!", listen=False, hangup=True)
 
 
-# ── Mantenimiento ─────────────────────────────────────────────────────────────
 
-MAINTENANCE_MESSAGE = (
-    "En este momento nuestro sistema de llamadas se encuentra en mantenimiento. "
-    "Por favor, solicita tu servicio a través de WhatsApp al número: "
-    "3  11... 5  44... 48... 51. "
-    "Si deseas que te repita el número, por favor di repetir. "
-    "Si no deseas escucharlo de nuevo, simplemente puedes colgar la llamada."
-)
-
-REPEAT_MESSAGE = (
-    "Claro que sí, el número es: "
-    "3  11... 5  44... 48... 51. "
-    "Si deseas escucharlo otra vez, di repetir, o simplemente cuelga la llamada."
-)
-
-SIMPLE_MAINTENANCE_MESSAGE = (
-    "En este momento nuestro sistema se encuentra en mantenimiento. "
-    "Por favor, intenta comunicarte más tarde. Muchas gracias."
-)
-
-
-def _get_base_url_for_twilio(request: Request) -> str:
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get(
-        "host", ""
-    )
-    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
-
-    if forwarded_host and "trycloudflare.com" in forwarded_host:
-        return f"{forwarded_proto}://{forwarded_host}"
-
-    if forwarded_host and forwarded_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
-        host_no_port = (
-            forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
-        )
-        if not host_no_port.replace(".", "").isdigit():
-            return f"{forwarded_proto}://{forwarded_host}"
-
-    base = str(request.base_url).rstrip("/")
-    if base.startswith("http://"):
-        base = "https://" + base[len("http://") :]
-    return base
-
-
-@voice_router.api_route("/voice/maintenance/call", methods=["GET", "POST"])
-async def voice_maintenance(request: Request):
-    """
-    Webhook inicial de Twilio para modo mantenimiento.
-    """
-    base_url = _get_base_url_for_twilio(request)
-    action_url = f"{base_url}/voice/maintenance/process"
-
-    audio_bytes = await _generate_tts_audio(MAINTENANCE_MESSAGE)
-    if audio_bytes:
-        audio_id = _cache_audio(audio_bytes)
-        play_or_say = _generate_play_twiml(audio_id, base_url)
-    else:
-        play_or_say = _generate_say_twiml(MAINTENANCE_MESSAGE)
-
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f'<Gather input="speech" language="es-CO"'
-        f' timeout="10" speechTimeout="auto"'
-        f' action="{action_url}" method="POST">'
-        f"{play_or_say}"
-        "</Gather>"
-        f'<Redirect method="POST">{action_url}</Redirect>'
-        "</Response>"
-    )
-    return _twiml_response(xml)
-
-
-@voice_router.api_route("/voice/maintenance/process", methods=["GET", "POST"])
-async def voice_maintenance_process(request: Request):
-    """
-    Webhook para procesar la respuesta en modo mantenimiento.
-    """
-    form = await request.form()
-    texto_usuario = str(form.get("SpeechResult", "")).strip().lower()
-
-    base_url = _get_base_url_for_twilio(request)
-    action_url = f"{base_url}/voice/maintenance/process"
-
-    repeat_words = [
-        "repite",
-        "repetir",
-        "repita",
-        "repítelo",
-        "repítemelo",
-        "otra vez",
-        "repiteme",
-    ]
-    wants_repeat = any(w in texto_usuario for w in repeat_words)
-
-    if wants_repeat:
-        audio_bytes = await _generate_tts_audio(REPEAT_MESSAGE)
-        if audio_bytes:
-            audio_id = _cache_audio(audio_bytes)
-            play_or_say = _generate_play_twiml(audio_id, base_url)
-        else:
-            play_or_say = _generate_say_twiml(REPEAT_MESSAGE)
-    else:
-        play_or_say = ""
-
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f'<Gather input="speech" language="es-CO"'
-        f' timeout="10" speechTimeout="auto"'
-        f' action="{action_url}" method="POST">'
-        f"{play_or_say}"
-        "</Gather>"
-        f'<Redirect method="POST">{action_url}</Redirect>'
-        "</Response>"
-    )
-    return _twiml_response(xml)
-
-
-@voice_router.api_route("/voice/maintenance/systems", methods=["GET", "POST"])
-async def voice_maintenance_simple(request: Request):
-    """
-    Webhook inicial de Twilio para modo mantenimiento simple (dice el mensaje y cuelga).
-    """
-    base_url = _get_base_url_for_twilio(request)
-
-    audio_bytes = await _generate_tts_audio(SIMPLE_MAINTENANCE_MESSAGE)
-    if audio_bytes:
-        audio_id = _cache_audio(audio_bytes)
-        play_or_say = _generate_play_twiml(audio_id, base_url)
-    else:
-        play_or_say = _generate_say_twiml(SIMPLE_MAINTENANCE_MESSAGE)
-
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        f"{play_or_say}"
-        "<Hangup/>"
-        "</Response>"
-    )
-    return _twiml_response(xml)
-
-
-# ── Partial speech endpoint ───────────────────────────────────────────────────
-
-
-@voice_router.post("/partial_speech")
-async def partial_speech(
-    request: Request,
-    CallSid: str = Form(""),
-    UnstableSpeechResult: str = Form(""),
-    SequenceNumber: str = Form(""),
-):
-    """
-    Procesa resultados parciales de STT de Twilio (partialResultCallback).
-
-    Permite:
-    - Detección temprana de cancelaciones ("no gracias")
-    - Detección temprana de correcciones
-    - Slot filling incremental de ubicaciones
-    - Preparar hipótesis antes de que el usuario termine de hablar
-
-    Nota: Este endpoint debe retornar 200 vacío rápidamente.
-    Las acciones reales (ej: cancelar TTS vía Twilio REST API) se harían
-    de forma asíncrona en background.
-    """
-    # Guard de concurrencia: si los parciales están desactivados (default),
-    # responder de inmediato sin gastar CPU en el event loop. Evita que el
-    # storm de callbacks parciales sature el loop y "pause" otras llamadas.
-    if not _twilio_enable_partial():
-        return Response(content="", media_type="text/xml")
-
-    if not UnstableSpeechResult or not CallSid:
-        return Response(content="", media_type="text/xml")
-
-    t_lower = strip_accents(UnstableSpeechResult.lower().strip())
-    sess = get_session(CallSid) if CallSid else None
-
-    try:
-        seq = int(SequenceNumber or 0)
-    except ValueError:
-        seq = 0
-
-    logger.debug(f"[PARTIAL] seq={seq} text={t_lower!r}")
-
-    # Procesar con el turn processor de la sesión
-    if sess and sess.turn_processor:
-        result = sess.turn_processor.process_partial_speech(
-            UnstableSpeechResult,
-            confidence=0.5,  # Parciales no tienen confidence score
-            current_state=sess.state if sess else "unknown",
-            seq_num=seq,
-        )
-
-        action = result.get("action", "wait")
-
-        if action == "interrupt_tts":
-            logger.info(f"[PARTIAL] INTERRUPT signal detected: {t_lower!r}")
-            # En producción: llamar Twilio REST API para cancelar el TTS actual
-            # asyncio.create_task(_cancel_current_tts(CallSid))
-            # Por ahora: loguear para monitoreo
-
-        elif action == "prepare_response":
-            partial_loc = result.get("partial_location")
-            if partial_loc and sess:
-                sess.memory.add_location_mention(partial_loc)
-                logger.info(f"[PARTIAL] Early location slot filled: {partial_loc!r}")
-
-        # Barge-in explícito
-        elif BargeInHandler.is_interruption(t_lower):
-            logger.info(f"[PARTIAL] Barge-in detected: {t_lower!r}")
-
-    return Response(content="", media_type="text/xml")
-
-
-# ── WebSocket Media Streams ───────────────────────────────────────────────────
-
-
-@voice_router.websocket("/voice/stream")
-async def voice_stream(websocket: WebSocket):
-    """
-    WebSocket para Twilio Media Streams.
-
-    Permite streaming de audio bidireccional para:
-    - STT incremental con Deepgram/AssemblyAI (menor latencia que polling)
-    - TTS en streaming directo al caller
-    - Control de barge-in en tiempo real
-
-    Estado actual: captura eventos y loguea. Para STT real vía WebSocket,
-    integrar con Deepgram Nova-2 o similar.
-    """
-    await websocket.accept()
-    stream_sid = None
-    call_sid = None
-    audio_buffer: list[bytes] = []
-
-    try:
-        while True:
-            message = await websocket.receive_text()
-            data = json.loads(message)
-            event = data.get("event")
-
-            if event == "connected":
-                logger.info("[WS_STREAM] Connected")
-
-            elif event == "start":
-                stream_sid = data["start"]["streamSid"]
-                call_sid = data["start"]["callSid"]
-                logger.info(
-                    f"[WS_STREAM] Started: CallSid={call_sid} StreamSid={stream_sid}"
-                )
-
-            elif event == "media":
-                # Audio µ-law 8kHz mono en base64
-                # Para STT en tiempo real: acumular y enviar a Deepgram vía WebSocket
-                payload = data["media"].get("payload", "")
-                # audio_buffer.append(base64.b64decode(payload))  # Activar con Deepgram
-                pass
-
-            elif event == "stop":
-                logger.info(f"[WS_STREAM] Stopped: StreamSid={stream_sid}")
-                break
-
-    except WebSocketDisconnect:
-        logger.info(f"[WS_STREAM] Disconnected: StreamSid={stream_sid}")
-    except Exception as e:
-        logger.error(f"[WS_STREAM] Error: {e}")
-
-
-# ── Health check ──────────────────────────────────────────────────────────────
-
-
-@voice_router.get("/health")
-async def voice_health():
-    from core.config import settings
-
-    return {
-        "ok": True,
-        "service": "lyra-intellitaxi-voice-v2",
-        "backend_api": settings.INTELLITAXI_API_BASE,
-        "twilio_voice": _twilio_voice(),
-        "speech_timeout": _twilio_speech_timeout(),
-        "gather_timeout": _twilio_gather_timeout(),
-        "gather_action_url": _gather_action_url() or "inferred",
-        "llm_provider": settings.LLM_PROVIDER,
-        "active_sessions": len(_SESSIONS),
-        "improvements": [
-            "adaptive_vad",
-            "stt_phonetic_correction",
-            "human_reference_resolution",
-            "conversational_repair",
-            "partial_intent_detection",
-            "contextual_memory",
-            "barge_in_detection",
-            "quality_adaptive_endpointing",
-        ],
-    }
+def get_active_session_count() -> int:
+    return len(_SESSIONS)

@@ -6,7 +6,7 @@ Provides:
   POST /voice/synthesize   — Text → MP3 audio (OpenAI TTS)
 
 Per-project activation: set `voice.enabled: true` in the project's YAML config.
-This is completely separate from Twilio telephony (twilio_voice.py).
+This is completely separate from FreeSWITCH telephony (api/routers/freeswitch.py).
 
 How to enable for a new project:
   1. Add to your project's YAML:
