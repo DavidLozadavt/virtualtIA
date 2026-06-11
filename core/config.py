@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     FREESWITCH_ESL_PORT: int = 8021
     FREESWITCH_ESL_PASSWORD: str = "ClueCon"
     FREESWITCH_WS_AUDIO_URL: str = "ws://127.0.0.1:8000/freeswitch/audio"
+    FREESWITCH_HTTP_BASE_URL: str = ""  # ej. http://127.0.0.1:8098 (para audio_url en inbound-call)
+    FREESWITCH_TTS_CACHE_DIR: str = "data/freeswitch_tts"
 
     TELEPHONY_STT_PROVIDER: str = "groq"  # groq | openai | deepgram
     TELEPHONY_STT_MODEL: str = "whisper-large-v3"

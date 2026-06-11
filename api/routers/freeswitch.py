@@ -10,7 +10,8 @@ import logging
 import traceback
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from core.config import settings
@@ -20,6 +21,7 @@ from services.telephony.call_handler import process_stt_turn, process_text_turn
 from services.telephony.phone_utils import limpiar_numero, resolve_caller_phone
 from services.telephony.session_store import get_session_store
 from services.telephony.stt_service import TelephonySTTService
+from services.telephony.tts_file_store import build_audio_url, get_tts_file_store
 from services.telephony.tts_service import TelephonyTTSService
 from services.telephony.voice_call_engine import VoiceCallEngine
 
@@ -48,6 +50,7 @@ class InboundCallRequest(BaseModel):
     caller_number: Optional[str] = None
     destination_number: Optional[str] = None
     sip_headers: Optional[Dict[str, Any]] = None
+    source: Optional[str] = None  # entel | freeswitch | manual
 
 
 class ProcessTextRequest(BaseModel):
@@ -136,20 +139,48 @@ async def test_create_service(req: TestCreateServiceRequest, request: Request):
     }
 
 
+def _inbound_use_file_mode(channel_source: Optional[str]) -> bool:
+    """FreeSWITCH/Entel: respuesta liviana con audio_url, sin base64."""
+    if not channel_source:
+        return True
+    return channel_source.strip().lower() in ("entel", "freeswitch", "fs", "dialplan")
+
+
+@freeswitch_router.get("/audio-file/{audio_id}")
+async def serve_audio_file(audio_id: str):
+    """
+    Sirve WAV 8 kHz mono generado para playback en FreeSWITCH.
+    URL ejemplo: /freeswitch/audio-file/abc123.wav
+    """
+    clean_id = audio_id.replace(".wav", "").replace("/", "").replace("\\", "")
+    store = get_tts_file_store()
+    path = store.get_path(clean_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Audio file not found or expired")
+    return FileResponse(
+        path=str(path),
+        media_type="audio/wav",
+        filename=f"{clean_id}.wav",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @freeswitch_router.post("/inbound-call")
 async def inbound_call(request: Request):
     raw = await _parse_inbound_body(request)
+    channel_source = str(raw.get("source") or raw.get("channel") or "freeswitch")
     req = InboundCallRequest(
         call_uuid=str(raw.get("call_uuid") or raw.get("uuid") or ""),
         caller_number=raw.get("caller_number") or raw.get("caller_id_number"),
         destination_number=raw.get("destination_number") or raw.get("destination_number"),
         sip_headers=raw.get("sip_headers") if isinstance(raw.get("sip_headers"), dict) else None,
+        source=channel_source,
     )
     if not req.call_uuid:
         return {"success": False, "error": "call_uuid required"}
 
     store = get_session_store()
-    caller, source = resolve_caller_phone(req.caller_number, req.sip_headers)
+    caller, phone_source = resolve_caller_phone(req.caller_number, req.sip_headers)
 
     session = store.get_or_create(
         call_uuid=req.call_uuid,
@@ -159,10 +190,12 @@ async def inbound_call(request: Request):
     )
 
     logger.info(
-        "[freeswitch] inbound-call call_uuid=%s caller=%s source=%s dest=%s",
+        "[freeswitch] inbound-call created call_uuid=%s caller=%s phone_source=%s "
+        "channel_source=%s dest=%s",
         req.call_uuid,
         caller,
-        source,
+        phone_source,
+        channel_source,
         req.destination_number,
     )
 
@@ -170,17 +203,69 @@ async def inbound_call(request: Request):
     store.save(turn.session or session)
 
     tts_result = await _tts.synthesize_for_telephony(turn.speak_text)
+    use_file = _inbound_use_file_mode(channel_source)
+
+    if use_file:
+        try:
+            file_store = get_tts_file_store()
+            audio_id, file_path = file_store.save_telephony_audio(
+                tts_result, call_uuid=req.call_uuid
+            )
+            audio_url = build_audio_url(audio_id, request)
+            response = {
+                "success": True,
+                "call_uuid": req.call_uuid,
+                "caller_phone": caller,
+                "caller_source": phone_source,
+                "speak_text": turn.speak_text,
+                "action": "play_then_listen",
+                "state": session.state,
+                "audio_id": audio_id,
+                "audio_url": audio_url,
+                "audio_format": "wav",
+                "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
+            }
+            payload = json.dumps(response, ensure_ascii=False)
+            logger.info(
+                "[freeswitch] inbound-call response call_uuid=%s audio_url=%s "
+                "file=%s response_bytes=%d",
+                req.call_uuid,
+                audio_url,
+                file_path,
+                len(payload.encode("utf-8")),
+            )
+            return Response(
+                content=payload,
+                media_type="application/json",
+            )
+        except Exception as e:
+            logger.error(
+                "[freeswitch] inbound-call tts file failed call_uuid=%s err=%s",
+                req.call_uuid,
+                e,
+            )
+            return {
+                "success": True,
+                "call_uuid": req.call_uuid,
+                "speak_text": turn.speak_text,
+                "action": "play_then_listen",
+                "audio_url": None,
+                "error": "tts_file_generation_failed",
+                "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
+            }
+
+    # Modo manual / pruebas: incluye base64 (no usar desde mod_curl en producción)
     audio_b64 = ""
     if tts_result.get("mulaw"):
         audio_b64 = base64.b64encode(tts_result["mulaw"]).decode("ascii")
     elif tts_result.get("mp3"):
         audio_b64 = base64.b64encode(tts_result["mp3"]).decode("ascii")
 
-    return {
+    response = {
         "success": True,
         "call_uuid": req.call_uuid,
         "caller_phone": caller,
-        "caller_source": source,
+        "caller_source": phone_source,
         "speak_text": turn.speak_text,
         "action": turn.action.value,
         "state": session.state,
@@ -188,6 +273,11 @@ async def inbound_call(request: Request):
         "audio_format": tts_result.get("format", "mp3"),
         "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
     }
+    logger.info(
+        "[freeswitch] inbound-call manual mode response_bytes=%d",
+        len(json.dumps(response).encode("utf-8")),
+    )
+    return response
 
 
 @freeswitch_router.post("/process-text")

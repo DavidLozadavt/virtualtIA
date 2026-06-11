@@ -24,12 +24,14 @@
       <action application="set" data="caller_number=${caller_id_number}"/>
       <action application="set" data="destination_number=${destination_number}"/>
 
-      <!-- 3. Notificar a Lyra (registrar sesión + saludo TTS) -->
-      <!-- JSON escapado para mod_curl; ajustar según versión FS -->
-      <action application="curl" data="http://IA_HOST:IA_PORT/freeswitch/inbound-call post application/json {&quot;call_uuid&quot;:&quot;${call_uuid}&quot;,&quot;caller_number&quot;:&quot;${caller_number}&quot;,&quot;destination_number&quot;:&quot;${destination_number}&quot;}"/>
+      <!-- 3. Notificar a Lyra (respuesta liviana: audio_url, NO base64) -->
+      <action application="curl" data="http://IA_HOST:IA_PORT/freeswitch/inbound-call post application/json {&quot;source&quot;:&quot;entel&quot;,&quot;call_uuid&quot;:&quot;${call_uuid}&quot;,&quot;caller_number&quot;:&quot;${caller_number}&quot;,&quot;destination_number&quot;:&quot;${destination_number}&quot;}"/>
 
-      <!-- 4. Opcional: reproducir saludo si Lyra devuelve audio (requiere script Lua/ESL) -->
-      <!-- Para MVP: el saludo se reproduce vía stream bidireccional -->
+      <!-- 4. Reproducir saludo desde audio_url (WAV 8kHz) -->
+      <!-- Opción A: Lua parsea ${curl_response_data} → set lyra_audio_url → playback -->
+      <!-- Opción B: ESL/script externo que lee JSON y ejecuta playback ${audio_url} -->
+      <!-- Ejemplo si ya tienes la URL en variable: -->
+      <!-- <action application="playback" data="${lyra_audio_url}"/> -->
 
       <!-- 5. Stream de audio hacia Lyra (STT + conversación) -->
       <!-- Sintaxis puede variar según build mod_audio_stream; ver VPS_DEPLOY.md -->
