@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import traceback
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
@@ -206,69 +207,287 @@ async def process_text(req: ProcessTextRequest, request: Request):
     return result
 
 
+def _ws_resolve_call_uuid(
+    current: Optional[str],
+    *,
+    query_params: Any,
+    data: Optional[dict] = None,
+) -> Optional[str]:
+    """Resuelve call_uuid desde query string o metadata JSON."""
+    if current:
+        return current
+
+    for key in ("call_uuid", "uuid", "callId", "call_id"):
+        val = query_params.get(key)
+        if val:
+            return str(val)
+
+    if not data:
+        return None
+
+    for key in ("call_uuid", "uuid", "callId", "call_id"):
+        val = data.get(key)
+        if val:
+            return str(val)
+
+    start = data.get("start") or {}
+    if isinstance(start, dict):
+        for key in ("callId", "call_uuid", "uuid"):
+            val = start.get(key)
+            if val:
+                return str(val)
+        custom = start.get("customParameters") or {}
+        if isinstance(custom, dict):
+            val = custom.get("call_uuid") or custom.get("uuid")
+            if val:
+                return str(val)
+
+    return None
+
+
+def _ws_resolve_caller_number(
+    current: Optional[str],
+    *,
+    query_params: Any,
+    data: Optional[dict] = None,
+) -> Optional[str]:
+    """Resuelve caller_number desde query string o metadata JSON."""
+    if current:
+        return current
+
+    for key in ("caller_number", "caller_id_number", "caller", "from"):
+        val = query_params.get(key)
+        if val:
+            cleaned = limpiar_numero(str(val))
+            if cleaned:
+                return cleaned
+
+    if not data:
+        return None
+
+    for key in ("caller_number", "caller_id_number", "caller", "from"):
+        val = data.get(key)
+        if val:
+            cleaned = limpiar_numero(str(val))
+            if cleaned:
+                return cleaned
+
+    start = data.get("start") or {}
+    if isinstance(start, dict):
+        for key in ("caller_number", "caller_id_number", "from"):
+            val = start.get(key)
+            if val:
+                cleaned = limpiar_numero(str(val))
+                if cleaned:
+                    return cleaned
+
+    return None
+
+
+def _ws_ensure_session(call_uuid: str, caller_number: Optional[str]) -> None:
+    """Vincula sesión si inbound-call ya la creó o la crea aquí."""
+    store = get_session_store()
+    session = store.get_or_create(call_uuid, caller_phone=caller_number)
+    if caller_number and not session.caller_phone:
+        session.caller_phone = caller_number
+        store.save(session)
+
+
+async def _ws_handle_text_metadata(
+    text: str,
+    *,
+    call_uuid: Optional[str],
+    caller_number: Optional[str],
+    websocket: WebSocket,
+) -> tuple[Optional[str], Optional[str], bool]:
+    """
+    Procesa frame text (JSON metadata o control).
+    Returns: (call_uuid, caller_number, should_stop)
+    """
+    stripped = text.strip()
+    if not stripped:
+        return call_uuid, caller_number, False
+
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        logger.debug("[freeswitch/ws] non-json text ignored len=%d", len(stripped))
+        return call_uuid, caller_number, False
+
+    logger.info(
+        "[freeswitch/ws] metadata text received keys=%s",
+        list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+    )
+
+    if not isinstance(data, dict):
+        return call_uuid, caller_number, False
+
+    event = data.get("event")
+    qp = {}  # query already applied; metadata may refine ids
+
+    new_uuid = _ws_resolve_call_uuid(call_uuid, query_params=qp, data=data)
+    new_caller = _ws_resolve_caller_number(caller_number, query_params=qp, data=data)
+
+    if new_uuid and new_uuid != call_uuid:
+        logger.info("[freeswitch/ws] call_uuid resolved=%s (event=%s)", new_uuid, event)
+        call_uuid = new_uuid
+        _audio_buffers.setdefault(call_uuid, bytearray())
+        _chunk_counters.setdefault(call_uuid, 0)
+
+    if call_uuid:
+        _ws_ensure_session(call_uuid, new_caller)
+        if new_caller:
+            caller_number = new_caller
+
+    if event == "connected":
+        logger.info("[freeswitch/ws] protocol connected call_uuid=%s", call_uuid)
+
+    elif event == "start":
+        logger.info("[freeswitch/ws] stream start call_uuid=%s caller=%s", call_uuid, caller_number)
+
+    elif event == "media" and call_uuid:
+        payload = (data.get("media") or {}).get("payload", "")
+        if payload:
+            try:
+                chunk = base64.b64decode(payload)
+                await _ws_append_audio(call_uuid, chunk, websocket=websocket)
+            except Exception as e:
+                logger.warning("[freeswitch/ws] media b64 decode failed: %s", e)
+
+    elif event == "stop":
+        logger.info("[freeswitch/ws] stream stop call_uuid=%s", call_uuid)
+        return call_uuid, caller_number, True
+
+    return call_uuid, caller_number, False
+
+
+_first_audio_logged: set[str] = set()
+
+
+async def _ws_append_audio(
+    call_uuid: str,
+    chunk: bytes,
+    *,
+    websocket: Optional[WebSocket],
+) -> None:
+    """Acumula audio y dispara STT al detectar fin de turno (VAD)."""
+    if not chunk:
+        return
+
+    if call_uuid not in _first_audio_logged:
+        _first_audio_logged.add(call_uuid)
+        logger.info(
+            "[freeswitch/ws] audio bytes received first time call_uuid=%s len=%d",
+            call_uuid,
+            len(chunk),
+        )
+
+    buf = _audio_buffers.setdefault(call_uuid, bytearray())
+    buf.extend(chunk)
+    _chunk_counters[call_uuid] = _chunk_counters.get(call_uuid, 0) + 1
+
+    # VAD cada ~50 chunks para no saturar CPU/logs
+    if _chunk_counters[call_uuid] % 50 != 0:
+        return
+
+    end, _ = detect_end_of_utterance(bytes(buf))
+    if end and len(buf) > 3200 and websocket is not None:
+        await _flush_audio_turn(websocket, call_uuid, buf)
+        _audio_buffers[call_uuid] = bytearray()
+        _chunk_counters[call_uuid] = 0
+
+
 @freeswitch_router.websocket("/audio")
 async def audio_stream(websocket: WebSocket):
     """
     WebSocket mod_audio_stream (FreeSWITCH) ↔ Lyra.
 
-    Eventos: connected | start | media | stop
+    Acepta frames text (JSON metadata) y bytes (audio µ-law raw).
     Respuesta: JSON con speak_text, action, audio_base64 (µ-law o mp3)
     """
     await websocket.accept()
-    call_uuid: Optional[str] = None
+    logger.info("[freeswitch/ws] websocket accepted")
+
+    call_uuid = _ws_resolve_call_uuid(
+        None, query_params=websocket.query_params, data=None
+    )
+    caller_number = _ws_resolve_caller_number(
+        None, query_params=websocket.query_params, data=None
+    )
+
+    if not call_uuid:
+        for header in ("x-call-uuid", "call-uuid", "x-freeswitch-uuid"):
+            val = websocket.headers.get(header)
+            if val:
+                call_uuid = str(val)
+                logger.info("[freeswitch/ws] call_uuid from header %s", header)
+                break
+
+    if not caller_number:
+        for header in ("x-caller-number", "caller-number", "x-caller-id"):
+            val = websocket.headers.get(header)
+            if val:
+                caller_number = limpiar_numero(str(val))
+                if caller_number:
+                    break
+
+    if call_uuid:
+        logger.info(
+            "[freeswitch/ws] call_uuid from query=%s caller=%s",
+            call_uuid,
+            caller_number,
+        )
+        _audio_buffers.setdefault(call_uuid, bytearray())
+        _chunk_counters.setdefault(call_uuid, 0)
+        _ws_ensure_session(call_uuid, caller_number)
 
     try:
         while True:
-            raw = await websocket.receive_text()
-            data = json.loads(raw)
-            event = data.get("event")
+            msg = await websocket.receive()
 
-            if event == "connected":
-                logger.info("[freeswitch/ws] connected")
-
-            elif event == "start":
-                start = data.get("start", {})
-                call_uuid = (
-                    start.get("callId")
-                    or start.get("call_uuid")
-                    or start.get("customParameters", {}).get("call_uuid")
-                )
-                if call_uuid:
-                    _audio_buffers[call_uuid] = bytearray()
-                    _chunk_counters[call_uuid] = 0
-                logger.info("[freeswitch/ws] start call_uuid=%s", call_uuid)
-
-            elif event == "media" and call_uuid:
-                payload = data.get("media", {}).get("payload", "")
-                if not payload:
-                    continue
-                chunk = base64.b64decode(payload)
-                buf = _audio_buffers.setdefault(call_uuid, bytearray())
-                buf.extend(chunk)
-                _chunk_counters[call_uuid] = _chunk_counters.get(call_uuid, 0) + 1
-
-                end, _ = detect_end_of_utterance(bytes(buf))
-                if end and len(buf) > 3200:
-                    await _flush_audio_turn(websocket, call_uuid, buf)
-                    _audio_buffers[call_uuid] = bytearray()
-                    _chunk_counters[call_uuid] = 0
-
-            elif event == "stop":
-                logger.info("[freeswitch/ws] stop call_uuid=%s", call_uuid)
-                if call_uuid and call_uuid in _audio_buffers:
-                    buf = _audio_buffers.pop(call_uuid)
-                    if len(buf) > 1600:
-                        await _flush_audio_turn(websocket, call_uuid, buf)
+            if msg.get("type") == "websocket.disconnect":
                 break
 
+            if msg.get("text") is not None:
+                call_uuid, caller_number, should_stop = await _ws_handle_text_metadata(
+                    msg["text"],
+                    call_uuid=call_uuid,
+                    caller_number=caller_number,
+                    websocket=websocket,
+                )
+                if should_stop:
+                    if call_uuid and call_uuid in _audio_buffers:
+                        buf = _audio_buffers.pop(call_uuid)
+                        if len(buf) > 1600:
+                            await _flush_audio_turn(websocket, call_uuid, buf)
+                    break
+                continue
+
+            if msg.get("bytes") is not None:
+                chunk = msg["bytes"]
+                if not call_uuid:
+                    logger.warning(
+                        "[freeswitch/ws] audio bytes before call_uuid resolved len=%d — ignored",
+                        len(chunk),
+                    )
+                    continue
+                await _ws_append_audio(call_uuid, chunk, websocket=websocket)
+                continue
+
     except WebSocketDisconnect:
-        logger.info("[freeswitch/ws] disconnected call_uuid=%s", call_uuid)
-    except Exception as e:
-        logger.error("[freeswitch/ws] error call_uuid=%s err=%s", call_uuid, e)
+        logger.info("[freeswitch/ws] websocket disconnected call_uuid=%s", call_uuid)
+    except Exception:
+        logger.error(
+            "[freeswitch/ws] error call_uuid=%s traceback=%s",
+            call_uuid,
+            traceback.format_exc(),
+        )
     finally:
         if call_uuid:
             _audio_buffers.pop(call_uuid, None)
             _chunk_counters.pop(call_uuid, None)
+            _first_audio_logged.discard(call_uuid)
+        logger.info("[freeswitch/ws] websocket closed call_uuid=%s", call_uuid)
 
 
 async def _flush_audio_turn(
