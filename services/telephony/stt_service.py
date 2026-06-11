@@ -62,6 +62,36 @@ class TelephonySTTService:
     def available(self) -> bool:
         return self._client is not None or self.provider == "deepgram"
 
+    async def transcribe_telephony_chunk(
+        self,
+        audio_bytes: bytes,
+        *,
+        encoding: str = "auto",
+        call_uuid: str = "",
+    ) -> dict:
+        """
+        Transcribe audio telefónico 8 kHz mono.
+
+        encoding: pcm16 | mulaw | auto (mod_audio_stream suele enviar PCM16).
+        """
+        if not audio_bytes:
+            return {"success": False, "text": "", "confidence": 0.0, "error": "empty audio"}
+
+        enc = (encoding or "auto").lower()
+        if enc == "auto":
+            enc = _guess_encoding(audio_bytes)
+
+        if enc in ("pcm16", "linear", "l16", "s16le"):
+            wav_bytes = _pcm16_to_wav(audio_bytes, self.sample_rate)
+        else:
+            wav_bytes = _mulaw_to_wav(audio_bytes, self.sample_rate)
+
+        return await self._transcribe_wav_bytes(
+            wav_bytes,
+            call_uuid=call_uuid,
+            verbose=True,
+        )
+
     async def transcribe_mulaw_chunk(
         self,
         mulaw_bytes: bytes,
@@ -146,7 +176,13 @@ class TelephonySTTService:
         # PCM lineal 16-bit
         return await self._transcribe_wav_bytes(raw, call_uuid=call_uuid)
 
-    async def _transcribe_wav_bytes(self, wav_bytes: bytes, *, call_uuid: str) -> dict:
+    async def _transcribe_wav_bytes(
+        self,
+        wav_bytes: bytes,
+        *,
+        call_uuid: str,
+        verbose: bool = False,
+    ) -> dict:
         if not self._client:
             return {"success": False, "text": "", "confidence": 0.0, "error": "STT not configured"}
         try:
@@ -156,14 +192,58 @@ class TelephonySTTService:
                 model=self.model,
                 file=audio_file,
                 language=self.language if self.language else None,
-                response_format="json",
+                response_format="verbose_json" if verbose else "json",
                 temperature=0.0,
             )
             text = (getattr(response, "text", None) or str(response)).strip()
-            return {"success": bool(text), "text": text, "confidence": 1.0, "error": ""}
+            confidence = 1.0
+            if verbose:
+                segments = getattr(response, "segments", []) or []
+                if segments:
+                    probs = [
+                        s.get("no_speech_prob", 0)
+                        for s in segments
+                        if isinstance(s, dict)
+                    ]
+                    if probs:
+                        confidence = round(1.0 - sum(probs) / len(probs), 3)
+
+            logger.info(
+                "[stt] call_uuid=%s conf=%.2f text=%r",
+                call_uuid,
+                confidence,
+                text[:80],
+            )
+            return {
+                "success": bool(text),
+                "text": text,
+                "confidence": confidence,
+                "error": "" if text else "no speech detected",
+            }
         except Exception as e:
             logger.error("[stt] wav call_uuid=%s error=%s", call_uuid, e)
             return {"success": False, "text": "", "confidence": 0.0, "error": str(e)}
+
+
+def _guess_encoding(audio_bytes: bytes) -> str:
+    """Heurística: mod_audio_stream mono 8k envía PCM16 en frames pares (~320 B)."""
+    if len(audio_bytes) % 2 != 0:
+        return "mulaw"
+    if len(audio_bytes) in (160, 320, 640, 1280):
+        return "pcm16"
+    return "pcm16"
+
+
+def _pcm16_to_wav(pcm_data: bytes, sample_rate: int) -> bytes:
+    import wave
+
+    buf = BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_data)
+    return buf.getvalue()
 
 
 def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int) -> bytes:

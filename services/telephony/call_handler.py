@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from services.telephony.session_store import CallSession, SessionStore
+from services.telephony.tts_file_store import build_audio_url, get_tts_file_store, sanitize_audio_id
 from services.telephony.tts_service import TelephonyTTSService
 from services.telephony.voice_call_engine import VoiceAction, VoiceCallEngine, VoiceTurnResult
 
@@ -82,6 +83,9 @@ async def process_text_turn(
     digits: str = "",
     http_client: Optional[httpx.AsyncClient] = None,
     create_session_if_missing: bool = False,
+    file_playback: bool = False,
+    request: Optional[Any] = None,
+    tts_result: Optional[dict] = None,
 ) -> Dict[str, Any]:
     session = store.get(call_uuid)
     if not session and create_session_if_missing:
@@ -105,9 +109,24 @@ async def process_text_turn(
         http_client=http_client,
     )
 
-    tts_result = await _tts.synthesize_for_telephony(turn.speak_text)
+    if tts_result is None:
+        tts_result = await _tts.synthesize_for_telephony(turn.speak_text)
     payload = build_audio_response(turn, tts_result)
     payload.update({"success": True, "call_uuid": call_uuid})
+
+    if file_playback:
+        file_store = get_tts_file_store()
+        audio_id = sanitize_audio_id(call_uuid)
+        _, file_path = file_store.save_telephony_audio(
+            tts_result,
+            call_uuid=call_uuid,
+            audio_id=audio_id,
+        )
+        payload["audio_id"] = audio_id
+        payload["audio_url"] = build_audio_url(audio_id, request)
+        payload["audio_format"] = "wav"
+        payload["action"] = turn.action.value
+        payload["file_path"] = str(file_path)
 
     if turn.backend_ok is not None:
         logger.info(

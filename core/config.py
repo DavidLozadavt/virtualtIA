@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     TELEPHONY_STT_LANGUAGE: str = "es"
     TELEPHONY_AUDIO_CODEC: str = "PCMU"
     TELEPHONY_SAMPLE_RATE: int = 8000
+    TELEPHONY_WS_AUDIO_ENCODING: str = "pcm16"  # pcm16 | mulaw (mod_audio_stream mono 8k)
+
+    FREESWITCH_ESL_ENABLED: bool = True
 
     LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
 

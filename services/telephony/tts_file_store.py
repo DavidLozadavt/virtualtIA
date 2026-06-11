@@ -26,6 +26,11 @@ _MAX_FILES = 300
 _TTL_SEC = 3600
 
 
+def sanitize_audio_id(value: str) -> str:
+    """ID seguro para nombre de archivo (p. ej. call_uuid)."""
+    return value.replace(".wav", "").replace("/", "").replace("\\", "").strip()
+
+
 class TTSFileStore:
     def __init__(self) -> None:
         self._dir = Path(settings.FREESWITCH_TTS_CACHE_DIR or "data/freeswitch_tts")
@@ -46,13 +51,19 @@ class TTSFileStore:
         tts_result: dict,
         *,
         call_uuid: str = "",
+        audio_id: Optional[str] = None,
     ) -> Tuple[str, Path]:
         """
         Persiste audio telefónico como WAV 8kHz mono.
 
         Returns: (audio_id, absolute_path)
         """
-        audio_id = uuid.uuid4().hex[:16]
+        if audio_id:
+            audio_id = sanitize_audio_id(audio_id)
+        elif call_uuid:
+            audio_id = sanitize_audio_id(call_uuid)
+        else:
+            audio_id = uuid.uuid4().hex[:16]
         wav_bytes = _to_wav_8k_mono(tts_result)
         if not wav_bytes:
             raise ValueError("TTS produced empty audio")
