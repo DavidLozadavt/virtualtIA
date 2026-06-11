@@ -69,6 +69,22 @@ def _is_whisper_model(model: str) -> bool:
     return "whisper" in (model or "").lower()
 
 
+def _extract_transcription_text(response) -> str:
+    """Extrae solo el texto transcrito; nunca serializa el objeto completo."""
+    raw = getattr(response, "text", None)
+    if raw is None:
+        if isinstance(response, dict):
+            raw = response.get("text")
+        elif hasattr(response, "model_dump"):
+            try:
+                raw = response.model_dump().get("text")
+            except Exception:
+                raw = None
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
 class TelephonySTTService:
     """Convierte audio telefónico (µ-law/PCM/WAV) a texto."""
 
@@ -228,7 +244,20 @@ class TelephonySTTService:
 
             response = await self._client.audio.transcriptions.create(**create_kwargs)
 
-            text = (getattr(response, "text", None) or str(response)).strip()
+            text = _extract_transcription_text(response)
+            if not text:
+                logger.info(
+                    "%s transcript_text=\"\" no_speech call_uuid=%s",
+                    log_prefix,
+                    call_uuid,
+                )
+                return {
+                    "success": False,
+                    "text": "",
+                    "confidence": 0.0,
+                    "error": "no speech detected",
+                }
+
             confidence = 1.0
             if verbose:
                 segments = getattr(response, "segments", []) or []
@@ -242,17 +271,17 @@ class TelephonySTTService:
                         confidence = round(1.0 - sum(probs) / len(probs), 3)
 
             logger.info(
-                '%s transcript="%s" call_uuid=%s conf=%.2f',
+                '%s transcript_text="%s" call_uuid=%s conf=%.2f',
                 log_prefix,
                 text[:200],
                 call_uuid,
                 confidence,
             )
             return {
-                "success": bool(text),
+                "success": True,
                 "text": text,
                 "confidence": confidence,
-                "error": "" if text else "no speech detected",
+                "error": "",
             }
         except Exception as e:
             logger.error("%s error=%s call_uuid=%s", log_prefix, e, call_uuid)

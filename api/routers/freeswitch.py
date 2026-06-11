@@ -622,21 +622,24 @@ async def audio_stream(websocket: WebSocket):
         logger.info("[freeswitch/ws] websocket closed call_uuid=%s", call_uuid)
 
 
-async def _playback_tts_on_call(call_uuid: str, file_path: str, audio_url: str) -> bool:
-    """Reproduce TTS en la llamada vía ESL uuid_broadcast."""
+async def _playback_tts_on_call(call_uuid: str, audio_url: str) -> bool:
+    """Reproduce TTS en la llamada vía ESL uuid_broadcast usando URL HTTP."""
     if not settings.FREESWITCH_ESL_ENABLED:
         logger.warning("[freeswitch/ws] ESL disabled — skip playback call_uuid=%s", call_uuid)
         return False
 
+    if not audio_url:
+        logger.warning("[freeswitch/ws] playback skipped — no audio_url call_uuid=%s", call_uuid)
+        return False
+
     esl = get_esl_client()
-    ok = await esl.uuid_broadcast(call_uuid, file_path, leg="aleg")
+    ok = await esl.uuid_broadcast(call_uuid, audio_url, leg="aleg")
     if ok:
         logger.info("[freeswitch/ws] playback sent call_uuid=%s audio_url=%s", call_uuid, audio_url)
     else:
         logger.warning(
-            "[freeswitch/ws] playback failed call_uuid=%s file=%s audio_url=%s",
+            "[freeswitch/ws] playback failed call_uuid=%s audio_url=%s",
             call_uuid,
-            file_path,
             audio_url,
         )
     return ok
@@ -675,15 +678,15 @@ async def _flush_audio_turn(
         )
         return
 
-    if not stt.get("success") or not stt.get("text"):
+    transcript = (stt.get("text") or "").strip()
+    if not stt.get("success") or not transcript:
         logger.info(
             "[freeswitch/ws] no speech call_uuid=%s err=%s",
             call_uuid,
-            stt.get("error", ""),
+            stt.get("error", "empty transcript"),
         )
         return
 
-    transcript = stt["text"].strip()
     logger.info(
         '[freeswitch/ws] transcript call_uuid=%s text="%s"',
         call_uuid,
@@ -724,12 +727,9 @@ async def _flush_audio_turn(
         logger.info("[freeswitch/ws] backend_ok=true call_uuid=%s", call_uuid)
 
     audio_url = response.get("audio_url") or ""
-    file_path = response.get("file_path") or ""
     if audio_url:
         logger.info("[freeswitch/ws] tts generated audio_url=%s", audio_url)
-
-    if file_path:
-        await _playback_tts_on_call(call_uuid, file_path, audio_url)
+        await _playback_tts_on_call(call_uuid, audio_url)
 
     if response.get("hangup"):
         if settings.FREESWITCH_ESL_ENABLED:

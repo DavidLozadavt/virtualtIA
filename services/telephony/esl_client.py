@@ -92,9 +92,9 @@ class FreeSwitchESLClient:
             except Exception:
                 pass
 
-    async def uuid_broadcast(self, call_uuid: str, wav_path: str, leg: str = "aleg") -> bool:
-        """Reproduce WAV en la pata indicada de la llamada."""
-        path = wav_path.replace("\\", "/")
+    async def uuid_broadcast(self, call_uuid: str, media_uri: str, leg: str = "aleg") -> bool:
+        """Reproduce audio en la pata indicada (URL HTTP o ruta absoluta WAV)."""
+        path = media_uri.replace("\\", "/")
         ok, reply = await self._run_api(f"uuid_broadcast {call_uuid} {path} {leg}")
         logger.info(
             "[esl] uuid_broadcast call_uuid=%s path=%s ok=%s reply=%s",

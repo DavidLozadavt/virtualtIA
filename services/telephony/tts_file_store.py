@@ -100,7 +100,10 @@ def build_audio_url(audio_id: str, request: Optional[object] = None) -> str:
     base = (settings.FREESWITCH_HTTP_BASE_URL or "").rstrip("/")
     if not base and request is not None:
         try:
-            base = str(request.base_url).rstrip("/")
+            from starlette.requests import Request
+
+            if isinstance(request, Request):
+                base = str(request.base_url).rstrip("/")
         except Exception:
             pass
     if not base:
