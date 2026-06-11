@@ -22,6 +22,7 @@ from core.config import settings
 from api.routers.main import router
 from api.routers.admin import admin_router
 from api.routers.twilio import voice_router
+from api.routers.freeswitch import freeswitch_router
 from api.routers.whatsapp import whatsapp_router
 from api.routers.browser_voice import browser_voice_router
 from api.routers.tts import router as tts_router
@@ -200,7 +201,8 @@ app.add_middleware(
 # Routes
 app.include_router(router)
 app.include_router(admin_router)
-app.include_router(voice_router)           # Twilio telephony (/voice, /process_speech)
+app.include_router(voice_router)           # Twilio telephony (/voice, /process_speech) — fallback
+app.include_router(freeswitch_router)      # FreeSWITCH direct (/freeswitch/*)
 app.include_router(whatsapp_router)        # Meta WhatsApp webhooks (/wh/whatsapp)
 app.include_router(browser_voice_router)   # Browser voice STT/TTS (/voice/transcribe, /voice/synthesize)
 app.include_router(tts_router)             # Serve generated MP3 files (/tts/{audio_id})

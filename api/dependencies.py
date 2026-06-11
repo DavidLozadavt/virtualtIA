@@ -3,8 +3,6 @@ from core.database import get_connection
 from core.config import settings, Settings
 from services.chat_service import ChatService
 from services.whatsapp_service import WhatsappService
-from services.twilio import TwilioService
-
 def get_db():
     try:
         with get_connection() as conn:
@@ -39,6 +37,8 @@ async def get_twilio_service(
     db=Depends(get_db),
     config: Settings = Depends(get_settings),
     llm=Depends(get_llm),
-    registries=Depends(get_tool_registries)
-) -> TwilioService:
+    registries=Depends(get_tool_registries),
+):
+    from services.twilio import TwilioService
+
     return TwilioService(db, config, llm, registries)

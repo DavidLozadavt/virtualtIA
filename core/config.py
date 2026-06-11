@@ -46,6 +46,24 @@ class Settings(BaseSettings):
     # Google Maps API (para geocodificación)
     GOOGLE_MAPS_API_KEY: str = ""
 
+    # ── Telephony / FreeSWITCH ──
+    FREESWITCH_ESL_HOST: str = "127.0.0.1"
+    FREESWITCH_ESL_PORT: int = 8021
+    FREESWITCH_ESL_PASSWORD: str = "ClueCon"
+    FREESWITCH_WS_AUDIO_URL: str = "ws://127.0.0.1:8000/freeswitch/audio"
+
+    TELEPHONY_STT_PROVIDER: str = "groq"  # groq | openai | deepgram
+    TELEPHONY_STT_MODEL: str = "whisper-large-v3"
+    TELEPHONY_STT_LANGUAGE: str = "es"
+    TELEPHONY_AUDIO_CODEC: str = "PCMU"
+    TELEPHONY_SAMPLE_RATE: int = 8000
+
+    LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
+
+    VOICE_SESSION_STORE: str = "memory"  # memory | redis
+    REDIS_URL: str = ""
+    CALL_SESSION_TTL_SEC: int = 7200
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
