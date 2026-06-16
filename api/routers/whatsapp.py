@@ -13,7 +13,6 @@ from core.address_utils import (
     extract_pickup_address,
     extract_destination_address,
     _parse_si_no,
-    _is_correction_request,
     normalize_address,
     _try_local_match,
     _nominatim_geocode,
@@ -24,6 +23,29 @@ from core.address_utils import (
 
 logger = logging.getLogger("lyra.whatsapp")
 whatsapp_router = APIRouter(prefix="/wh/whatsapp", tags=["whatsapp"])
+
+REACTIVACION_RECORDATORIO_DEFAULT = (
+    "Tu solicitud está pendiente de confirmación. "
+    "Utiliza los botones del mensaje anterior para indicar si deseas volver a solicitar el servicio o cancelarlo."
+)
+
+
+async def _tiene_reactivacion_pendiente(sender_phone: str, company_id: int) -> tuple[bool, str | None]:
+    """Consulta al ERP si el teléfono tiene una reactivación WhatsApp pendiente."""
+    url = f"{settings.INTELLITAXI_API_BASE}/taxi/reactivacion-whatsapp/pendiente"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                url,
+                params={"telefono": sender_phone, "company_id": company_id},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("pendiente"):
+                return True, data.get("mensaje") or REACTIVACION_RECORDATORIO_DEFAULT
+    except Exception as e:
+        logger.warning(f"reactivacion pendiente check failed: {e}")
+    return False, None
 
 
 # ✅ VERIFICACIÓN WEBHOOK
@@ -242,11 +264,28 @@ STATE_WAITING_TIPO_SERVICIO = "waiting_tipo_servicio"
 STATE_WAITING_HORA_PROG = "waiting_hora_prog"
 STATE_WAITING_ORIGIN = "waiting_origin"
 STATE_CONFIRMING_ORIGIN = "confirming_origin"
-STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
 STATE_WAITING_DOM_ORIGIN = "waiting_dom_origin"
 STATE_WAITING_DOM_DEST = "waiting_dom_dest"
 STATE_WAITING_DOM_OBS = "waiting_dom_obs"
 STATE_FINISHED = "finished"
+
+# Prompt para solicitar la dirección de entrega de un domicilio (único flujo con destino).
+_DOM_DEST_PROMPT = (
+    "📦 ¿A qué dirección llevamos el domicilio?\n\n"
+    "Comparte la ubicación de entrega con el botón, o escríbela."
+)
+
+# Prompt de observación para domicilios (tras capturar origen y dirección de entrega).
+_DOM_OBS_PROMPT = (
+    "✅ Recogida y entrega anotadas.\n\n"
+    "📝 ¿Alguna observación? (opcional)\n\n"
+    "Por ejemplo:\n"
+    "• Qué se recoge\n"
+    "• Nombre de quien recibe\n"
+    "• Teléfono de contacto\n"
+    "• Instrucciones de entrega\n\n"
+    "Escríbela, o responde *NO* para omitir."
+)
 
 # Marcadores de pregunta/charla conversacional — NO son direcciones.
 _QUESTION_MARKERS = (
@@ -378,6 +417,7 @@ async def _create_wp_service(
         origen = normalize_address(origen) or origen
         olat, olng = 0.0, 0.0
 
+    # Solo el domicilio lleva destino (dirección de entrega). Taxi ahora/programado → destino=None.
     dlat, dlng = 0.0, 0.0
     if destino:
         map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
@@ -395,8 +435,7 @@ async def _create_wp_service(
                         destino = f"Barrio {b_info[0]['name']}"
                     else:
                         destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
-            
-            # Check if the destination is Maria Oriente to override coords
+
             is_maria_oriente_d = False
             if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
                 is_maria_oriente_d = True
@@ -452,9 +491,15 @@ async def _create_wp_service(
         payload["destino"] = ""
         payload["destino_lat"] = 0.0
         payload["destino_lng"] = 0.0
-        
+
     if observacion:
         payload["observaciones"] = observacion
+
+    sess = get_wp_session(celular or "", 1)
+    pendiente, msg_pendiente = await _tiene_reactivacion_pendiente(celular or sess.phone, sess.company_id)
+    if pendiente:
+        await send_whatsapp_message(celular or sess.phone, msg_pendiente or REACTIVACION_RECORDATORIO_DEFAULT)
+        return False, msg_pendiente or REACTIVACION_RECORDATORIO_DEFAULT
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -467,12 +512,53 @@ async def _create_wp_service(
             return False, "Uy, tuvimos un problema registrando tu servicio. Dale, inténtalo de nuevo en unos segunditos."
         
         if fecha_programada and hora_programada:
-            return True, f"¡Listo! Tu {tipo_servicio} ha quedado programado para: *{fecha_programada} a las {hora_programada}*. El conductor llegará en ese horario. Muchas gracias por preferirnos."
-        else:
-            return True, f"¡Listo! Ya te estamos buscando un {tipo_servicio}. En un momentico se comunica contigo el conductor. Muchas gracias por preferirnos."
+            return True, (
+                "✅ ¡Servicio programado!\n\n"
+                f"📅 Fecha: {fecha_programada}\n"
+                f"🕒 Hora: {hora_programada}\n\n"
+                "📍 Recogida:\n"
+                f"{origen}\n\n"
+                "🚕 Un conductor te recogerá a esa hora.\n"
+                "Gracias por preferirnos."
+            )
+        if tipo_servicio == "domicilio":
+            return True, (
+                "✅ ¡Domicilio registrado!\n\n"
+                "📍 Recogida:\n"
+                f"{origen}\n\n"
+                "📦 Entrega:\n"
+                f"{destino or 'Por confirmar'}\n\n"
+                "🚕 Un mensajero se comunicará contigo en un momento.\n"
+                "Gracias por preferirnos."
+            )
+        return True, (
+            "✅ Ubicación recibida\n\n"
+            "📍 Recogida:\n"
+            f"{origen}\n\n"
+            "🚕 Estamos buscando un conductor para ti.\n"
+            "Gracias por preferirnos."
+        )
     except Exception as e:
         logger.error(f"Backend POST WP error: {e}")
-        return False, "Tuvimos un problemita técnico. Intenta de nuevo."
+        return False, "⚠️ Tuvimos un problemita técnico.\n\nPor favor, intenta de nuevo en unos segundos."
+
+
+async def _finalizar_taxi(sender_phone: str, sess: "WpSession"):
+    """Crea el servicio (taxi ahora / programado) solo con el origen y envía la confirmación.
+
+    El flujo WhatsApp ya no solicita destino, por lo que siempre se invoca con destino=None.
+    """
+    ok, closing = await _create_wp_service(
+        sender_phone,
+        sess.origen_text or "",
+        None,
+        sess.tipo_servicio or "taxi ahora",
+        sess.fecha_programada,
+        sess.hora_programada,
+    )
+    if ok:
+        sess.state = STATE_FINISHED
+    await send_whatsapp_message(sender_phone, closing)
 
 
 # ✅ PROCESAR MENSAJE (SIN BASE DE DATOS)
@@ -518,6 +604,11 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     texto_usuario = message.strip()
     sess = get_wp_session(sender_phone, company_id)
+
+    pendiente, msg_pendiente = await _tiene_reactivacion_pendiente(sender_phone, company_id)
+    if pendiente:
+        await send_whatsapp_message(sender_phone, msg_pendiente or REACTIVACION_RECORDATORIO_DEFAULT)
+        return
 
     # Clean text to detect cancellations
     t_clean = texto_usuario.lower()
@@ -579,7 +670,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         sess.state = STATE_WAITING_TIPO_SERVICIO
         await send_whatsapp_interactive_buttons(
             sender_phone,
-            "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+            "¡Hola! Soy tu asistente de Tax Belalcázar 🚕. ¿Qué tipo de servicio necesitas hoy?",
             [
                 ("taxi_ahora", "Taxi Ahora"),
                 ("taxi_prog", "Taxi Programado"),
@@ -600,7 +691,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             sess.state = STATE_WAITING_TIPO_SERVICIO
             await send_whatsapp_interactive_buttons(
                 sender_phone,
-                "¡Hola! Soy Lyra, tu asistente de IntelliTaxi. ¿Qué tipo de servicio necesitas hoy?",
+                "¡Hola! Soy tu asistente de Tax Belalcázar 🚕. ¿Qué tipo de servicio necesitas hoy?",
                 [("taxi_ahora", "Taxi Ahora"), ("taxi_prog", "Taxi Programado"), ("domicilio", "Domicilio")]
             )
             return
@@ -624,17 +715,17 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             sess.tipo_servicio = "taxi programado"
             sess.state = STATE_WAITING_HORA_PROG
             sess.origen_text = None
-            await send_whatsapp_message(sender_phone, "¡Perfecto! Has elegido Taxi Programado. Dime para qué fecha y a qué hora lo necesitas (ej. mañana a las 7:00 AM).")
+            await send_whatsapp_message(sender_phone, "📅 *Taxi Programado*\n\n¿Para qué fecha y hora lo necesitas?\n\nEjemplo: mañana a las 7:00 AM")
             return
         elif t_clean_srv == "taxi ahora":
             sess.tipo_servicio = "taxi ahora"
             sess.state = STATE_WAITING_ORIGIN
-            await send_whatsapp_location_request(sender_phone, "¡Perfecto! Has elegido Taxi Ahora. ¿En qué parte te recogemos? Toca el botón de abajo para enviar tu ubicación, o escribe una calle, barrio o un lugar.")
+            await send_whatsapp_location_request(sender_phone, "🚕 *Taxi Ahora*\n\n📍 ¿En qué parte te recogemos?\n\nComparte tu ubicación con el botón, o escribe la calle, barrio o lugar.")
             return
         elif t_clean_srv == "domicilio":
             sess.tipo_servicio = "domicilio"
             sess.state = STATE_WAITING_DOM_ORIGIN
-            await send_whatsapp_location_request(sender_phone, "¡Perfecto! Has elegido Domicilio. ¿En qué dirección debemos recoger el paquete o pedido? (Usa el botón para enviar tu ubicación, o escríbela)")
+            await send_whatsapp_location_request(sender_phone, "📦 *Domicilio*\n\n📍 ¿En qué dirección recogemos el paquete o pedido?\n\nComparte tu ubicación con el botón, o escríbela.")
             return
         else:
             # No seleccionó botón. Si escribió saludo/pregunta (no dirección), aún
@@ -654,47 +745,38 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         dt_info = await extract_datetime_with_llm(texto_usuario)
         
         if "error" in dt_info:
-            await send_whatsapp_message(sender_phone, f"DEBUG ERROR LLM: {dt_info['error']}")
+            await send_whatsapp_message(sender_phone, "⚠️ No entendí la fecha y la hora.\n\n¿Me las repites? Ejemplo: mañana a las 7:00 AM")
             return
-            
+
         f_prog = dt_info.get("fecha_programada")
         h_prog = dt_info.get("hora_programada")
         if not dt_info or not f_prog or not h_prog:
-            await send_whatsapp_message(sender_phone, f"DEBUG FAILED DT_INFO: '{dt_info}'\nNo entendí muy bien la fecha y hora. ¿Me la podrías decir de nuevo?")
+            await send_whatsapp_message(sender_phone, "⚠️ No entendí muy bien la fecha y la hora.\n\n¿Me las podrías decir de nuevo? Ejemplo: mañana a las 7:00 AM")
             return
 
         sess.fecha_programada = f_prog
         sess.hora_programada = h_prog
         sess.fecha_hora_prog = f"{f_prog} {h_prog}"
         sess.state = STATE_WAITING_ORIGIN
-        await send_whatsapp_location_request(sender_phone, f"Anotado para el {f_prog} a las {h_prog}. Ahora, ¿en qué lugar de Popayán te recogemos? Envía la ubicación con el botón o escribe tu dirección.")
+        await send_whatsapp_location_request(sender_phone, f"📅 Anotado para el {f_prog} a las {h_prog}.\n\n📍 ¿En qué lugar de Popayán te recogemos?\n\nComparte tu ubicación con el botón o escribe tu dirección.")
         return
 
     # ── STATE: waiting_origin ──
     if sess.state == STATE_WAITING_ORIGIN:
         if t_clean in ["no", "no se", "ninguno"]:
-            await send_whatsapp_message(sender_phone, "Necesito saber de dónde te recogemos. Por favor escribe tu dirección, barrio o envía tu ubicación.")
+            await send_whatsapp_location_request(sender_phone, "📍 Necesito tu punto de recogida.\n\nEscribe la dirección o el barrio, o comparte tu ubicación con el botón.")
             return
 
         if texto_usuario.startswith("Ubicación en mapa:"):
-            origen = texto_usuario
-            sess.origen_text = origen
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            
-            map_match_o = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", origen)
-            loc_name = "la ubicación compartida"
-            if map_match_o and map_match_o.group(1):
-                loc_name = clean_map_location(map_match_o.group(1))
-                
-            msg = f"Listo, te recogemos en {loc_name}. ¿A dónde te diriges? Envía la ubicación con el botón, escríbela, o dinos NO si prefieres avisarle al conductor."
-            await send_whatsapp_location_request(sender_phone, msg)
+            sess.origen_text = texto_usuario
+            await _finalizar_taxi(sender_phone, sess)
             return
 
         # Saludo / pregunta / charla → re-pedir origen, SIN reenviar el menú.
         # Guard con señal EXPLÍCITA de dirección (número/calle/barrio), no fuzzy:
         # evita que un falso positivo de looks_like_place deje pasar una pregunta.
         if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            await send_whatsapp_location_request(sender_phone, "Para continuar con tu solicitud necesito primero el punto de recogida. ¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
+            await send_whatsapp_location_request(sender_phone, "📍 Para continuar necesito tu punto de recogida.\n\n¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
             return
 
         origen_llm, hint = extract_pickup_address(texto_usuario)
@@ -705,10 +787,9 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
 
-        # No se pudo extraer un origen válido → re-pedir el origen SIN reenviar el
-        # menú (el usuario ya eligió tipo de servicio; perder eso lo frustra).
+        # No se pudo extraer un origen válido → re-pedir el origen SIN reenviar el menú.
         if not origen or len(origen) < 2 or not looks_like_place(origen):
-            await send_whatsapp_location_request(sender_phone, "No logré identificar el lugar de recogida. ¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
+            await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar el lugar de recogida.\n\n📍 Escribe la dirección o el barrio, o comparte tu ubicación.")
             return
 
         sess.origen_text = origen
@@ -716,110 +797,49 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+', origen.lower()))
         if is_street:
             sess.state = STATE_CONFIRMING_ORIGIN
-            msg = f"Entendemos que tu dirección es: {origen}. ¿Es correcta? Responde SÍ o NO."
-            await send_whatsapp_message(sender_phone, msg)
+            await send_whatsapp_message(sender_phone, f"📍 Tu dirección de recogida es:\n{origen}\n\n¿Es correcta? Responde *SÍ* o *NO*.")
             return
 
-        sess.state = STATE_WAITING_DEST_OR_SKIP
-        msg = f"Listo, te recogemos en {origen}. ¿A dónde te diriges? Envía tu ubicación abajo, escríbela o di NO si prefieres contarle al conductor."
-        await send_whatsapp_location_request(sender_phone, msg)
+        # Origen válido → crear el servicio de inmediato (sin pedir destino).
+        await _finalizar_taxi(sender_phone, sess)
         return
 
     # ── STATE: confirming_origin ──
     if sess.state == STATE_CONFIRMING_ORIGIN:
         is_yes = _parse_si_no(texto_usuario)
-        
+
         if is_yes is True:
-            sess.state = STATE_WAITING_DEST_OR_SKIP
-            msg = f"Perfecto. Te recogemos en {sess.origen_text}. ¿A dónde te diriges? Toca el botón para compartir ubicación, escríbela o di NO si prefieres contarle al conductor."
-            await send_whatsapp_location_request(sender_phone, msg)
+            # Confirmado → crear el servicio de inmediato (sin pedir destino).
+            await _finalizar_taxi(sender_phone, sess)
             return
-            
+
         if is_yes is False:
             sess.state = STATE_WAITING_ORIGIN
             sess.origen_text = None
-            msg = "¿En qué dirección te recogemos entonces? (Puedes enviarla escrita o compartir ubicación)"
-            await send_whatsapp_message(sender_phone, msg)
+            await send_whatsapp_location_request(sender_phone, "📍 ¿En qué dirección te recogemos entonces?\n\n(Escríbela o comparte tu ubicación)")
             return
 
         # Saludo/pregunta/charla → re-preguntar la confirmación, sin tomarlo como dirección.
         if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            msg = f"¿Confirmas que te recogemos en {sess.origen_text}? Responde SÍ o NO."
-            await send_whatsapp_message(sender_phone, msg)
+            await send_whatsapp_message(sender_phone, f"📍 ¿Confirmas que te recogemos en:\n{sess.origen_text}?\n\nResponde *SÍ* o *NO*.")
             return
 
-        # Si responde otra cosa, lo tomamos como corrección directa de la dirección
+        # Si responde otra cosa, lo tomamos como corrección directa → crear el servicio.
         sess.origen_text = texto_usuario
-        sess.state = STATE_WAITING_DEST_OR_SKIP
-        msg = f"Listo, te recogemos en {texto_usuario}. ¿A dónde te diriges? Toca el botón para compartir la ubicación, escríbela o di NO."
-        await send_whatsapp_location_request(sender_phone, msg)
-        return
-
-    # ── STATE: waiting_dest_or_skip ──
-    if sess.state == STATE_WAITING_DEST_OR_SKIP:
-        if _is_correction_request(texto_usuario):
-            sess.state = STATE_WAITING_ORIGIN
-            sess.origen_text = None
-            msg = "Sin problema, vamos a corregir la ubicación. ¿Dónde te recogemos? (Usa el botón abajo o escribe)"
-            await send_whatsapp_location_request(sender_phone, msg)
-            return
-
-        is_no = _parse_si_no(texto_usuario)
-        if is_no is False:
-            ok, closing = await _create_wp_service(sender_phone, sess.origen_text or "", None, sess.tipo_servicio or "taxi ahora", sess.fecha_programada, sess.hora_programada)
-            if ok:
-                sess.state = STATE_FINISHED
-            await send_whatsapp_message(sender_phone, closing)
-            return
-
-        # Saludo/pregunta/charla (no dirección) → re-pedir destino sin extraer.
-        if not texto_usuario.startswith("Ubicación en mapa:") and (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            msg = "Sigo registrando tu servicio. ¿A dónde te diriges? Envía tu ubicación con el botón, escribe un barrio o calle, o di *NO* si prefieres contarle al conductor."
-            await send_whatsapp_location_request(sender_phone, msg)
-            return
-
-        if texto_usuario.startswith("Ubicación en mapa:"):
-            dest = texto_usuario
-        else:
-            dest_llm, hint = extract_destination_address(texto_usuario)
-            dest = (dest_llm or "").strip()
-
-            if dest:
-                normalized = normalize_address(dest)
-                if normalized and len(normalized) > len(dest) * 0.5:
-                    dest = normalized
-
-        if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
-            msg = "¿A dónde te diriges? Envía tu ubicación con el botón, escribe un barrio o calle, o di *NO* si prefieres contarle al conductor."
-            await send_whatsapp_location_request(sender_phone, msg)
-            return
-
-        sess.destino_text = dest
-
-        ok, closing = await _create_wp_service(sender_phone, sess.origen_text or "", dest, sess.tipo_servicio or "taxi ahora", sess.fecha_programada, sess.hora_programada)
-        if ok:
-            sess.state = STATE_FINISHED
-        await send_whatsapp_message(sender_phone, closing)
+        await _finalizar_taxi(sender_phone, sess)
         return
 
     # ── STATE: waiting_dom_origin ──
     if sess.state == STATE_WAITING_DOM_ORIGIN:
         if texto_usuario.startswith("Ubicación en mapa:"):
-            origen = texto_usuario
-            sess.origen_text = origen
+            sess.origen_text = texto_usuario
             sess.state = STATE_WAITING_DOM_DEST
-            
-            map_match_o = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", origen)
-            loc_name = "la ubicación compartida"
-            if map_match_o and map_match_o.group(1):
-                loc_name = clean_map_location(map_match_o.group(1))
-
-            await send_whatsapp_location_request(sender_phone, f"Anotado, recogemos en {loc_name}. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
+            await send_whatsapp_location_request(sender_phone, _DOM_DEST_PROMPT)
             return
 
         # Saludo/pregunta/charla (no dirección) → re-pedir origen sin extraer.
         if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            await send_whatsapp_location_request(sender_phone, "Para continuar necesito primero el punto de recogida del domicilio. ¿En qué dirección lo recogemos? (Usa el botón o escribe)")
+            await send_whatsapp_location_request(sender_phone, "📍 Para continuar necesito el punto de recogida del domicilio.\n\n¿En qué dirección lo recogemos? (Usa el botón o escribe)")
             return
 
         origen_llm, hint = extract_pickup_address(texto_usuario)
@@ -831,21 +851,19 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
                 origen = normalized
 
         if not origen or len(origen) < 2 or not looks_like_place(origen):
-            msg = "¿En qué dirección recogemos el domicilio? Usa el botón para enviar tu ubicación o escribe la dirección."
-            await send_whatsapp_location_request(sender_phone, msg)
+            await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de recogida.\n\n📍 Escríbela o comparte tu ubicación.")
             return
 
         sess.origen_text = origen
-            
         sess.state = STATE_WAITING_DOM_DEST
-        await send_whatsapp_location_request(sender_phone, f"Anotado, recogemos en {origen}. ¿A qué dirección debemos llevarlo? (Usa el botón abajo o escribe)")
+        await send_whatsapp_location_request(sender_phone, _DOM_DEST_PROMPT)
         return
 
-    # ── STATE: waiting_dom_dest ──
+    # ── STATE: waiting_dom_dest (solo el domicilio lleva destino de entrega) ──
     if sess.state == STATE_WAITING_DOM_DEST:
         # Saludo/pregunta/charla (no dirección) → re-pedir destino sin extraer.
         if not texto_usuario.startswith("Ubicación en mapa:") and (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            await send_whatsapp_location_request(sender_phone, "Sigo registrando tu domicilio. ¿A qué dirección lo llevamos? Envía tu ubicación con el botón o escribe la dirección.")
+            await send_whatsapp_location_request(sender_phone, "📦 ¿A qué dirección llevamos el domicilio?\n\nComparte la ubicación de entrega con el botón o escríbela.")
             return
 
         if texto_usuario.startswith("Ubicación en mapa:"):
@@ -853,43 +871,36 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         else:
             dest_llm, hint = extract_destination_address(texto_usuario)
             dest = (dest_llm or "").strip()
-
             if dest:
                 normalized = normalize_address(dest)
                 if normalized and len(normalized) > len(dest) * 0.5:
                     dest = normalized
 
         if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
-            msg = "¿A qué dirección llevamos el domicilio? Envía tu ubicación con el botón o escribe la dirección."
-            await send_whatsapp_location_request(sender_phone, msg)
+            await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de entrega.\n\n📦 Escríbela o comparte la ubicación.")
             return
 
         sess.destino_text = dest
-            
-        msg_dest = "la ubicación compartida"
-        if dest.startswith("Ubicación en mapa:"):
-            map_match_d = re.search(r"Ubicación en mapa:\s*-?\d+\.\d+,-?\d+\.\d+(?:\s*\|\s*(.*))?", dest)
-            if map_match_d and map_match_d.group(1):
-                msg_dest = clean_map_location(map_match_d.group(1))
-        else:
-            msg_dest = dest
-
         sess.state = STATE_WAITING_DOM_OBS
-        await send_whatsapp_message(sender_phone, f"Listo, lo llevamos a {msg_dest}. ¿Tienes alguna observación? Por ejemplo, a quién debemos entregarlo, si hay que pagar algo al recibir, o alguna otra instrucción.")
+        await send_whatsapp_message(sender_phone, _DOM_OBS_PROMPT)
         return
 
     # ── STATE: waiting_dom_obs ──
     if sess.state == STATE_WAITING_DOM_OBS:
-        sess.observacion = texto_usuario.strip()
-        
+        obs_clean = texto_usuario.strip().lower()
+        if obs_clean in ("no", "ninguna", "ninguno", "nada", "no gracias", "omitir"):
+            sess.observacion = None
+        else:
+            sess.observacion = texto_usuario.strip()
+
         ok, closing = await _create_wp_service(
-            sender_phone, 
-            sess.origen_text or "", 
-            sess.destino_text or "", 
-            sess.tipo_servicio or "domicilio", 
-            sess.fecha_programada, 
-            sess.hora_programada, 
-            sess.observacion
+            sender_phone,
+            sess.origen_text or "",
+            sess.destino_text or "",
+            sess.tipo_servicio or "domicilio",
+            sess.fecha_programada,
+            sess.hora_programada,
+            sess.observacion,
         )
         if ok:
             sess.state = STATE_FINISHED
