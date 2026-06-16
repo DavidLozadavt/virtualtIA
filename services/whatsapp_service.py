@@ -242,7 +242,7 @@ class WhatsappService:
             sess.state = STATE_WAITING_TIPO_SERVICIO
             await self.send_interactive_buttons(
                 sender_phone,
-                "¡Hola, qué gusto saludarte! 😊 Soy Lyra, tu asistente de TaxBelalcazar. Te ayudaré asistiéndote en tu servicio con el mayor de los gustos. ¿Qué tipo de servicio deseas solicitar hoy?",
+                "¡Hola, qué gusto saludarte! 😊 Soy tu asistente virtual de Tax Belalcázar, tu asistente de TaxBelalcazar. Te ayudaré asistiéndote en tu servicio con el mayor de los gustos. ¿Qué tipo de servicio deseas solicitar hoy?",
                 [
                     ("taxi_ahora", "Taxi Ahora"),
                     ("taxi_prog",  "Taxi Programado"),
