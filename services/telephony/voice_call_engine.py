@@ -24,7 +24,6 @@ from core.address_utils import (
     normalize_address,
     normalize_colombian_address,
 )
-from core.conversation_repair import ConversationMemory, get_repair_message
 from core.geocoder_service import run_pipeline
 from core.geo_types import ResolutionStatus
 from core.location_match import decide, is_filler, resolve_location_entity, Decision
@@ -280,7 +279,7 @@ class VoiceCallEngine:
 
         if not trusted and not looks_like_place(origen) and not looks_like_place(text):
             session.retry_count += 1
-            msg = "Perdona, no te capté el lugar. Dime solo el barrio o la dirección."
+            msg = "Disculpa, no te entendí. ¿Me puedes repetir la dirección?"
             session.last_message = msg
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
@@ -446,10 +445,9 @@ class VoiceCallEngine:
                     session=session,
                 )
 
-        memory = ConversationMemory(session.call_uuid)
-        msg = get_repair_message(text, confidence, session.state, memory)
-        if session.origen_barrio:
-            msg = f"¿Confirmas que estás por {session.origen_barrio}? Di sí, o dime tu barrio."
+        # Respuesta no parseable en confirmación: pedir repetir la dirección de
+        # forma natural (no "¿me confirmas el barrio o la dirección?").
+        msg = "Disculpa, no te entendí. ¿Me puedes repetir la dirección?"
         session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,

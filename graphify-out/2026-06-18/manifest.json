@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "api/routers/freeswitch.py": {
-    "mtime": 1781761431.7355797,
-    "ast_hash": "975a4110f4cf3a9c91a6acf9fb13de7b",
+    "mtime": 1781761850.5679255,
+    "ast_hash": "2fbabf78cf48ca3751fb46637de28744",
     "semantic_hash": ""
   },
   "services/telephony/__init__.py": {
@@ -470,8 +470,8 @@
     "semantic_hash": ""
   },
   "services/telephony/backend_client.py": {
-    "mtime": 1781759002.959437,
-    "ast_hash": "25b375aac38a5d3deaa36fdd42e29aac",
+    "mtime": 1781761892.885088,
+    "ast_hash": "5f27ddad4303387808cb473115b14495",
     "semantic_hash": ""
   },
   "services/telephony/call_handler.py": {
@@ -505,8 +505,8 @@
     "semantic_hash": ""
   },
   "services/telephony/stt_service.py": {
-    "mtime": 1781759002.9623666,
-    "ast_hash": "37de0055cfc7824065cef2995f7b972f",
+    "mtime": 1781761919.701975,
+    "ast_hash": "62842f8ad04a81ded59c0a046dea44a2",
     "semantic_hash": ""
   },
   "services/telephony/tts_file_store.py": {
@@ -520,8 +520,8 @@
     "semantic_hash": ""
   },
   "services/telephony/voice_call_engine.py": {
-    "mtime": 1781759002.964394,
-    "ast_hash": "c29ff4be22e27b1ecfe6c65c3b62599d",
+    "mtime": 1781762751.3156288,
+    "ast_hash": "2bb89b72f8b8cca6f2ff3cb62b95a8c1",
     "semantic_hash": ""
   },
   "services/telephony/ws_audio_buffer.py": {
