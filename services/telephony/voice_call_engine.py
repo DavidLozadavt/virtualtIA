@@ -219,6 +219,7 @@ class VoiceCallEngine:
             call_uuid=session.call_uuid,
             use_freeswitch_channel=True,
             http_client=http_client,
+            origen_barrio=session.origen_barrio,
         )
 
         if not ok:
@@ -306,7 +307,7 @@ class VoiceCallEngine:
                     if barrio:
                         session.origen_barrio = barrio
                         session.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"Te repito: tu dirección es {origen}, barrio {barrio}. ¿Me confirmas?"
+                        msg = f"El punto de recogida es {origen}, barrio {barrio}."
                         session.last_message = msg
                         return VoiceTurnResult(
                             speak_text=msg,
@@ -328,7 +329,7 @@ class VoiceCallEngine:
                 logger.warning("[engine] geocode pipeline error: %s", exc)
 
         session.state = STATE_CONFIRMING_ORIGIN
-        msg = f"Te repito: el punto de recogida es {origen}. ¿Me confirmas?"
+        msg = f"El punto de recogida es {origen}."
         session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,
@@ -350,7 +351,7 @@ class VoiceCallEngine:
             session.origen_text = orig_q
             session.state = STATE_CONFIRMING_ORIGIN
             barrio_str = f", barrio {barrio}" if barrio else ""
-            msg = f"Te repito: tu dirección es {orig_q}{barrio_str}. ¿Me confirmas?"
+            msg = f"El punto de recogida es {orig_q}{barrio_str}."
             session.last_message = msg
             return VoiceTurnResult(
                 speak_text=msg,
@@ -365,7 +366,7 @@ class VoiceCallEngine:
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
         session.state = STATE_CONFIRMING_ORIGIN
-        msg = f"Te repito: el punto de recogida es {orig_q}. ¿Me confirmas?"
+        msg = f"El punto de recogida es {orig_q}."
         session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,

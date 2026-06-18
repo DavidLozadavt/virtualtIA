@@ -43,9 +43,12 @@ _backend = TelephonyBackendClient()
 
 _ws_audio: Dict[str, WsAudioBuffer] = {}
 
-# Cola extra (s) tras la duración del WAV: cubre la latencia entre uuid_broadcast
-# y el inicio real del playback (fetch HTTP en FreeSWITCH) + decaimiento del eco.
-_PLAYBACK_GATE_TAIL_SEC = 1.5
+# Cola extra (s) tras la duración del WAV antes de re-abrir la captura.
+# Pequeña a propósito: una cola larga descartaba el primer "sí" del usuario
+# (tenía que repetirlo). El eco que se filtre por debajo de esta ventana lo
+# rechaza _looks_like_bot_echo a nivel de texto, así que no hace falta cubrir
+# toda la latencia de fetch aquí.
+_PLAYBACK_GATE_TAIL_SEC = 0.4
 
 
 class TestCreateServiceRequest(BaseModel):
@@ -68,6 +71,55 @@ class ProcessTextRequest(BaseModel):
     text: str
     confidence: float = 1.0
     digits: str = ""
+
+
+def _normalize_transcript(text: str, confidence: float) -> str:
+    """
+    Limpieza STT compartida con el gateway Twilio (preprocess_stt): elimina
+    fragmentos de eco de Lyra, expande contracciones payanesas ("hágale"/"de una"
+    -> "sí"), repara direcciones y corrige fonética de Popayán.
+
+    Sin esto, el motor recibe el transcript crudo: una confirmación coloquial o
+    contaminada con eco no matchea _parse_si_no -> is_yes None -> repair -> el
+    usuario tiene que confirmar dos veces. Twilio ya aplica esto (twilio.py:1359).
+    """
+    if not text:
+        return text
+    try:
+        from api.routers.twilio import preprocess_stt
+
+        cleaned = preprocess_stt(text, confidence)
+        return cleaned or text
+    except Exception as e:  # nunca romper el turno por un fallo de normalización
+        logger.debug("[freeswitch] preprocess_stt skipped: %s", e)
+        return text
+
+
+def _echo_tokens(text: str) -> list[str]:
+    import re as _re
+
+    return _re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
+
+
+def _looks_like_bot_echo(transcript: str, last_message: str) -> bool:
+    """
+    True si el transcript es un fragmento literal del último mensaje del bot.
+
+    mod_audio_stream reinyecta el eco del TTS de Lyra; si la cola del prompt
+    ("...¿me confirmas?") escapa al gate, el STT la transcribe y el motor la
+    procesa como turno del usuario -> repair/doble confirmación. Solo descarta
+    secuencias contiguas de >=2 palabras del prompt (nunca un "sí"/"no" corto).
+    """
+    t = _echo_tokens(transcript)
+    if len(t) < 2:
+        return False
+    p = _echo_tokens(last_message)
+    if len(t) > len(p):
+        return False
+    for i in range(len(p) - len(t) + 1):
+        if p[i : i + len(t)] == t:
+            return True
+    return False
 
 
 async def _parse_inbound_body(request: Request) -> dict:
@@ -321,7 +373,7 @@ async def process_text(req: ProcessTextRequest, request: Request):
     result = await process_text_turn(
         store,
         req.call_uuid,
-        user_text=req.text,
+        user_text=_normalize_transcript(req.text, req.confidence),
         confidence=req.confidence,
         digits=req.digits,
         http_client=http_client,
@@ -716,9 +768,21 @@ async def _flush_audio_turn(
         )
         return
 
+    raw_transcript = transcript
+    transcript = _normalize_transcript(transcript, stt.get("confidence", 0.0))
+
+    if session and _looks_like_bot_echo(transcript, session.last_message):
+        logger.info(
+            "[freeswitch/ws] dropped bot-echo call_uuid=%s text=%r",
+            call_uuid,
+            transcript[:120],
+        )
+        return
+
     logger.info(
-        '[freeswitch/ws] transcript call_uuid=%s text="%s"',
+        '[freeswitch/ws] transcript call_uuid=%s raw="%s" norm="%s"',
         call_uuid,
+        raw_transcript[:200],
         transcript[:200],
     )
 

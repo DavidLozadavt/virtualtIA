@@ -241,6 +241,11 @@ class TelephonySTTService:
                 create_kwargs["temperature"] = 0.0
             else:
                 create_kwargs["response_format"] = "json"
+                # Fijar idioma también en gpt-4o-transcribe: sin esto, en
+                # utterances de 1 palabra ("sí") la autodetección falla y la
+                # confirmación no matchea.
+                if self.language:
+                    create_kwargs["language"] = self.language
 
             response = await self._client.audio.transcriptions.create(**create_kwargs)
 

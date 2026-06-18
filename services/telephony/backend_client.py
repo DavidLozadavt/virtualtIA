@@ -164,6 +164,7 @@ class TelephonyBackendClient:
         call_uuid: Optional[str] = None,
         use_freeswitch_channel: bool = True,
         http_client: Optional[httpx.AsyncClient] = None,
+        origen_barrio: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Geocodifica origen/destino y crea el servicio en Laravel.
@@ -171,7 +172,9 @@ class TelephonyBackendClient:
         """
         from core.geocoder_service import geocode
 
-        g_o = await geocode(origen)
+        # Pasar el barrio resuelto mejora la precisión de Google para
+        # nomenclaturas colombianas (paridad con el gateway Twilio).
+        g_o = await geocode(origen, barrio=origen_barrio)
         if not g_o:
             return False, (
                 "No me aparece esa ubicación en Popayán. "
