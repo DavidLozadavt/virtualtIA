@@ -68,6 +68,8 @@ class Settings(BaseSettings):
 
     LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
 
+    FFMPEG_BIN: str = "/usr/bin/ffmpeg"
+
     VOICE_SESSION_STORE: str = "memory"  # memory | redis
     REDIS_URL: str = ""
     CALL_SESSION_TTL_SEC: int = 7200

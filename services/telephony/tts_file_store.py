@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from core.config import settings
+from services.telephony.ffmpeg_bin import ffmpeg_executable, log_ffmpeg_diagnostics
 
 logger = logging.getLogger("lyra.telephony.tts_files")
 
@@ -141,9 +142,10 @@ def _mp3_bytes_to_wav_8k(mp3_bytes: bytes) -> bytes:
 
     wav_path = mp3_path + ".wav"
     try:
+        log_ffmpeg_diagnostics("_mp3_bytes_to_wav_8k")
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", mp3_path,
+                ffmpeg_executable(), "-y", "-i", mp3_path,
                 "-ar", "8000", "-ac", "1", "-f", "wav", wav_path,
             ],
             check=True,

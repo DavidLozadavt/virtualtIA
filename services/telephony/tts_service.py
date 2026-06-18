@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from core.config import settings
+from services.telephony.ffmpeg_bin import ffmpeg_executable, log_ffmpeg_diagnostics
 
 logger = logging.getLogger("lyra.telephony.tts")
 
@@ -58,7 +59,7 @@ class TelephonyTTSService:
 def _mp3_to_mulaw(mp3_bytes: bytes) -> bytes:
     """
     MP3 → PCM 8kHz mono → µ-law.
-    Requiere ffmpeg en PATH. Si no está, lanza excepción.
+    Requiere ffmpeg (ruta absoluta FFMPEG_BIN). Si no está, lanza excepción.
     """
     import subprocess
     import tempfile
@@ -70,9 +71,10 @@ def _mp3_to_mulaw(mp3_bytes: bytes) -> bytes:
 
     pcm_path = mp3_path + ".pcm"
     try:
+        log_ffmpeg_diagnostics("_mp3_to_mulaw")
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", mp3_path,
+                ffmpeg_executable(), "-y", "-i", mp3_path,
                 "-ar", "8000", "-ac", "1", "-f", "s16le", pcm_path,
             ],
             check=True,
