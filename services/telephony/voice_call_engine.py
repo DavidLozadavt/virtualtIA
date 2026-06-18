@@ -49,6 +49,13 @@ GREETING = (
     "Cuéntame, ¿en dónde te recogemos hoy?"
 )
 
+# Barrios cuyo NOMBRE geocodifica mal o choca con otro homónimo: se fuerza la
+# dirección correcta (clave = canónico normalizado, sin tildes). La creación del
+# servicio geocodifica esta dirección, no el nombre del barrio.
+_ORIGIN_ADDRESS_OVERRIDES = {
+    "la paz": "Cra. 4 #70AN-09, Popayán, Cauca",
+}
+
 DTMF_BARRIO_MAP = {
     "1": "Pubenza",
     "2": "Centro",
@@ -253,29 +260,55 @@ class VoiceCallEngine:
         origen = None
         trusted = False
 
-        m = resolve_location_entity(text)
-        d = decide(m)
-        if d == Decision.AMBIGUOUS and m.canonical:
-            session.pending_disambiguation = {
-                "candidates": list(m.disambiguation_candidates),
-                "question": _disambiguation_question(m.disambiguation_candidates),
-            }
-            msg = session.pending_disambiguation["question"]
-            session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
-
-        if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
-            origen = m.canonical
-            trusted = True
-        elif is_filler(text):
-            session.retry_count += 1
-            msg = "No logré identificar la ubicación. ¿Podrías repetirla?"
-            session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+        # Respuesta a una desambiguación pendiente (ej. "¿La Paz o La Paz Sur?"):
+        # resolver acotado a las sedes ofrecidas. Sin esto el motor solo PREGUNTA
+        # pero nunca consume la respuesta (mismo patrón que twilio.py:1643).
+        if session.pending_disambiguation:
+            pd = session.pending_disambiguation
+            m_dis = resolve_location_entity(text, scope=pd.get("candidates"))
+            if decide(m_dis) == Decision.ACCEPT and m_dis.canonical:
+                session.pending_disambiguation = None
+                origen = m_dis.canonical
+                trusted = True
+                logger.info("[engine] disambiguated -> %r", origen)
+            else:
+                msg = pd.get("question") or "¿Cuál de las opciones?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN, short_answer=True, session=session
+                )
         else:
-            origen = await self._extract_origin_llm(text)
-            if not origen:
-                origen = text
+            m = resolve_location_entity(text)
+            d = decide(m)
+            if d == Decision.AMBIGUOUS and m.canonical:
+                session.pending_disambiguation = {
+                    "candidates": list(m.disambiguation_candidates),
+                    "question": _disambiguation_question(m.disambiguation_candidates),
+                }
+                msg = session.pending_disambiguation["question"]
+                session.last_message = msg
+                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+            if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
+                origen = m.canonical
+                trusted = True
+            elif is_filler(text):
+                session.retry_count += 1
+                msg = "No logré identificar la ubicación. ¿Podrías repetirla?"
+                session.last_message = msg
+                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            else:
+                origen = await self._extract_origin_llm(text)
+                if not origen:
+                    origen = text
+
+        # Barrios con dirección fija (nombre geocodifica mal o es ambiguo).
+        if origen:
+            forced = _ORIGIN_ADDRESS_OVERRIDES.get(strip_accents(origen.lower().strip()))
+            if forced:
+                logger.info("[engine] origin address override %r -> %r", origen, forced)
+                origen = forced
+                trusted = True
 
         if not trusted and not looks_like_place(origen) and not looks_like_place(text):
             session.retry_count += 1
