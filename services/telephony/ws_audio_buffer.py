@@ -33,6 +33,21 @@ class WsAudioBuffer:
     chunk_count: int = 0
     first_chunk_at: Optional[float] = None
     first_chunk_logged: bool = False
+    # Instante (time.monotonic) hasta el cual se descarta el audio entrante.
+    # Se activa mientras Lyra reproduce TTS: sin esto, mod_audio_stream devuelve
+    # el eco de su propia voz, el buffer lo vacía como "habla del usuario", el STT
+    # produce basura y el motor cae en el bucle "no logré entender / ¿me confirmas?".
+    muted_until: float = 0.0
+
+    def is_muted(self) -> bool:
+        return time.monotonic() < self.muted_until
+
+    def gate_playback(self, seconds: float) -> None:
+        """Silencia la captura durante un playback y descarta lo ya acumulado."""
+        self.muted_until = time.monotonic() + max(0.0, seconds)
+        self.buffer = bytearray()
+        self.chunk_count = 0
+        self.first_chunk_at = None
 
     @property
     def bytes_per_second(self) -> int:
@@ -48,6 +63,9 @@ class WsAudioBuffer:
 
     def append(self, chunk: bytes) -> None:
         if not chunk:
+            return
+        if self.is_muted():
+            # Eco del TTS en curso: descartar para no auto-dispararse.
             return
         if self.first_chunk_at is None:
             self.first_chunk_at = time.monotonic()

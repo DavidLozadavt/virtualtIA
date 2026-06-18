@@ -43,6 +43,10 @@ _backend = TelephonyBackendClient()
 
 _ws_audio: Dict[str, WsAudioBuffer] = {}
 
+# Cola extra (s) tras la duración del WAV: cubre la latencia entre uuid_broadcast
+# y el inicio real del playback (fetch HTTP en FreeSWITCH) + decaimiento del eco.
+_PLAYBACK_GATE_TAIL_SEC = 1.5
+
 
 class TestCreateServiceRequest(BaseModel):
     telefono: str
@@ -754,6 +758,14 @@ async def _flush_audio_turn(
     audio_url = response.get("audio_url") or ""
     if audio_url:
         logger.info("[freeswitch/ws] tts generated audio_url=%s", audio_url)
+        # Silenciar la captura mientras Lyra habla: descarta el eco de su propia
+        # voz (mod_audio_stream lo reinyecta) que disparaba turnos basura y el
+        # bucle "no logré entender / ¿me confirmas?". Ventana = duración + cola
+        # para latencia de fetch del playback + decaimiento del eco.
+        dur = _wav_duration_seconds(response.get("file_path"))
+        buf = _ws_audio.get(call_uuid)
+        if buf is not None:
+            buf.gate_playback(dur + _PLAYBACK_GATE_TAIL_SEC)
         await _playback_tts_on_call(call_uuid, audio_url)
 
     if response.get("hangup"):
