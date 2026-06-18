@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 
 from core.config import settings
 from services.telephony.backend_client import TelephonyBackendClient
-from services.telephony.call_handler import process_text_turn
+from services.telephony.call_handler import process_text_turn, _restore_terminal_session
 from services.telephony.esl_client import get_esl_client
 from services.telephony.phone_utils import limpiar_numero, resolve_caller_phone
-from services.telephony.session_store import get_session_store
+from services.telephony.session_store import STATE_FINISHED, get_session_store
 from services.telephony.stt_service import TelephonySTTService
 from services.telephony.tts_file_store import (
     build_audio_url,
@@ -654,6 +654,16 @@ async def _flush_audio_turn(
     reason: str = "",
 ) -> None:
     if not audio_buf:
+        return
+
+    store = get_session_store()
+    session = store.get(call_uuid) or _restore_terminal_session(store, call_uuid)
+    if session and (session.service_created or session.state == STATE_FINISHED):
+        logger.info(
+            "[freeswitch/ws] skip stt — call already finished call_uuid=%s state=%s",
+            call_uuid,
+            session.state,
+        )
         return
 
     logger.info(

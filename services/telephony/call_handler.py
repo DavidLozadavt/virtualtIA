@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from services.telephony.session_store import CallSession, SessionStore
+from services.telephony.session_store import CallSession, SessionStore, STATE_FINISHED
 from services.telephony.tts_file_store import build_audio_url, get_tts_file_store, sanitize_audio_id
 from services.telephony.tts_service import TelephonyTTSService
 from services.telephony.voice_call_engine import VoiceAction, VoiceCallEngine, VoiceTurnResult
@@ -48,10 +48,36 @@ async def run_conversation_turn(
 
     if turn.session:
         store.save(turn.session)
-        if turn.action == VoiceAction.HANGUP:
+        # Mantener sesión tras crear servicio para que audio residual del WS
+        # no reinicie el flujo en waiting_origin / confirming_origin.
+        if turn.action == VoiceAction.HANGUP and not turn.session.service_created:
             store.delete(turn.session.call_uuid)
 
     return turn
+
+
+def _restore_terminal_session(store: SessionStore, call_uuid: str) -> Optional[CallSession]:
+    """Si el servicio ya se envió al backend, devolver sesión terminal."""
+    from services.telephony.idempotency import get_submission_guard
+
+    if not get_submission_guard().already_submitted(call_uuid):
+        return None
+
+    session = store.get(call_uuid)
+    if session and (session.service_created or session.state == STATE_FINISHED):
+        return session
+
+    session = CallSession(
+        call_uuid=call_uuid,
+        service_created=True,
+        state=STATE_FINISHED,
+        last_message=(
+            "Tu solicitud ya fue registrada. "
+            "En un momento el conductor se comunica contigo."
+        ),
+    )
+    store.save(session)
+    return session
 
 
 def build_audio_response(turn: VoiceTurnResult, tts_result: dict) -> Dict[str, Any]:
@@ -88,6 +114,8 @@ async def process_text_turn(
     tts_result: Optional[dict] = None,
 ) -> Dict[str, Any]:
     session = store.get(call_uuid)
+    if not session:
+        session = _restore_terminal_session(store, call_uuid)
     if not session and create_session_if_missing:
         session = store.get_or_create(call_uuid)
     if not session:
@@ -148,6 +176,8 @@ async def process_stt_turn(
 ) -> Dict[str, Any]:
     """Turno proveniente de STT (WebSocket audio)."""
     session = store.get(call_uuid)
+    if not session:
+        session = _restore_terminal_session(store, call_uuid)
     if not session:
         session = store.get_or_create(call_uuid)
 

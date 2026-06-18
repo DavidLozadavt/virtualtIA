@@ -108,12 +108,16 @@ class VoiceCallEngine:
             confidence,
         )
 
-        # ── Terminales ──
-        if session.state == STATE_FINISHED or (
-            session.service_created and session.state == STATE_CREATING_SERVICE
-        ):
+        # ── Terminales (servicio ya creado o llamada finalizada) ──
+        if session.service_created or session.state == STATE_FINISHED:
+            closing = (
+                session.last_message
+                if session.service_created and session.last_message
+                else "¡Gracias por llamar! ¡Que te vaya bien!"
+            )
+            session.state = STATE_FINISHED
             return VoiceTurnResult(
-                speak_text="¡Gracias por llamar! ¡Que te vaya bien!",
+                speak_text=closing,
                 action=VoiceAction.HANGUP,
                 session=session,
             )
@@ -232,6 +236,7 @@ class VoiceCallEngine:
 
         session.service_created = True
         session.state = STATE_FINISHED
+        session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,
             action=VoiceAction.HANGUP,
@@ -422,6 +427,23 @@ class VoiceCallEngine:
                 short_answer=True,
                 session=session,
             )
+
+        # Respuesta ambigua con origen+barrio ya resueltos → confirmación implícita
+        # (misma lógica que twilio.py; evita bucle de "¿Me confirmas el barrio?")
+        ambiguous_is_place = looks_like_place(text)
+        if session.origen_text and session.origen_barrio and not ambiguous_is_place:
+            logger.info(
+                "[engine] implicit confirm call_uuid=%s text=%r",
+                session.call_uuid,
+                text[:80],
+            )
+            if not ASK_DESTINATION:
+                session.state = STATE_CREATING_SERVICE
+                return VoiceTurnResult(
+                    speak_text="Un momento por favor...",
+                    action=VoiceAction.CREATE_SERVICE,
+                    session=session,
+                )
 
         memory = ConversationMemory(session.call_uuid)
         msg = get_repair_message(text, confidence, session.state, memory)
