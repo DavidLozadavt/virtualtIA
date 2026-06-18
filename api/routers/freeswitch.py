@@ -4,10 +4,12 @@ api/routers/freeswitch.py — Integración directa FreeSWITCH ↔ Lyra (sin Twil
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import traceback
+import wave
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -622,6 +624,19 @@ async def audio_stream(websocket: WebSocket):
         logger.info("[freeswitch/ws] websocket closed call_uuid=%s", call_uuid)
 
 
+def _wav_duration_seconds(file_path: Optional[str]) -> float:
+    """Duración del WAV local para esperar a que termine el playback antes de colgar."""
+    if not file_path:
+        return 0.0
+    try:
+        with wave.open(file_path, "rb") as wf:
+            rate = wf.getframerate() or 8000
+            return wf.getnframes() / float(rate)
+    except Exception as e:
+        logger.debug("[freeswitch/ws] wav duration failed path=%s err=%s", file_path, e)
+        return 0.0
+
+
 async def _playback_tts_on_call(call_uuid: str, audio_url: str) -> bool:
     """Reproduce TTS en la llamada vía ESL uuid_broadcast usando URL HTTP."""
     if not settings.FREESWITCH_ESL_ENABLED:
@@ -743,6 +758,12 @@ async def _flush_audio_turn(
 
     if response.get("hangup"):
         if settings.FREESWITCH_ESL_ENABLED:
+            # uuid_broadcast es fire-and-forget: encola el playback y retorna.
+            # Esperar la duración del audio (+ buffer) antes de uuid_kill, si no
+            # el mensaje de confirmación del servicio se corta antes de oírse.
+            wait_s = _wav_duration_seconds(response.get("file_path"))
+            if wait_s > 0:
+                await asyncio.sleep(wait_s + 0.75)
             await get_esl_client().uuid_kill(call_uuid)
 
     ws_payload = {

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import uuid
 from typing import Any, Dict, Optional
 
 import httpx
@@ -144,7 +145,11 @@ async def process_text_turn(
 
     if file_playback:
         file_store = get_tts_file_store()
-        audio_id = sanitize_audio_id(call_uuid)
+        # ID único por turno: si se reusa el call_uuid como nombre de archivo,
+        # la URL de playback es idéntica cada turno y FreeSWITCH (mod_http_cache)
+        # sirve el audio cacheado del turno anterior (ej. "¿Me confirmas?") en
+        # vez del mensaje nuevo. Sufijo aleatorio → URL única → sin cache stale.
+        audio_id = f"{sanitize_audio_id(call_uuid)}-{uuid.uuid4().hex[:8]}"
         _, file_path = file_store.save_telephony_audio(
             tts_result,
             call_uuid=call_uuid,
