@@ -421,6 +421,21 @@ HUMAN_REFERENCES: dict[str, dict] = {
         "lat": 2.441584217876181, "lon": -76.6028230716416,
         "aliases": ["sena centro", "sena del centro", "senacentro", "el senacentro"],
     },
+    # Dos "La Paz" en Popayán → ambiguo, como SENA. "la paz" (barrio) tiene
+    # dirección fija Cra. 4 #70AN-09 (override en voice_call_engine); "la paz sur"
+    # geocodifica bien por su nombre. lat/lon de "la paz" aproximados: la creación
+    # del servicio usa la dirección override, no estas coords.
+    "la paz": {
+        "canonical": "La Paz",
+        "lat": 2.4775, "lon": -76.6095,
+        "aliases": ["la paz", "barrio la paz", "la paz barrio", "barrio paz"],
+        "needs_disambiguation": True,
+    },
+    "la paz sur": {
+        "canonical": "La Paz Sur",
+        "lat": 2.4321, "lon": -76.6111,
+        "aliases": ["la paz sur", "lapaz sur", "barrio la paz sur"],
+    },
     "la estancia clinica": {
         "canonical": "Clínica La Estancia",
         "lat": 2.4528, "lon": -76.5960,
@@ -490,6 +505,7 @@ HUMAN_REFERENCES: dict[str, dict] = {
 # entidad multi-sede futura es solo añadir aquí (sin tocar el flujo de Twilio).
 DISAMBIGUATION_GROUPS: dict[str, list[str]] = {
     "sena": ["sena norte", "sena centro"],
+    "la paz": ["la paz", "la paz sur"],
 }
 
 

@@ -238,7 +238,7 @@ BARRIO_ALIASES: Dict[str, List[str]] = {
     "Gabriel García Márquez": ["gabriel garcia marquez", "garcia marquez", "gabo", "g garcia", "gabriel garcia"],
     "Jorge E. Gaitán": ["jorge gaitan", "jorge e gaitan", "gaitán", "gaitan", "barrio gaitan"],
     "Limonar": ["limonar", "el limonar", "barrio limonar"],
-    "La Paz Sur": ["la paz sur", "lapaz sur", "la paz", "barrio paz"],
+    "La Paz Sur": ["la paz sur", "lapaz sur"],
     "La Gran Victoria": ["la gran victoria", "gran victoria", "victoria", "barrio victoria"],
     "Versalles": ["versalles", "versales", "barrio versalles", "el versalles"],
     "Ladera": ["ladera", "la ladera", "barrio ladera", "sector ladera"],

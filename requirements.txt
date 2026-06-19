@@ -10,3 +10,4 @@ python-multipart>=0.0.9
 openai>=1.0.0
 edge-tts>=7.0.0
 pusher>=3.3.1
+redis>=5.0.0

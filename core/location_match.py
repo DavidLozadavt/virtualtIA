@@ -150,6 +150,7 @@ _LOCK = threading.Lock()
 _ENTITIES: Optional[dict[str, _Entity]] = None         # key: canonical normalizado
 _CORRECTIONS_NORM: Optional[dict[str, str]] = None     # wrong_norm → canonical
 _HR_KEY_TO_CANONICAL: dict[str, str] = {}              # HR key → canonical
+_ALIAS_TO_CANONICAL: Optional[dict[str, str]] = None   # alias_norm → canonical (match exacto)
 
 
 def _norm(s: str) -> str:
@@ -157,7 +158,7 @@ def _norm(s: str) -> str:
 
 
 def _build_catalog() -> None:
-    global _ENTITIES, _CORRECTIONS_NORM
+    global _ENTITIES, _CORRECTIONS_NORM, _ALIAS_TO_CANONICAL
     if _ENTITIES is not None:
         return
     with _LOCK:
@@ -223,6 +224,15 @@ def _build_catalog() -> None:
             target = entities.get(right_norm)
             corrections[_norm(wrong)] = target.canonical if target else right
         _CORRECTIONS_NORM = corrections
+
+        # Índice de alias exacto → canónico. Permite que un nombre corto pero
+        # real (p. ej. "la paz", "la paz sur") supere el filtro _has_content
+        # (MIN_CONTENT_LEN=4 mata tokens de 3 letras como "paz"/"sur").
+        alias_index: dict[str, str] = {}
+        for ent in entities.values():
+            for a in ent.aliases:
+                alias_index.setdefault(a, ent.canonical)
+        _ALIAS_TO_CANONICAL = alias_index
 
         _ENTITIES = entities
 
@@ -332,7 +342,9 @@ def resolve_location_entity(
         return _resolve_scoped(t, scope)
 
     # Rechazar relleno puro (sin token de contenido) — mata "en el" → SENA.
-    if not _has_content(t):
+    # Excepción: si el input completo es un alias exacto del catálogo, es un
+    # lugar real aunque sus tokens sean cortos ("la paz", "la paz sur").
+    if not (_ALIAS_TO_CANONICAL and t in _ALIAS_TO_CANONICAL) and not _has_content(t):
         return LocationMatch(canonical=None, evidence=t)
 
     # 1. Corrección STT exacta → ALIAS_EXACT

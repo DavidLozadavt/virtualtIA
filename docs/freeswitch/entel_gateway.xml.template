@@ -1,0 +1,31 @@
+<!--
+  Template: Gateway SIP Entel para FreeSWITCH (perfil external)
+  Copiar a: /etc/freeswitch/sip_profiles/external/entel.xml
+  Reemplazar placeholders ANTES de desplegar. NO subir credenciales al repo.
+
+  Variables:
+    ENTEL_USERNAME      — usuario SIP / auth username
+    ENTEL_PASSWORD      — password SIP
+    ENTEL_PROXY         — proxy/registrar (ej. sip.entel.example.com)
+    ENTEL_REALM         — realm SIP (si aplica)
+    ENTEL_FROM_DOMAIN   — dominio From (si aplica)
+    ENTEL_REGISTER      — true | false
+-->
+<include>
+  <gateway name="ENTEL_GATEWAY">
+    <param name="username" value="ENTEL_USERNAME"/>
+    <param name="auth-username" value="ENTEL_USERNAME"/>
+    <param name="password" value="ENTEL_PASSWORD"/>
+    <param name="proxy" value="ENTEL_PROXY"/>
+    <param name="realm" value="ENTEL_REALM"/>
+    <param name="from-domain" value="ENTEL_FROM_DOMAIN"/>
+    <param name="register" value="ENTEL_REGISTER"/>
+    <param name="register-transport" value="udp"/>
+    <param name="retry-seconds" value="30"/>
+    <param name="expire-seconds" value="600"/>
+    <param name="caller-id-in-from" value="true"/>
+    <param name="extension-in-contact" value="true"/>
+    <!-- Codecs recomendados telefonía Colombia -->
+    <param name="codec-prefs" value="PCMU,PCMA"/>
+  </gateway>
+</include>
