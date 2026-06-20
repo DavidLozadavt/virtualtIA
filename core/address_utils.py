@@ -540,6 +540,55 @@ def normalize_colombian_address(address: str) -> str:
     return t.strip()
 
 
+# ── Recuperación de número de casa / landmark perdidos en la extracción ───────
+
+_HOUSE_NUMBER_MARK = "#"
+
+
+def reattach_address_details(original_user_text: str, extracted: str) -> str:
+    """
+    Garantiza que el número de casa y el landmark sobrevivan hasta la query del
+    geocoder, sin importar qué función intermedia (extractor LLM, match de
+    catálogo local, referencia humana) haya recortado la dirección.
+
+    Causa raíz (item 7 del audit, "Auto-aceptación de Direcciones Incompletas"):
+    el extractor de origen devuelve solo el nombre de la vía
+    ("Calle Cuarta, número 26, Camilo Torres" → "Calle Cuarta") y descarta el
+    número de casa ("# 26") y el landmark ("Camilo Torres"). La normalización
+    posterior ya no puede recuperar lo que se descartó ANTES de ella.
+
+    `normalize_colombian_address` SÍ preserva número + landmark cuando recibe el
+    texto completo del usuario. Por eso, si la normalización del texto original
+    contiene un número de casa ('#') que el candidato extraído perdió, usamos la
+    normalización completa del original como fuente de verdad: es exactamente lo
+    que el usuario dijo, normalizado, sin pérdida.
+
+    Returns:
+        El candidato enriquecido, o el `extracted` original si no hay número de
+        casa que proteger o si el candidato ya lo conserva.
+    """
+    if not original_user_text or not extracted:
+        return extracted
+
+    norm_full = normalize_colombian_address(_strip_preamble(original_user_text))
+
+    # Sin número de casa en el texto original → no hay detalle de casa que
+    # proteger (ej. el usuario solo dio un barrio). No tocar el candidato.
+    if _HOUSE_NUMBER_MARK not in norm_full:
+        return extracted
+
+    # El candidato extraído ya conserva un número de casa → respetarlo tal cual.
+    if _HOUSE_NUMBER_MARK in normalize_colombian_address(extracted):
+        return extracted
+
+    logger.info(
+        "[ADDR_RECOVER] extracted %r dropped house number/landmark; "
+        "recovering full normalized address %r",
+        extracted, norm_full,
+    )
+    return norm_full
+
+
 # ── Resolución local de barrios/landmarks (catálogo popayan_geodata) ──────────
 # Se usan SOLO los nombres/aliases de popayan_geodata (BARRIO_ALIASES, LANDMARKS);
 # las coordenadas de ese módulo NO se usan — la geocodificación real ocurre en

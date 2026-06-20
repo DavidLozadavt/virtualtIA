@@ -23,6 +23,7 @@ from core.address_utils import (
     looks_like_place,
     normalize_address,
     normalize_colombian_address,
+    reattach_address_details,
 )
 from core.conversation_repair import get_progressive_retry_message
 from core.geocoder_service import run_pipeline
@@ -325,6 +326,11 @@ class VoiceCallEngine:
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
         session.retry_count = 0
+        # Red de seguridad: si la extracción (LLM / catálogo / referencia humana)
+        # recortó el número de casa o el landmark que el usuario sí dijo, los
+        # recuperamos del texto original antes de geocodificar (bug item 7).
+        if origen:
+            origen = reattach_address_details(text, origen)
         if origen:
             col_norm = normalize_colombian_address(origen)
             if col_norm and len(col_norm) >= 3:
@@ -405,6 +411,32 @@ class VoiceCallEngine:
             session.last_message = msg
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
+        if geo_result.status == ResolutionStatus.FAILED:
+            # Reintentos agotados y el geocoder sigue sin precisión de número de
+            # casa. Fallback seguro y EXPLÍCITO: no aceptar el resultado de baja
+            # precisión, no confirmar una dirección sin coordenadas reales (la
+            # creación del servicio igualmente la rechazaría). Este canal no tiene
+            # transferencia a humano, así que reiniciamos la captura del origen
+            # pidiendo explícitamente número de casa + referencia.
+            logger.warning(
+                "[engine] geo context exhausted (still low precision) → safe "
+                "fallback, restarting origin capture call_uuid=%s",
+                session.call_uuid,
+            )
+            session.state = STATE_WAITING_ORIGIN
+            session.origen_text = None
+            session.origen_barrio = None
+            session.geo_attempt = 0
+            session.geo_original_query = None
+            msg = (
+                "No logré ubicar la dirección exacta. Intentémoslo de nuevo: "
+                "dime la calle con el número de la casa y un punto de "
+                "referencia cercano."
+            )
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        # NEEDS_DISAMBIGUATION u otro estado no terminal → confirmar texto.
         session.state = STATE_CONFIRMING_ORIGIN
         msg = f"El punto de recogida es {orig_q}."
         session.last_message = msg

@@ -75,6 +75,7 @@ from core.address_utils import (
     looks_like_place,
     normalize_address,
     normalize_colombian_address,
+    reattach_address_details,
 )
 from core.geocoder_service import geocode, run_pipeline, handle_user_context
 from core.geo_types import GeoSessionState
@@ -1041,14 +1042,14 @@ async def extract_address(user_text: str, role: str = "origen") -> Tuple[Optiona
             logger.info(f"[EXTRACT] Human ref + street → address span: {span!r}")
             return span, ""
         logger.info(f"[EXTRACT] Human ref: {user_text!r} → {human_ref['canonical']!r}")
-        return human_ref["canonical"], ""
+        return reattach_address_details(user_text, human_ref["canonical"]), ""
 
     # 4. Local match (stub → siempre None; mantenido por compatibilidad de flujo)
     for candidate in (cleaned, user_text):
         local = _try_local_match(candidate)
         if local:
             logger.info(f"[EXTRACT] Local match {role}: {local!r}")
-            return local, ""
+            return reattach_address_details(user_text, local), ""
 
     # 5. Si hay dirección de calle, recortar ruido conversacional y retornar.
     if has_street:
@@ -1102,7 +1103,7 @@ async def extract_address(user_text: str, role: str = "origen") -> Tuple[Optiona
             else:
                 return (fb if len(fb) >= 3 else None), "¿Cuál es tu destino?"
 
-        return raw, ""
+        return reattach_address_details(user_text, raw), ""
 
     except Exception as e:
         logger.error(f"extract_address error: {e}")

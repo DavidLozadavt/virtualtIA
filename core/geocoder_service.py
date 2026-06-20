@@ -741,6 +741,30 @@ def _build_context_question(reason: str = "general") -> str:
     return "¿En qué barrio o referencia cercana queda la dirección?"
 
 
+def _build_house_number_question() -> str:
+    """
+    Pregunta específica para precisión de dirección: el geocoder devolvió el
+    centro de la vía (sin número de casa). Pedimos número de casa o un punto de
+    referencia cercano para re-consultar con mayor precisión (item 7 audit).
+    """
+    return (
+        "Encontré la calle pero no el punto exacto. "
+        "¿Cuál es el número de la casa o un punto de referencia cercano?"
+    )
+
+
+# Precisiones que NUNCA se auto-aceptan: el geocoder devolvió el centro de la
+# vía / un nivel aproximado, sin precisión de número de casa. Siempre se pide
+# número de casa o landmark y se re-consulta (item 7 audit: "Auto-aceptación de
+# Direcciones Incompletas"). Decisión de producto 2026-06-20: incluye
+# GEOMETRIC_CENTER + APPROXIMATE + NOMINATIM_LOW.
+_NEVER_AUTOACCEPT = {
+    LocationType.GEOMETRIC_CENTER,
+    LocationType.APPROXIMATE,
+    LocationType.NOMINATIM_LOW,
+}
+
+
 def _build_disambiguation_question(candidates: list[GeoCandidate]) -> str:
     """
     Construye pregunta SOLO con datos reales de los candidatos.
@@ -928,6 +952,46 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
     best = _pick_best(in_bbox)
     if best:
         result_matches = _result_matches_query(best.display_name, normalized)
+
+        # Regla dura (item 7 audit): GEOMETRIC_CENTER / APPROXIMATE /
+        # NOMINATIM_LOW NUNCA se auto-aceptan, coincida o no el número textual.
+        # El geocoder devolvió el centro de la vía o un nivel aproximado → falta
+        # precisión de número de casa. Siempre pedir número de casa o landmark y
+        # re-consultar: handle_user_context re-ejecuta el pipeline con el dato
+        # adicional (attempt + 1), y si Google/Places ahora devuelve
+        # ROOFTOP/RANGE_INTERPOLATED se acepta. El tope MAX_PIPELINE_ATTEMPTS
+        # corta el ciclo si nunca mejora.
+        if best.location_type in _NEVER_AUTOACCEPT:
+            # Intentos agotados y sigue siendo baja precisión: NUNCA caer a
+            # aceptar el resultado solo porque se acabaron los reintentos (eso
+            # reabriría el bug item 7 en el caso límite). Se devuelve FAILED y el
+            # caller dispara su fallback seguro. El tope se centraliza aquí para
+            # que aplique a TODOS los callers (Twilio vía handle_user_context y
+            # FreeSWITCH que llama run_pipeline directamente).
+            if attempt >= MAX_PIPELINE_ATTEMPTS:
+                logger.warning(
+                    f"[PIPELINE] {best.location_type.value} still low-precision "
+                    f"after {attempt} attempts: {best.display_name!r} for "
+                    f"{normalized!r} → FAILED (no silent low-precision accept)"
+                )
+                return GeoResolution(
+                    status=ResolutionStatus.FAILED,
+                    query=normalized,
+                    attempt=attempt,
+                    candidates=in_bbox,
+                )
+            logger.warning(
+                f"[PIPELINE] {best.location_type.value} never auto-accepted "
+                f"(attempt {attempt}): {best.display_name!r} for {normalized!r} "
+                f"→ CONTEXT_GATHERING (need house number/landmark)"
+            )
+            return GeoResolution(
+                status=ResolutionStatus.CONTEXT_GATHERING,
+                query=normalized,
+                attempt=attempt,
+                candidates=in_bbox,
+                disambiguation_question=_build_house_number_question(),
+            )
 
         # Mismatch de baja precisión SOLO en el primer intento → pedir barrio.
         # Google para direcciones residenciales de Popayán raramente alcanza
