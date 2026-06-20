@@ -25,7 +25,8 @@
     <param name="expire-seconds" value="600"/>
     <param name="caller-id-in-from" value="true"/>
     <param name="extension-in-contact" value="true"/>
-    <!-- Codecs recomendados telefonía Colombia -->
-    <param name="codec-prefs" value="PCMU,PCMA"/>
+    <!-- Forzar G.711 PCMU únicamente: evita transcodificación que degrada el
+         audio crudo enviado al STT. Ver docs/freeswitch_audio_config.md -->
+    <param name="codec-prefs" value="PCMU"/>
   </gateway>
 </include>
