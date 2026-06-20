@@ -374,6 +374,47 @@ class VoiceCallEngine:
             except Exception as exc:
                 logger.warning("[engine] geocode pipeline error: %s", exc)
 
+        # Caso 2: nombre propio / landmark sin patrón de calle. También se
+        # geocodifica para ejercer el guard _NEVER_AUTOACCEPT en la captura
+        # inicial (antes solo geocodificaba is_street=True; los landmarks se
+        # diferían a la creación del servicio). La rama is_street de arriba queda
+        # intacta. Solo se geocodifica si parece un lugar real (looks_like_place).
+        if not is_street and origen and looks_like_place(origen):
+            try:
+                geo_result = await run_pipeline(origen, attempt=1)
+                if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                    barrio = geo_result.selected.neighborhood
+                    if barrio:
+                        session.origen_barrio = barrio
+                    session.state = STATE_CONFIRMING_ORIGIN
+                    barrio_str = f", barrio {barrio}" if barrio else ""
+                    msg = f"El punto de recogida es {origen}{barrio_str}."
+                    session.last_message = msg
+                    return VoiceTurnResult(
+                        speak_text=msg,
+                        action=VoiceAction.LISTEN,
+                        short_answer=True,
+                        session=session,
+                    )
+                elif (
+                    geo_result.status in (
+                        ResolutionStatus.CONTEXT_GATHERING,
+                        ResolutionStatus.NEEDS_DISAMBIGUATION,
+                    )
+                    and not trusted
+                ):
+                    # No degradar shortcuts confiables (catálogo local / override):
+                    # solo los NO confiables pasan a pedir barrio/referencia.
+                    session.geo_original_query = origen
+                    session.geo_attempt = 1
+                    session.state = STATE_WAITING_GEO_CONTEXT
+                    msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
+                    session.last_message = msg
+                    return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                # trusted en no-RESOLVED, o FAILED → caer a confirm plano.
+            except Exception as exc:
+                logger.warning("[engine] landmark geocode pipeline error: %s", exc)
+
         session.state = STATE_CONFIRMING_ORIGIN
         msg = f"El punto de recogida es {origen}."
         session.last_message = msg

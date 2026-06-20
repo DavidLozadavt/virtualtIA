@@ -1842,6 +1842,48 @@ async def process_speech(request: Request):
             sess.last_message = msg
             return _twiml_response(await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True))
 
+        # Caso 2: nombre propio / landmark sin patrón de calle. Geocodificar
+        # también aquí para ejercer el guard _NEVER_AUTOACCEPT en la captura
+        # inicial (paridad con FreeSWITCH; antes el landmark se difería a la
+        # creación del servicio). La rama is_street de arriba queda intacta.
+        if not is_street and origen and looks_like_place(origen):
+            from core.geo_types import ResolutionStatus
+            try:
+                geo_result = await run_pipeline(origen, attempt=1)
+                if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                    barrio_name = geo_result.selected.neighborhood
+                    if barrio_name:
+                        sess.origen_barrio = barrio_name
+                    sess.geo_origin.reset()
+                    sess.state = STATE_CONFIRMING_ORIGIN
+                    barrio_str = f", barrio {barrio_name}" if barrio_name else ""
+                    msg = f"te repito: el punto de recogida es {origen}{barrio_str}. ¿Me confirmas?"
+                    sess.last_message = msg
+                    return _twiml_response(
+                        await _twiml_gather_adaptive(msg, action_url, sess, short_answer=True)
+                    )
+                elif (
+                    geo_result.status in (
+                        ResolutionStatus.CONTEXT_GATHERING,
+                        ResolutionStatus.NEEDS_DISAMBIGUATION,
+                    )
+                    and not trusted_origin
+                ):
+                    # No degradar shortcuts confiables (catálogo / referencia):
+                    # solo los NO confiables pasan a pedir barrio/referencia.
+                    sess.geo_origin.pending = geo_result
+                    sess.geo_origin.original_query = origen
+                    sess.geo_origin.attempt = 1
+                    sess.state = STATE_WAITING_GEO_CONTEXT
+                    geo_question = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
+                    sess.last_message = geo_question
+                    return _twiml_response(
+                        await _twiml_gather_adaptive(geo_question, action_url, sess)
+                    )
+                # trusted_origin en no-RESOLVED, o FAILED → caer a confirm plano.
+            except Exception as exc:
+                logger.warning(f"[ORIGIN] Landmark pipeline geocode failed: {exc}")
+
         # Lugar nombrado: ir a confirmación
         sess.state = STATE_CONFIRMING_ORIGIN
         msg = f"te repito: el punto de recogida es {origen}. ¿Me confirmas?"
