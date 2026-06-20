@@ -137,6 +137,7 @@ POPAYAN_STT_CORRECTIONS: dict[str, str] = {
     "belal cazar":       "belalcázar",
     "valle del ortigal": "valle del ortigal",   # self-entry → exact match exits early, no subcadena cascade
     "ortigal":           "valle del ortigal",
+    "hortigal":          "valle del ortigal",    # mishear Whisper ("hortigal"); el colapso de duplicados limpia "valle del valle del ortigal"
     "el ortigal":        "valle del ortigal",
     "valle ortigal":     "valle del ortigal",
     "valle del hostiga": "valle del ortigal",   # STT mishear
@@ -271,20 +272,58 @@ def correct_stt_errors(text: str) -> str:
         return POPAYAN_STT_CORRECTIONS[t_lower]
 
     # 2. Subcadenas — reemplaza la parte errónea dentro de una frase más larga.
+    #    Solo se reemplaza en LÍMITE DE PALABRA (\b...\b): así "ortigal" no
+    #    matchea dentro de "hortigal" ni "ospital" dentro de "hospital", que
+    #    causaba texto corrupto ("valle del hvalle del ortigal", "hhospital").
     #    Guard: saltar si la forma correcta YA está en el resultado — evita
-    #    doble-reemplazo en cascada (ej: "el ortigal" ⊂ "valle del ortigal"
-    #    causaba "valle dvalle del valle del ortigal").
+    #    doble-reemplazo en cascada (ej: "el ortigal" ⊂ "valle del ortigal").
     result = t_lower
     for wrong, right in sorted(
         POPAYAN_STT_CORRECTIONS.items(), key=lambda x: len(x[0]), reverse=True
     ):
-        if wrong in result and right.lower() not in result:
-            result = result.replace(wrong, right)
+        # Guard también en límite de palabra: la forma correcta se considera
+        # "ya presente" solo si aparece como palabra completa, no como subcadena
+        # (sin esto, "ortigal" ⊂ "hortigal" bloqueaba la corrección de "hortigal").
+        if re.search(r'\b' + re.escape(right.lower()) + r'\b', result):
+            continue
+        pattern = r'\b' + re.escape(wrong) + r'\b'
+        if re.search(pattern, result):
+            result = re.sub(pattern, right, result)
+
+    # 2b. Red de seguridad: colapsar frases idénticas adyacentes que un reemplazo
+    #     auto-expansivo (wrong ⊂ right) haya podido duplicar.
+    result = _collapse_adjacent_duplicate_phrases(result)
 
     # 3. Normalización de abreviaturas de calle
     result = _normalize_street_abbreviations(result)
 
     return result if result != t_lower else t
+
+
+def _collapse_adjacent_duplicate_phrases(text: str) -> str:
+    """
+    Colapsa frases idénticas adyacentes:
+      "valle del valle del ortigal" → "valle del ortigal"
+      "popayán popayán"             → "popayán"
+
+    Red de seguridad contra reemplazos auto-expansivos (wrong ⊂ right) que
+    dupliquen palabras vecinas ya presentes en el texto.
+    """
+    words = text.split()
+    changed = True
+    while changed:
+        changed = False
+        for size in range(min(4, len(words) // 2), 0, -1):
+            i = 0
+            while i + 2 * size <= len(words):
+                if words[i:i + size] == words[i + size:i + 2 * size]:
+                    del words[i + size:i + 2 * size]
+                    changed = True
+                else:
+                    i += 1
+            if changed:
+                break
+    return " ".join(words)
 
 
 def _normalize_street_abbreviations(text: str) -> str:

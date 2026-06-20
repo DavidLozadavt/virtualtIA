@@ -9,8 +9,68 @@ hints produce el formato correcto por modelo.
 
 import pytest
 
-from core.stt_enhancer import repair_location_transcription as repair
+from core.stt_enhancer import (
+    repair_location_transcription as repair,
+    correct_stt_errors,
+    _collapse_adjacent_duplicate_phrases,
+)
 from core.streaming_pipeline import _get_contextual_hints, _build_hint_vocab
+
+
+# ── Corrección fonética: reemplazo limpio sin duplicar/corromper vecinos ────────
+
+def test_correct_hortigal_no_word_duplication():
+    # Caso 1 real: "Valle del Hortigal" NO debe duplicar "valle del".
+    out = correct_stt_errors("Valle del Hortigal").lower()
+    assert out == "valle del ortigal"
+    assert out.count("valle del") == 1
+    assert "hvalle" not in out
+
+
+def test_correct_popayan_hortigal_clean():
+    # Caso 2 real: "Popayán, Hortigal" → corrige solo "Hortigal"; "popayán" es
+    # texto legítimo de Whisper y el corrector NO lo toca ni lo duplica.
+    out = correct_stt_errors("Popayán, Hortigal").lower()
+    assert out == "popayán, valle del ortigal"
+    assert out.count("valle del ortigal") == 1
+    assert out.count("popayán") == 1
+    assert "hvalle" not in out
+
+
+def test_correct_standalone_hortigal():
+    assert correct_stt_errors("Hortigal").lower() == "valle del ortigal"
+    assert correct_stt_errors("ortigal").lower() == "valle del ortigal"
+
+
+def test_correct_word_boundary_no_inner_match():
+    # "ospital" ⊂ "hospital": el límite de palabra impide corromper "hospital"
+    # a "hhospital"; pero "ospital" suelto sí se corrige.
+    assert correct_stt_errors("hospital") == "hospital"
+    assert correct_stt_errors("el ospital").lower() == "el hospital"
+
+
+def test_correct_full_chain_no_corruption():
+    # Cadena de producción: correct_stt_errors → repair (preprocess_stt).
+    for raw in ("Valle del Hortigal", "valle del hortigal", "Hortigal"):
+        full = repair(correct_stt_errors(raw)).lower()
+        assert full == "valle del ortigal", f"{raw!r} → {full!r}"
+        assert "hvalle" not in full
+        assert full.count("valle del") == 1
+
+
+def test_correct_leaves_normal_speech_unchanged():
+    for t in ("no pueden venir", "quiero un taxi para mi casa",
+              "villa del carmen", "el exito"):
+        assert correct_stt_errors(t) == t
+
+
+def test_collapse_adjacent_duplicate_phrases():
+    assert _collapse_adjacent_duplicate_phrases(
+        "valle del valle del ortigal") == "valle del ortigal"
+    assert _collapse_adjacent_duplicate_phrases("popayán popayán") == "popayán"
+    # No colapsa cuando no hay duplicado adyacente.
+    assert _collapse_adjacent_duplicate_phrases(
+        "calle 4 carrera 5") == "calle 4 carrera 5"
 
 
 # ── Reparación fonética ─────────────────────────────────────────────────────────
