@@ -280,6 +280,14 @@ class ConversationRepair:
             "¿Más hacia {last_location} o diferente zona?",
             "¿Seguimos por {last_location}?",
         ],
+        # Reintentos consecutivos (>=2): el usuario ya falló varias veces. En vez
+        # de repetir "no entendí", simplificar la tarea y pedir la dirección por
+        # partes pequeñas, empezando por el barrio. Pensado para adultos mayores.
+        "retry_step_by_step": [
+            "Tranquilo, vamos paso a paso. Primero dígame solo el nombre del barrio.",
+            "No se preocupe, hagámoslo simple. ¿Cuál es solo el nombre del barrio?",
+            "Vamos despacio y por partes. Dígame nada más el barrio donde está.",
+        ],
     }
 
     def __init__(self):
@@ -438,6 +446,21 @@ class BargeInHandler:
 # ── Instancia singleton del motor de reparación ───────────────────────────────
 
 _repair_engine = ConversationRepair()
+
+# A partir de cuántos reintentos consecutivos conviene simplificar la pregunta.
+RETRY_SIMPLIFY_THRESHOLD = 2
+
+
+def get_progressive_retry_message(retry_count: int) -> Optional[str]:
+    """Mensaje de reparación simplificado para reintentos consecutivos.
+
+    Cuando el usuario ya falló `RETRY_SIMPLIFY_THRESHOLD` (2) o más veces, en vez
+    de repetir "no entendí" se le pide la dirección por partes (barrio primero).
+    Devuelve None si todavía no aplica, para que el caller use su mensaje normal.
+    """
+    if retry_count < RETRY_SIMPLIFY_THRESHOLD:
+        return None
+    return _repair_engine._next_template("retry_step_by_step")
 
 
 def get_repair_message(

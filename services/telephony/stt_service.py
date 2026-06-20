@@ -19,6 +19,46 @@ logger = logging.getLogger("lyra.telephony.stt")
 _OPENAI_TRANSCRIBE_DEFAULT = "gpt-4o-mini-transcribe"
 _GROQ_WHISPER_DEFAULT = "whisper-large-v3"
 
+# Términos prioritarios fijos (la ciudad, vías y palabras de guía). El resto de
+# barrios se añade dinámicamente desde el catálogo de core/location_match.
+_STT_PROMPT_PRIORITY = [
+    "Popayán", "Cauca", "Campanario", "Pubenza", "Yanaconas",
+    "Valle del Ortigal", "calle", "carrera", "barrio",
+]
+
+_STT_PROMPT_CACHE: str | None = None
+
+
+def _build_stt_prompt() -> str:
+    """Vocabulario local para sesgar el STT hacia nombres propios de Popayán.
+
+    Combina términos prioritarios fijos con los barrios/landmarks del catálogo
+    (si está disponible). Se construye una sola vez y se cachea.
+    """
+    global _STT_PROMPT_CACHE
+    if _STT_PROMPT_CACHE is not None:
+        return _STT_PROMPT_CACHE
+
+    terms: list[str] = []
+    try:
+        from core.location_match import catalog_terms
+
+        terms = catalog_terms(40)
+    except Exception as e:  # catálogo opcional: nunca romper el STT
+        logger.debug("[stt] catalog prompt skipped: %s", e)
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    for term in _STT_PROMPT_PRIORITY + terms:
+        t = (term or "").strip()
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            merged.append(t)
+
+    _STT_PROMPT_CACHE = ", ".join(merged)
+    return _STT_PROMPT_CACHE
+
 
 def _openai_stt_api_key() -> str:
     """API key OpenAI para STT (nunca OpenRouter sk-or)."""
@@ -234,6 +274,13 @@ class TelephonySTTService:
                 "model": self.model,
                 "file": audio_file,
             }
+
+            # Sesgo de vocabulario local (barrios/vías de Popayán). Tanto Whisper
+            # como gpt-4o-transcribe aceptan `prompt`; sin él se pierde toda ayuda
+            # contextual para nombres propios.
+            stt_prompt = _build_stt_prompt()
+            if stt_prompt:
+                create_kwargs["prompt"] = stt_prompt
 
             if _is_whisper_model(self.model):
                 create_kwargs["language"] = self.language if self.language else None

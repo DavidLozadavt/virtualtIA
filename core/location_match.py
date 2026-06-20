@@ -310,6 +310,31 @@ def _has_content(norm_text: str) -> bool:
     return any(len(t) >= MIN_CONTENT_LEN for t in _content_tokens(norm_text))
 
 
+def catalog_terms(limit: int = 60) -> list[str]:
+    """Nombres canónicos del catálogo local (barrios + landmarks de Popayán).
+
+    Pensado para sesgar el STT (parámetro `prompt` de Whisper/gpt-4o-transcribe)
+    con vocabulario propio de la ciudad. Devuelve canónicos deduplicados, sin
+    importar el catálogo más de una vez (build cacheado)."""
+    _build_catalog()
+    if not _ENTITIES:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for ent in _ENTITIES.values():
+        name = (ent.canonical or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def resolve_location_entity(
     text: str,
     scope: Optional[list[str]] = None,

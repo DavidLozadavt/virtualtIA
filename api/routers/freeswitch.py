@@ -101,6 +101,25 @@ def _echo_tokens(text: str) -> list[str]:
     return _re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
 
 
+def _transcript_is_known_entity(transcript: str) -> bool:
+    """True si el transcript resuelve a una entidad real del catálogo local
+    (barrio/landmark de Popayán). Una dirección que el usuario REPITE compartiendo
+    palabras con el prompt ("Sí, La Paz" tras "¿Confirmas barrio La Paz?") no es
+    eco: nunca debe descartarse."""
+    try:
+        from core.location_match import Decision, decide, resolve_location_entity
+
+        m = resolve_location_entity(transcript)
+        return bool(m.canonical) and decide(m) in (
+            Decision.ACCEPT,
+            Decision.CONFIRM,
+            Decision.AMBIGUOUS,
+        )
+    except Exception as e:  # nunca bloquear el turno por el catálogo
+        logger.debug("[freeswitch] entity check skipped: %s", e)
+        return False
+
+
 def _looks_like_bot_echo(transcript: str, last_message: str) -> bool:
     """
     True si el transcript es un fragmento literal del último mensaje del bot.
@@ -108,10 +127,16 @@ def _looks_like_bot_echo(transcript: str, last_message: str) -> bool:
     mod_audio_stream reinyecta el eco del TTS de Lyra; si la cola del prompt
     ("...¿me confirmas?") escapa al gate, el STT la transcribe y el motor la
     procesa como turno del usuario -> repair/doble confirmación. Solo descarta
-    secuencias contiguas de >=2 palabras del prompt (nunca un "sí"/"no" corto).
+    secuencias contiguas de >=3 palabras del prompt (nunca un "sí"/"no" corto ni
+    una confirmación de 2 palabras como "La Paz" que comparte el nombre del barrio
+    con la pregunta del bot).
     """
     t = _echo_tokens(transcript)
-    if len(t) < 2:
+    if len(t) < 3:
+        return False
+    # Excepción catálogo: si el usuario nombró una ubicación conocida, no es eco
+    # aunque comparta palabras con el prompt (el bot acaba de leerle ese barrio).
+    if _transcript_is_known_entity(transcript):
         return False
     p = _echo_tokens(last_message)
     if len(t) > len(p):

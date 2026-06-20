@@ -64,6 +64,20 @@ class Settings(BaseSettings):
     TELEPHONY_SAMPLE_RATE: int = 8000
     TELEPHONY_WS_AUDIO_ENCODING: str = "pcm16"  # pcm16 | mulaw (mod_audio_stream mono 8k)
 
+    # Segmentación de audio FreeSWITCH (mod_audio_stream). Duración máxima de una
+    # locución antes de forzar el flush al STT. Adultos mayores dictan direcciones
+    # pausado: 3s cortaba la dirección a la mitad → fallback amplio (12s).
+    FS_MAX_UTTERANCE_SEC: float = 12.0
+
+    # VAD por energía. Base/fallback; el detector calibra el umbral real contra el
+    # piso de ruido medido al inicio de cada locución (voces bajas/temblorosas).
+    FS_VAD_SILENCE_RMS: float = 400.0      # techo del umbral adaptativo
+    FS_VAD_SILENCE_FRAMES: int = 25         # frames de silencio base (~500ms @20ms)
+    FS_VAD_MIN_SPEECH_FRAMES: int = 8
+    FS_VAD_NOISE_CALIB_MS: int = 300        # ventana inicial para medir ruido de fondo
+    FS_VAD_NOISE_MULT: float = 1.8          # umbral = piso_ruido * mult (acotado)
+    FS_VAD_HANGOVER_MS: int = 600           # padding de silencio antes de cerrar turno
+
     FREESWITCH_ESL_ENABLED: bool = True
 
     LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
