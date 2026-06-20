@@ -18,7 +18,7 @@ logger = logging.getLogger("lyra.llm")
 class LLMEngine:
     def __init__(self, model_path: str, n_ctx: int = 4096, n_gpu_layers: int = 0, n_threads: int = 4):
         self.provider = settings.LLM_PROVIDER
-        self.api_endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        self.api_endpoint = settings.llm_base_url().rstrip("/") + "/chat/completions"
         self.model_name = settings.OPENAI_MODEL or "openai/gpt-4o-mini"
         self._tools_type_map: dict = {}  # tool_name -> {arg_name: json_type}
 
@@ -31,7 +31,7 @@ class LLMEngine:
             llm_tools = self._build_llm_tools(tools_schema)
 
             headers = {
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                "Authorization": f"Bearer {settings.llm_api_key()}",
                 "Content-Type": "application/json",
             }
             payload = {
@@ -71,7 +71,7 @@ class LLMEngine:
             if self.provider not in {"openrouter", "openai"}:
                 return "Error: proveedor LLM no soportado para modo sin herramientas."
 
-            headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+            headers = {"Authorization": f"Bearer {settings.llm_api_key()}"}
             payload = {"model": self.model_name, "messages": messages,
                        "max_tokens": max_tokens, "temperature": temperature}
             r = httpx.post(self.api_endpoint, headers=headers, json=payload, timeout=30.0)
