@@ -243,3 +243,36 @@ def test_freeswitch_geo_context_exhaustion_triggers_safe_fallback(monkeypatch):
     assert session.origen_text is None
     assert session.geo_attempt == 0
     assert "exacta" in res.speak_text.lower() or "de nuevo" in res.speak_text.lower()
+
+
+# ── Cache no debe ser un bypass del guard _NEVER_AUTOACCEPT ───────────────────
+
+def test_low_precision_mem_cache_hit_not_served(patched_pipeline, monkeypatch):
+    # Entrada vieja (pre-fix) en cache de memoria: 'Cl. 4' → GEOMETRIC_CENTER.
+    stale = _candidate(LocationType.GEOMETRIC_CENTER, "Cl. 4, Popayán")
+    monkeypatch.setattr(gs, "_mem_get", lambda k: stale)
+    patched_pipeline["geocoding"] = []  # re-geocode no encuentra nada preciso
+
+    res = asyncio.run(gs.run_pipeline("Cl. 4"))
+    # NO se sirve la entrada de baja precisión desde cache.
+    assert res.status != ResolutionStatus.RESOLVED
+    assert res.selected is None
+
+
+def test_low_precision_db_cache_hit_not_served(patched_pipeline, monkeypatch):
+    stale = _candidate(LocationType.GEOMETRIC_CENTER, "Cl. 4, Popayán")
+    monkeypatch.setattr(gs, "_db_get", lambda k: stale)
+    patched_pipeline["geocoding"] = []
+
+    res = asyncio.run(gs.run_pipeline("Cl. 4"))
+    assert res.status != ResolutionStatus.RESOLVED
+    assert res.selected is None
+
+
+def test_high_precision_cache_hit_still_served(patched_pipeline, monkeypatch):
+    good = _candidate(LocationType.ROOFTOP, "Cl. 4 # 26, Camilo Torres, Popayán")
+    monkeypatch.setattr(gs, "_mem_get", lambda k: good)
+
+    res = asyncio.run(gs.run_pipeline("Cl. 4 # 26"))
+    assert res.status == ResolutionStatus.RESOLVED
+    assert res.selected.location_type == LocationType.ROOFTOP
