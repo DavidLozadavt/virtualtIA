@@ -119,7 +119,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L1",
       "id": "api_dependencies",
-      "community": 98,
+      "community": 26,
       "norm_label": "dependencies.py"
     },
     {
@@ -128,7 +128,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L6",
       "id": "api_dependencies_get_db",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_db()"
     },
     {
@@ -137,7 +137,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L13",
       "id": "api_dependencies_get_settings",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_settings()"
     },
     {
@@ -146,7 +146,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L13",
       "id": "api_dependencies_py_settings",
-      "community": 98,
+      "community": 26,
       "norm_label": "settings"
     },
     {
@@ -155,7 +155,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L16",
       "id": "api_dependencies_get_llm",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_llm()"
     },
     {
@@ -164,7 +164,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L16",
       "id": "api_dependencies_py_request",
-      "community": 98,
+      "community": 26,
       "norm_label": "request"
     },
     {
@@ -173,7 +173,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L19",
       "id": "api_dependencies_get_tool_registries",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_tool_registries()"
     },
     {
@@ -182,7 +182,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L22",
       "id": "api_dependencies_get_chat_service",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_chat_service()"
     },
     {
@@ -191,7 +191,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L22",
       "id": "api_dependencies_py_chatservice",
-      "community": 98,
+      "community": 26,
       "norm_label": "chatservice"
     },
     {
@@ -200,7 +200,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L30",
       "id": "api_dependencies_get_whatsapp_service",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_whatsapp_service()"
     },
     {
@@ -209,7 +209,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L30",
       "id": "whatsappservice",
-      "community": 98,
+      "community": 26,
       "norm_label": "whatsappservice"
     },
     {
@@ -218,7 +218,7 @@
       "source_file": "api/dependencies.py",
       "source_location": "L36",
       "id": "api_dependencies_get_twilio_service",
-      "community": 98,
+      "community": 26,
       "norm_label": "get_twilio_service()"
     },
     {
@@ -335,7 +335,7 @@
       "source_file": "",
       "source_location": "",
       "id": "basemodel",
-      "community": 16,
+      "community": 9,
       "norm_label": "basemodel"
     },
     {
@@ -497,7 +497,7 @@
       "source_file": "api/routers/admin/config.py",
       "source_location": "L215",
       "id": "admin_config_list_versions",
-      "community": 11,
+      "community": 98,
       "norm_label": "list_versions()"
     },
     {
@@ -605,7 +605,7 @@
       "source_file": "api/routers/admin/config.py",
       "source_location": "L216",
       "id": "admin_config_rationale_216",
-      "community": 11,
+      "community": 98,
       "norm_label": "list lyra version history."
     },
     {
@@ -758,7 +758,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L1",
       "id": "admin_stats",
-      "community": 47,
+      "community": 106,
       "norm_label": "stats.py"
     },
     {
@@ -767,7 +767,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "admin_stats_parse_period",
-      "community": 47,
+      "community": 106,
       "norm_label": "_parse_period()"
     },
     {
@@ -776,7 +776,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "api_routers_admin_stats_py_str",
-      "community": 47,
+      "community": 106,
       "norm_label": "str"
     },
     {
@@ -785,7 +785,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "api_routers_admin_stats_py_int",
-      "community": 47,
+      "community": 106,
       "norm_label": "int"
     },
     {
@@ -794,7 +794,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L18",
       "id": "admin_stats_empty_stats",
-      "community": 47,
+      "community": 106,
       "norm_label": "_empty_stats()"
     },
     {
@@ -803,7 +803,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L30",
       "id": "admin_stats_get_stats",
-      "community": 47,
+      "community": 106,
       "norm_label": "get_stats()"
     },
     {
@@ -812,7 +812,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L98",
       "id": "admin_stats_hourly_stats",
-      "community": 47,
+      "community": 106,
       "norm_label": "hourly_stats()"
     },
     {
@@ -821,7 +821,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L119",
       "id": "admin_stats_intent_stats",
-      "community": 47,
+      "community": 106,
       "norm_label": "intent_stats()"
     },
     {
@@ -830,7 +830,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L31",
       "id": "admin_stats_rationale_31",
-      "community": 47,
+      "community": 106,
       "norm_label": "get usage statistics for a given period."
     },
     {
@@ -839,7 +839,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L99",
       "id": "admin_stats_rationale_99",
-      "community": 47,
+      "community": 106,
       "norm_label": "get hourly message distribution."
     },
     {
@@ -848,7 +848,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L120",
       "id": "admin_stats_rationale_120",
-      "community": 47,
+      "community": 106,
       "norm_label": "intent breakdown (placeholder \u2014 lyra uses llm, not fixed intents)."
     },
     {
@@ -1010,7 +1010,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L1",
       "id": "routers_freeswitch",
-      "community": 2,
+      "community": 9,
       "norm_label": "freeswitch.py"
     },
     {
@@ -1019,7 +1019,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L54",
       "id": "routers_freeswitch_testcreateservicerequest",
-      "community": 2,
+      "community": 9,
       "norm_label": "testcreateservicerequest"
     },
     {
@@ -1028,7 +1028,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L61",
       "id": "routers_freeswitch_inboundcallrequest",
-      "community": 2,
+      "community": 9,
       "norm_label": "inboundcallrequest"
     },
     {
@@ -1037,7 +1037,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L69",
       "id": "routers_freeswitch_processtextrequest",
-      "community": 2,
+      "community": 9,
       "norm_label": "processtextrequest"
     },
     {
@@ -1046,7 +1046,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L76",
       "id": "routers_freeswitch_normalize_transcript",
-      "community": 111,
+      "community": 9,
       "norm_label": "_normalize_transcript()"
     },
     {
@@ -1064,7 +1064,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L76",
       "id": "api_routers_freeswitch_py_float",
-      "community": 2,
+      "community": 97,
       "norm_label": "float"
     },
     {
@@ -1091,7 +1091,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L104",
       "id": "api_routers_freeswitch_py_bool",
-      "community": 2,
+      "community": 111,
       "norm_label": "bool"
     },
     {
@@ -1118,7 +1118,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L150",
       "id": "api_routers_freeswitch_py_request",
-      "community": 2,
+      "community": 9,
       "norm_label": "request"
     },
     {
@@ -1127,7 +1127,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L167",
       "id": "routers_freeswitch_freeswitch_health",
-      "community": 75,
+      "community": 9,
       "norm_label": "freeswitch_health()"
     },
     {
@@ -1136,7 +1136,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L198",
       "id": "routers_freeswitch_test_create_service",
-      "community": 2,
+      "community": 9,
       "norm_label": "test_create_service()"
     },
     {
@@ -1145,7 +1145,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L230",
       "id": "routers_freeswitch_inbound_use_file_mode",
-      "community": 9,
+      "community": 111,
       "norm_label": "_inbound_use_file_mode()"
     },
     {
@@ -1163,7 +1163,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L247",
       "id": "routers_freeswitch_serve_audio_file",
-      "community": 9,
+      "community": 111,
       "norm_label": "serve_audio_file()"
     },
     {
@@ -1172,7 +1172,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L262",
       "id": "routers_freeswitch_head_audio_file",
-      "community": 9,
+      "community": 118,
       "norm_label": "head_audio_file()"
     },
     {
@@ -1190,7 +1190,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L394",
       "id": "routers_freeswitch_process_text",
-      "community": 2,
+      "community": 9,
       "norm_label": "process_text()"
     },
     {
@@ -1208,7 +1208,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L410",
       "id": "api_routers_freeswitch_py_any",
-      "community": 2,
+      "community": 97,
       "norm_label": "any"
     },
     {
@@ -1217,7 +1217,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L448",
       "id": "routers_freeswitch_ws_resolve_caller_number",
-      "community": 96,
+      "community": 75,
       "norm_label": "_ws_resolve_caller_number()"
     },
     {
@@ -1235,7 +1235,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L496",
       "id": "routers_freeswitch_ws_handle_text_metadata",
-      "community": 2,
+      "community": 75,
       "norm_label": "_ws_handle_text_metadata()"
     },
     {
@@ -1244,7 +1244,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L496",
       "id": "api_routers_freeswitch_py_websocket",
-      "community": 2,
+      "community": 75,
       "norm_label": "websocket"
     },
     {
@@ -1262,7 +1262,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L579",
       "id": "wsaudiobuffer",
-      "community": 2,
+      "community": 97,
       "norm_label": "wsaudiobuffer"
     },
     {
@@ -1271,7 +1271,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L588",
       "id": "routers_freeswitch_ws_append_audio",
-      "community": 2,
+      "community": 75,
       "norm_label": "_ws_append_audio()"
     },
     {
@@ -1280,7 +1280,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L588",
       "id": "api_routers_freeswitch_py_bytes",
-      "community": 2,
+      "community": 75,
       "norm_label": "bytes"
     },
     {
@@ -1298,7 +1298,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L708",
       "id": "routers_freeswitch_wav_duration_seconds",
-      "community": 111,
+      "community": 120,
       "norm_label": "_wav_duration_seconds()"
     },
     {
@@ -1316,7 +1316,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L744",
       "id": "routers_freeswitch_flush_audio_turn",
-      "community": 111,
+      "community": 75,
       "norm_label": "_flush_audio_turn()"
     },
     {
@@ -1325,7 +1325,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L1",
       "id": "routers_freeswitch_rationale_1",
-      "community": 2,
+      "community": 9,
       "norm_label": "api/routers/freeswitch.py \u2014 integracion directa freeswitch \u2194 lyra (sin twilio)."
     },
     {
@@ -1334,7 +1334,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L77",
       "id": "routers_freeswitch_rationale_77",
-      "community": 111,
+      "community": 9,
       "norm_label": "limpieza stt compartida con el gateway twilio (preprocess_stt): elimina     fra"
     },
     {
@@ -1370,7 +1370,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L231",
       "id": "routers_freeswitch_rationale_231",
-      "community": 9,
+      "community": 111,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64."
     },
     {
@@ -1379,7 +1379,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L248",
       "id": "routers_freeswitch_rationale_248",
-      "community": 9,
+      "community": 111,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr"
     },
     {
@@ -1388,7 +1388,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L263",
       "id": "routers_freeswitch_rationale_263",
-      "community": 9,
+      "community": 118,
       "norm_label": "head para que freeswitch valide existencia del wav sin descargar cuerpo."
     },
     {
@@ -1406,7 +1406,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L454",
       "id": "routers_freeswitch_rationale_454",
-      "community": 96,
+      "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json."
     },
     {
@@ -1424,7 +1424,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L503",
       "id": "routers_freeswitch_rationale_503",
-      "community": 2,
+      "community": 75,
       "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n"
     },
     {
@@ -1433,7 +1433,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L594",
       "id": "routers_freeswitch_rationale_594",
-      "community": 2,
+      "community": 75,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo."
     },
     {
@@ -1451,7 +1451,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L709",
       "id": "routers_freeswitch_rationale_709",
-      "community": 111,
+      "community": 120,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar."
     },
     {
@@ -1469,7 +1469,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L1",
       "id": "routers_main",
-      "community": 16,
+      "community": 26,
       "norm_label": "main.py"
     },
     {
@@ -1478,7 +1478,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "routers_main_chat",
-      "community": 16,
+      "community": 26,
       "norm_label": "chat()"
     },
     {
@@ -1487,7 +1487,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_chatrequest",
-      "community": 16,
+      "community": 26,
       "norm_label": "chatrequest"
     },
     {
@@ -1496,7 +1496,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_request",
-      "community": 16,
+      "community": 26,
       "norm_label": "request"
     },
     {
@@ -1505,7 +1505,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_chatservice",
-      "community": 16,
+      "community": 26,
       "norm_label": "chatservice"
     },
     {
@@ -1514,7 +1514,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L37",
       "id": "routers_main_health",
-      "community": 16,
+      "community": 26,
       "norm_label": "health()"
     },
     {
@@ -1523,7 +1523,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L53",
       "id": "routers_main_reverse_geocode_api",
-      "community": 98,
+      "community": 26,
       "norm_label": "reverse_geocode_api()"
     },
     {
@@ -1532,7 +1532,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L53",
       "id": "api_routers_main_py_float",
-      "community": 98,
+      "community": 26,
       "norm_label": "float"
     },
     {
@@ -1541,7 +1541,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L60",
       "id": "routers_main_geocode_api",
-      "community": 53,
+      "community": 26,
       "norm_label": "geocode_api()"
     },
     {
@@ -1550,7 +1550,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L60",
       "id": "api_routers_main_py_str",
-      "community": 53,
+      "community": 26,
       "norm_label": "str"
     },
     {
@@ -1559,7 +1559,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L67",
       "id": "routers_main_list_projects",
-      "community": 16,
+      "community": 26,
       "norm_label": "list_projects()"
     },
     {
@@ -1568,7 +1568,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L114",
       "id": "routers_main_public_status",
-      "community": 16,
+      "community": 26,
       "norm_label": "public_status()"
     },
     {
@@ -1577,7 +1577,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L1",
       "id": "routers_main_rationale_1",
-      "community": 16,
+      "community": 26,
       "norm_label": "gateway/router.py \u2014 fastapi endpoints: post /chat, get /health, get /projects."
     },
     {
@@ -1586,7 +1586,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L28",
       "id": "routers_main_rationale_28",
-      "community": 16,
+      "community": 26,
       "norm_label": "main chat endpoint.     delegates processing to chatservice."
     },
     {
@@ -1595,7 +1595,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L38",
       "id": "routers_main_rationale_38",
-      "community": 16,
+      "community": 26,
       "norm_label": "health check \u2014 reports model and db status."
     },
     {
@@ -1604,7 +1604,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L54",
       "id": "routers_main_rationale_54",
-      "community": 98,
+      "community": 26,
       "norm_label": "proxy for reverse geocoding to avoid cors and handle api keys securely."
     },
     {
@@ -1613,7 +1613,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L61",
       "id": "routers_main_rationale_61",
-      "community": 53,
+      "community": 26,
       "norm_label": "proxy for forward geocoding with google maps support & osm fallback."
     },
     {
@@ -1622,7 +1622,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L68",
       "id": "routers_main_rationale_68",
-      "community": 16,
+      "community": 26,
       "norm_label": "list all active projects in the database."
     },
     {
@@ -1631,7 +1631,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L115",
       "id": "routers_main_rationale_115",
-      "community": 16,
+      "community": 26,
       "norm_label": "public status endpoint \u2014 lightweight check for frontend clients."
     },
     {
@@ -1640,7 +1640,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L1",
       "id": "routers_tts",
-      "community": 100,
+      "community": 47,
       "norm_label": "tts.py"
     },
     {
@@ -1649,7 +1649,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "routers_tts_serve_audio",
-      "community": 100,
+      "community": 47,
       "norm_label": "serve_audio()"
     },
     {
@@ -1658,7 +1658,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "api_routers_tts_py_str",
-      "community": 100,
+      "community": 47,
       "norm_label": "str"
     },
     {
@@ -1667,7 +1667,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "api_routers_tts_py_request",
-      "community": 100,
+      "community": 47,
       "norm_label": "request"
     },
     {
@@ -1820,7 +1820,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L183",
       "id": "api_routers_twilio_py_bool",
-      "community": 46,
+      "community": 13,
       "norm_label": "bool"
     },
     {
@@ -1838,7 +1838,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L234",
       "id": "routers_twilio_build_dtmf_gather",
-      "community": 102,
+      "community": 42,
       "norm_label": "_build_dtmf_gather()"
     },
     {
@@ -1874,7 +1874,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L332",
       "id": "routers_twilio_callsession",
-      "community": 46,
+      "community": 13,
       "norm_label": "callsession"
     },
     {
@@ -1883,7 +1883,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L357",
       "id": "routers_twilio_callsession_post_init",
-      "community": 104,
+      "community": 13,
       "norm_label": ".__post_init__()"
     },
     {
@@ -1910,7 +1910,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L375",
       "id": "routers_twilio_callsession_speech_timeout",
-      "community": 46,
+      "community": 13,
       "norm_label": ".speech_timeout()"
     },
     {
@@ -1919,7 +1919,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L378",
       "id": "routers_twilio_callsession_gather_timeout",
-      "community": 46,
+      "community": 13,
       "norm_label": ".gather_timeout()"
     },
     {
@@ -1991,7 +1991,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L451",
       "id": "routers_twilio_generate_play_twiml",
-      "community": 102,
+      "community": 110,
       "norm_label": "_generate_play_twiml()"
     },
     {
@@ -2000,7 +2000,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L457",
       "id": "routers_twilio_twiml_gather_message",
-      "community": 42,
+      "community": 80,
       "norm_label": "_twiml_gather_message()"
     },
     {
@@ -2099,7 +2099,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L800",
       "id": "routers_twilio_aggressive_normalize",
-      "community": 112,
+      "community": 91,
       "norm_label": "_aggressive_normalize()"
     },
     {
@@ -2126,7 +2126,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L894",
       "id": "routers_twilio_classify_speech_quality",
-      "community": 106,
+      "community": 0,
       "norm_label": "classify_speech_quality()"
     },
     {
@@ -2180,7 +2180,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1021",
       "id": "routers_twilio_extract_address",
-      "community": 0,
+      "community": 72,
       "norm_label": "extract_address()"
     },
     {
@@ -2297,7 +2297,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2571",
       "id": "routers_twilio_voice_stream",
-      "community": 115,
+      "community": 13,
       "norm_label": "voice_stream()"
     },
     {
@@ -2306,7 +2306,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2571",
       "id": "api_routers_twilio_py_websocket",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket"
     },
     {
@@ -2387,7 +2387,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L239",
       "id": "routers_twilio_rationale_239",
-      "community": 102,
+      "community": 42,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a"
     },
     {
@@ -2441,7 +2441,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L452",
       "id": "routers_twilio_rationale_452",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado."
     },
     {
@@ -2450,7 +2450,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L465",
       "id": "routers_twilio_rationale_465",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es"
     },
     {
@@ -2486,7 +2486,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L801",
       "id": "routers_twilio_rationale_801",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli"
     },
     {
@@ -2504,7 +2504,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L897",
       "id": "routers_twilio_rationale_897",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h"
     },
     {
@@ -2549,7 +2549,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1022",
       "id": "routers_twilio_rationale_1022",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano"
     },
     {
@@ -2630,7 +2630,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2572",
       "id": "routers_twilio_rationale_2572",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket para twilio media streams.      permite streaming de audio bidirecci"
     },
     {
@@ -2927,7 +2927,7 @@
       "source_file": "api/schemas/__init__.py",
       "source_location": "L1",
       "id": "schemas_init",
-      "community": 16,
+      "community": 26,
       "norm_label": "__init__.py"
     },
     {
@@ -2936,7 +2936,7 @@
       "source_file": "api/schemas/chat.py",
       "source_location": "L1",
       "id": "schemas_chat",
-      "community": 16,
+      "community": 26,
       "norm_label": "chat.py"
     },
     {
@@ -2945,7 +2945,7 @@
       "source_file": "api/schemas/chat.py",
       "source_location": "L4",
       "id": "schemas_chat_chatrequest",
-      "community": 16,
+      "community": 26,
       "norm_label": "chatrequest"
     },
     {
@@ -2954,7 +2954,7 @@
       "source_file": "api/schemas/chat.py",
       "source_location": "L10",
       "id": "schemas_chat_chatrequest_transform_user_id_to_string",
-      "community": 16,
+      "community": 26,
       "norm_label": ".transform_user_id_to_string()"
     },
     {
@@ -2963,7 +2963,7 @@
       "source_file": "api/schemas/chat.py",
       "source_location": "L25",
       "id": "schemas_chat_chatresponse",
-      "community": 16,
+      "community": 26,
       "norm_label": "chatresponse"
     },
     {
@@ -2972,7 +2972,7 @@
       "source_file": "api/schemas/common.py",
       "source_location": "L1",
       "id": "schemas_common",
-      "community": 16,
+      "community": 26,
       "norm_label": "common.py"
     },
     {
@@ -2981,7 +2981,7 @@
       "source_file": "api/schemas/common.py",
       "source_location": "L3",
       "id": "schemas_common_healthresponse",
-      "community": 16,
+      "community": 26,
       "norm_label": "healthresponse"
     },
     {
@@ -2990,7 +2990,7 @@
       "source_file": "api/schemas/common.py",
       "source_location": "L9",
       "id": "schemas_common_projectresponse",
-      "community": 16,
+      "community": 26,
       "norm_label": "projectresponse"
     },
     {
@@ -3134,7 +3134,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L382",
       "id": "core_address_utils_strip_preamble",
-      "community": 1,
+      "community": 73,
       "norm_label": "_strip_preamble()"
     },
     {
@@ -3161,7 +3161,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L438",
       "id": "core_address_utils_is_repeat_request",
-      "community": 0,
+      "community": 24,
       "norm_label": "_is_repeat_request()"
     },
     {
@@ -3215,7 +3215,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L633",
       "id": "core_address_utils_build_local_match_index",
-      "community": 73,
+      "community": 72,
       "norm_label": "_build_local_match_index()"
     },
     {
@@ -3224,7 +3224,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L693",
       "id": "core_address_utils_try_local_match",
-      "community": 73,
+      "community": 72,
       "norm_label": "_try_local_match()"
     },
     {
@@ -3314,7 +3314,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L383",
       "id": "core_address_utils_rationale_383",
-      "community": 1,
+      "community": 73,
       "norm_label": "elimina saludos y relleno del inicio/fin del texto."
     },
     {
@@ -3359,7 +3359,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L694",
       "id": "core_address_utils_rationale_694",
-      "community": 73,
+      "community": 72,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod"
     },
     {
@@ -3395,7 +3395,7 @@
       "source_file": "core/config.py",
       "source_location": "L1",
       "id": "core_config",
-      "community": 24,
+      "community": 30,
       "norm_label": "config.py"
     },
     {
@@ -3404,7 +3404,7 @@
       "source_file": "core/config.py",
       "source_location": "L9",
       "id": "core_config_settings",
-      "community": 30,
+      "community": 102,
       "norm_label": "settings"
     },
     {
@@ -3413,7 +3413,7 @@
       "source_file": "",
       "source_location": "",
       "id": "basesettings",
-      "community": 30,
+      "community": 102,
       "norm_label": "basesettings"
     },
     {
@@ -3422,7 +3422,7 @@
       "source_file": "core/config.py",
       "source_location": "L98",
       "id": "core_config_settings_llm_api_key",
-      "community": 30,
+      "community": 102,
       "norm_label": ".llm_api_key()"
     },
     {
@@ -3431,7 +3431,7 @@
       "source_file": "core/config.py",
       "source_location": "L98",
       "id": "core_config_py_str",
-      "community": 30,
+      "community": 102,
       "norm_label": "str"
     },
     {
@@ -3440,7 +3440,7 @@
       "source_file": "core/config.py",
       "source_location": "L109",
       "id": "core_config_settings_llm_base_url",
-      "community": 30,
+      "community": 102,
       "norm_label": ".llm_base_url()"
     },
     {
@@ -3449,7 +3449,7 @@
       "source_file": "core/config.py",
       "source_location": "L115",
       "id": "core_config_settings_get_absolute_model_path",
-      "community": 30,
+      "community": 102,
       "norm_label": ".get_absolute_model_path()"
     },
     {
@@ -3458,7 +3458,7 @@
       "source_file": "core/config.py",
       "source_location": "L1",
       "id": "core_config_rationale_1",
-      "community": 24,
+      "community": 30,
       "norm_label": "core/config.py \u2014 configuracion centralizada desde .env con pydantic-settings."
     },
     {
@@ -3467,7 +3467,7 @@
       "source_file": "core/config.py",
       "source_location": "L99",
       "id": "core_config_rationale_99",
-      "community": 30,
+      "community": 102,
       "norm_label": "credencial para llamadas de chat al llm.          openrouter y openai usan sis"
     },
     {
@@ -3476,7 +3476,7 @@
       "source_file": "core/config.py",
       "source_location": "L110",
       "id": "core_config_rationale_110",
-      "community": 30,
+      "community": 102,
       "norm_label": "base url del endpoint llm segun proveedor."
     },
     {
@@ -3485,7 +3485,7 @@
       "source_file": "core/config.py",
       "source_location": "L116",
       "id": "core_config_rationale_116",
-      "community": 30,
+      "community": 102,
       "norm_label": "resolve model path relative to project root."
     },
     {
@@ -3494,7 +3494,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L1",
       "id": "core_conversation_repair",
-      "community": 72,
+      "community": 12,
       "norm_label": "conversation_repair.py"
     },
     {
@@ -3503,7 +3503,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L36",
       "id": "core_conversation_repair_conversationmemory",
-      "community": 13,
+      "community": 12,
       "norm_label": "conversationmemory"
     },
     {
@@ -3512,7 +3512,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L50",
       "id": "core_conversation_repair_conversationmemory_add_location_mention",
-      "community": 121,
+      "community": 12,
       "norm_label": ".add_location_mention()"
     },
     {
@@ -3566,7 +3566,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L77",
       "id": "core_conversation_repair_conversationmemory_best_hypothesis",
-      "community": 13,
+      "community": 12,
       "norm_label": ".best_hypothesis()"
     },
     {
@@ -3575,7 +3575,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L120",
       "id": "core_conversation_repair_infer_intent",
-      "community": 72,
+      "community": 12,
       "norm_label": "infer_intent()"
     },
     {
@@ -3584,7 +3584,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L182",
       "id": "core_conversation_repair_extract_partial_location",
-      "community": 72,
+      "community": 12,
       "norm_label": "_extract_partial_location()"
     },
     {
@@ -3647,7 +3647,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L423",
       "id": "core_conversation_repair_bargeinhandler_is_interruption",
-      "community": 12,
+      "community": 119,
       "norm_label": ".is_interruption()"
     },
     {
@@ -3656,7 +3656,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L423",
       "id": "core_conversation_repair_py_bool",
-      "community": 12,
+      "community": 119,
       "norm_label": "bool"
     },
     {
@@ -3701,7 +3701,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L1",
       "id": "core_conversation_repair_rationale_1",
-      "community": 72,
+      "community": 12,
       "norm_label": "core/conversation_repair.py \u2014 motor de reparacion conversacional inteligente par"
     },
     {
@@ -3710,7 +3710,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L37",
       "id": "core_conversation_repair_rationale_37",
-      "community": 13,
+      "community": 12,
       "norm_label": "memoria de la conversacion actual.     registra ubicaciones mencionadas, hipote"
     },
     {
@@ -3719,7 +3719,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L51",
       "id": "core_conversation_repair_rationale_51",
-      "community": 121,
+      "community": 12,
       "norm_label": "registra una ubicacion mencionada (sin confirmar)."
     },
     {
@@ -3737,7 +3737,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L78",
       "id": "core_conversation_repair_rationale_78",
-      "community": 13,
+      "community": 12,
       "norm_label": "hipotesis con mayor confianza."
     },
     {
@@ -3746,7 +3746,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L125",
       "id": "core_conversation_repair_rationale_125",
-      "community": 72,
+      "community": 12,
       "norm_label": "infiere la intencion del usuario con scores de probabilidad.          retorna:"
     },
     {
@@ -3755,7 +3755,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L183",
       "id": "core_conversation_repair_rationale_183",
-      "community": 72,
+      "community": 12,
       "norm_label": "extrae cualquier fragmento que parezca un lugar (aun si el texto es incompleto)."
     },
     {
@@ -3809,7 +3809,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L424",
       "id": "core_conversation_repair_rationale_424",
-      "community": 12,
+      "community": 119,
       "norm_label": "detecta si el texto parcial indica intencion de interrumpir.         se usa con"
     },
     {
@@ -3845,7 +3845,7 @@
       "source_file": "core/database.py",
       "source_location": "L1",
       "id": "core_database",
-      "community": 47,
+      "community": 98,
       "norm_label": "database.py"
     },
     {
@@ -3854,7 +3854,7 @@
       "source_file": "core/database.py",
       "source_location": "L28",
       "id": "core_database_get_connection",
-      "community": 47,
+      "community": 98,
       "norm_label": "get_connection()"
     },
     {
@@ -3863,7 +3863,7 @@
       "source_file": "core/database.py",
       "source_location": "L28",
       "id": "core_database_py_str",
-      "community": 47,
+      "community": 98,
       "norm_label": "str"
     },
     {
@@ -3872,7 +3872,7 @@
       "source_file": "core/database.py",
       "source_location": "L49",
       "id": "core_database_run_migration",
-      "community": 47,
+      "community": 98,
       "norm_label": "run_migration()"
     },
     {
@@ -3899,7 +3899,7 @@
       "source_file": "core/database.py",
       "source_location": "L1",
       "id": "core_database_rationale_1",
-      "community": 47,
+      "community": 98,
       "norm_label": "core/database.py \u2014 pool de conexiones mysql con pymysql.  provee get_connectio"
     },
     {
@@ -3908,7 +3908,7 @@
       "source_file": "core/database.py",
       "source_location": "L29",
       "id": "core_database_rationale_29",
-      "community": 47,
+      "community": 98,
       "norm_label": "yields a pymysql connection. closes it on exit.     allows specifying a differe"
     },
     {
@@ -3917,7 +3917,7 @@
       "source_file": "core/database.py",
       "source_location": "L50",
       "id": "core_database_rationale_50",
-      "community": 47,
+      "community": 98,
       "norm_label": "execute a .sql file against the database."
     },
     {
@@ -3935,7 +3935,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L1",
       "id": "core_geo_types",
-      "community": 1,
+      "community": 53,
       "norm_label": "geo_types.py"
     },
     {
@@ -3944,7 +3944,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L31",
       "id": "core_geo_types_in_urban_bbox",
-      "community": 1,
+      "community": 53,
       "norm_label": "in_urban_bbox()"
     },
     {
@@ -3953,7 +3953,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L31",
       "id": "core_geo_types_py_float",
-      "community": 1,
+      "community": 53,
       "norm_label": "float"
     },
     {
@@ -3962,7 +3962,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L31",
       "id": "core_geo_types_py_bool",
-      "community": 1,
+      "community": 112,
       "norm_label": "bool"
     },
     {
@@ -3971,7 +3971,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L36",
       "id": "core_geo_types_in_wide_bbox",
-      "community": 1,
+      "community": 53,
       "norm_label": "in_wide_bbox()"
     },
     {
@@ -3980,7 +3980,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L43",
       "id": "core_geo_types_locationtype",
-      "community": 1,
+      "community": 53,
       "norm_label": "locationtype"
     },
     {
@@ -3998,7 +3998,7 @@
       "source_file": "",
       "source_location": "",
       "id": "enum",
-      "community": 1,
+      "community": 53,
       "norm_label": "enum"
     },
     {
@@ -4007,7 +4007,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L54",
       "id": "core_geo_types_resolutionstatus",
-      "community": 1,
+      "community": 53,
       "norm_label": "resolutionstatus"
     },
     {
@@ -4016,7 +4016,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L64",
       "id": "core_geo_types_geocandidate",
-      "community": 1,
+      "community": 112,
       "norm_label": "geocandidate"
     },
     {
@@ -4025,7 +4025,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L74",
       "id": "core_geo_types_geocandidate_in_urban_bbox",
-      "community": 1,
+      "community": 112,
       "norm_label": ".in_urban_bbox()"
     },
     {
@@ -4034,7 +4034,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L77",
       "id": "core_geo_types_geocandidate_in_wide_bbox",
-      "community": 1,
+      "community": 112,
       "norm_label": ".in_wide_bbox()"
     },
     {
@@ -4043,7 +4043,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L80",
       "id": "core_geo_types_geocandidate_auto_acceptable",
-      "community": 1,
+      "community": 112,
       "norm_label": ".auto_acceptable()"
     },
     {
@@ -4052,7 +4052,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L89",
       "id": "core_geo_types_georesolution",
-      "community": 1,
+      "community": 16,
       "norm_label": "georesolution"
     },
     {
@@ -4061,7 +4061,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L98",
       "id": "core_geo_types_georesolution_resolved",
-      "community": 1,
+      "community": 16,
       "norm_label": ".resolved()"
     },
     {
@@ -4070,7 +4070,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L102",
       "id": "core_geo_types_georesolution_needs_input",
-      "community": 1,
+      "community": 16,
       "norm_label": ".needs_input()"
     },
     {
@@ -4097,7 +4097,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L1",
       "id": "core_geo_types_rationale_1",
-      "community": 1,
+      "community": 53,
       "norm_label": "core/geo_types.py \u2014 tipos del pipeline de geocodificacion.  separacion de resp"
     },
     {
@@ -4106,7 +4106,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L81",
       "id": "core_geo_types_rationale_81",
-      "community": 1,
+      "community": 112,
       "norm_label": "solo rooftop y range_interpolated dentro del area urbana se auto-aceptan."
     },
     {
@@ -4169,7 +4169,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L83",
       "id": "core_geocoder_service_db_get",
-      "community": 1,
+      "community": 53,
       "norm_label": "_db_get()"
     },
     {
@@ -4187,7 +4187,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L151",
       "id": "core_geocoder_service_google_location_type",
-      "community": 1,
+      "community": 53,
       "norm_label": "_google_location_type()"
     },
     {
@@ -4196,7 +4196,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L151",
       "id": "core_geocoder_service_py_locationtype",
-      "community": 1,
+      "community": 53,
       "norm_label": "locationtype"
     },
     {
@@ -4241,7 +4241,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L304",
       "id": "core_geocoder_service_pred_precision",
-      "community": 1,
+      "community": 53,
       "norm_label": "_pred_precision()"
     },
     {
@@ -4250,7 +4250,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L304",
       "id": "core_geocoder_service_py_float",
-      "community": 1,
+      "community": 53,
       "norm_label": "float"
     },
     {
@@ -4286,7 +4286,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L478",
       "id": "core_geocoder_service_google_places_search",
-      "community": 1,
+      "community": 112,
       "norm_label": "_google_places_search()"
     },
     {
@@ -4304,7 +4304,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L608",
       "id": "core_geocoder_service_nominatim_request",
-      "community": 1,
+      "community": 112,
       "norm_label": "_nominatim_request()"
     },
     {
@@ -4313,7 +4313,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L680",
       "id": "core_geocoder_service_cache_worthy",
-      "community": 1,
+      "community": 122,
       "norm_label": "_cache_worthy()"
     },
     {
@@ -4322,7 +4322,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L680",
       "id": "core_geocoder_service_py_bool",
-      "community": 1,
+      "community": 122,
       "norm_label": "bool"
     },
     {
@@ -4331,7 +4331,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L709",
       "id": "core_geocoder_service_result_matches_query",
-      "community": 1,
+      "community": 122,
       "norm_label": "_result_matches_query()"
     },
     {
@@ -4394,7 +4394,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L808",
       "id": "core_geocoder_service_py_int",
-      "community": 1,
+      "community": 66,
       "norm_label": "int"
     },
     {
@@ -4403,43 +4403,43 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L808",
       "id": "georesolution",
-      "community": 1,
+      "community": 66,
       "norm_label": "georesolution"
     },
     {
       "label": "_extract_geo_context()",
       "file_type": "code",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1058",
+      "source_location": "L1074",
       "id": "core_geocoder_service_extract_geo_context",
-      "community": 1,
+      "community": 66,
       "norm_label": "_extract_geo_context()"
     },
     {
       "label": "handle_user_context()",
       "file_type": "code",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1146",
+      "source_location": "L1162",
       "id": "core_geocoder_service_handle_user_context",
-      "community": 1,
+      "community": 66,
       "norm_label": "handle_user_context()"
     },
     {
       "label": "_match_user_to_candidate()",
       "file_type": "code",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1219",
+      "source_location": "L1235",
       "id": "core_geocoder_service_match_user_to_candidate",
-      "community": 1,
+      "community": 66,
       "norm_label": "_match_user_to_candidate()"
     },
     {
       "label": "geocode()",
       "file_type": "code",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1252",
+      "source_location": "L1268",
       "id": "core_geocoder_service_geocode",
-      "community": 1,
+      "community": 123,
       "norm_label": "geocode()"
     },
     {
@@ -4484,7 +4484,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L305",
       "id": "core_geocoder_service_rationale_305",
-      "community": 1,
+      "community": 53,
       "norm_label": "deriva precision de los `types` de la prediccion."
     },
     {
@@ -4520,7 +4520,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L479",
       "id": "core_geocoder_service_rationale_479",
-      "community": 1,
+      "community": 112,
       "norm_label": "fallback a google places text search cuando geocoding devuelve geometric_center."
     },
     {
@@ -4538,7 +4538,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L681",
       "id": "core_geocoder_service_rationale_681",
-      "community": 1,
+      "community": 122,
       "norm_label": "solo cachear resultados que tengan relacion semantica con la query.     previen"
     },
     {
@@ -4547,7 +4547,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L710",
       "id": "core_geocoder_service_rationale_710",
-      "community": 1,
+      "community": 122,
       "norm_label": "verifica que el resultado de google corresponde a la direccion del usuario,"
     },
     {
@@ -4599,36 +4599,36 @@
       "label": "Extrae el t\u00e9rmino geogr\u00e1fico \u00fatil del texto libre del usuario para enrichment.",
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1059",
-      "id": "core_geocoder_service_rationale_1059",
-      "community": 1,
+      "source_location": "L1075",
+      "id": "core_geocoder_service_rationale_1075",
+      "community": 66,
       "norm_label": "extrae el termino geografico util del texto libre del usuario para enrichment."
     },
     {
       "label": "Procesa respuesta del usuario a CONTEXT_GATHERING o NEEDS_DISAMBIGUATION.",
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1152",
-      "id": "core_geocoder_service_rationale_1152",
-      "community": 1,
+      "source_location": "L1168",
+      "id": "core_geocoder_service_rationale_1168",
+      "community": 66,
       "norm_label": "procesa respuesta del usuario a context_gathering o needs_disambiguation."
     },
     {
       "label": "Intenta mapear la respuesta del usuario a uno de los candidatos conocidos.",
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1223",
-      "id": "core_geocoder_service_rationale_1223",
-      "community": 1,
+      "source_location": "L1239",
+      "id": "core_geocoder_service_rationale_1239",
+      "community": 66,
       "norm_label": "intenta mapear la respuesta del usuario a uno de los candidatos conocidos."
     },
     {
       "label": "Shortcut para resoluci\u00f3n directa (sin CONTEXT_GATHERING interactivo).     Retor",
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
-      "source_location": "L1256",
-      "id": "core_geocoder_service_rationale_1256",
-      "community": 1,
+      "source_location": "L1272",
+      "id": "core_geocoder_service_rationale_1272",
+      "community": 123,
       "norm_label": "shortcut para resolucion directa (sin context_gathering interactivo).     retor"
     },
     {
@@ -4808,7 +4808,7 @@
       "source_file": "core/llm_utils.py",
       "source_location": "L37",
       "id": "asyncopenai",
-      "community": 4,
+      "community": 37,
       "norm_label": "asyncopenai"
     },
     {
@@ -4943,7 +4943,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L41",
       "id": "core_location_match_matchtype",
-      "community": 107,
+      "community": 49,
       "norm_label": "matchtype"
     },
     {
@@ -4952,7 +4952,7 @@
       "source_file": "",
       "source_location": "",
       "id": "intenum",
-      "community": 107,
+      "community": 49,
       "norm_label": "intenum"
     },
     {
@@ -4961,7 +4961,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L52",
       "id": "core_location_match_decision",
-      "community": 2,
+      "community": 97,
       "norm_label": "decision"
     },
     {
@@ -4979,7 +4979,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L89",
       "id": "core_location_match_rank",
-      "community": 107,
+      "community": 49,
       "norm_label": "_rank()"
     },
     {
@@ -4988,7 +4988,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L89",
       "id": "core_location_match_py_int",
-      "community": 107,
+      "community": 49,
       "norm_label": "int"
     },
     {
@@ -4997,7 +4997,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L96",
       "id": "core_location_match_key",
-      "community": 107,
+      "community": 49,
       "norm_label": "_key()"
     },
     {
@@ -5006,7 +5006,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L96",
       "id": "core_location_match_py_float",
-      "community": 107,
+      "community": 49,
       "norm_label": "float"
     },
     {
@@ -5051,7 +5051,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L156",
       "id": "core_location_match_py_str",
-      "community": 66,
+      "community": 49,
       "norm_label": "str"
     },
     {
@@ -5069,7 +5069,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L261",
       "id": "core_location_match_is_all_filler",
-      "community": 66,
+      "community": 49,
       "norm_label": "_is_all_filler()"
     },
     {
@@ -5078,7 +5078,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L261",
       "id": "core_location_match_py_bool",
-      "community": 66,
+      "community": 49,
       "norm_label": "bool"
     },
     {
@@ -5087,7 +5087,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L270",
       "id": "core_location_match_is_filler",
-      "community": 66,
+      "community": 49,
       "norm_label": "is_filler()"
     },
     {
@@ -5096,7 +5096,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L279",
       "id": "core_location_match_content_tokens",
-      "community": 66,
+      "community": 49,
       "norm_label": "_content_tokens()"
     },
     {
@@ -5105,7 +5105,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L286",
       "id": "core_location_match_token_coverage",
-      "community": 66,
+      "community": 49,
       "norm_label": "_token_coverage()"
     },
     {
@@ -5114,7 +5114,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L309",
       "id": "core_location_match_has_content",
-      "community": 66,
+      "community": 49,
       "norm_label": "_has_content()"
     },
     {
@@ -5123,7 +5123,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L313",
       "id": "core_location_match_catalog_terms",
-      "community": 107,
+      "community": 49,
       "norm_label": "catalog_terms()"
     },
     {
@@ -5168,7 +5168,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L42",
       "id": "core_location_match_rationale_42",
-      "community": 107,
+      "community": 49,
       "norm_label": "orden = prioridad. un tipo superior siempre vence a uno inferior aunque     el"
     },
     {
@@ -5177,7 +5177,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L90",
       "id": "core_location_match_rationale_90",
-      "community": 107,
+      "community": 49,
       "norm_label": "rango de prioridad para comparar candidatos. los tipos textuales     (substring"
     },
     {
@@ -5204,7 +5204,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L262",
       "id": "core_location_match_rationale_262",
-      "community": 66,
+      "community": 49,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'b"
     },
     {
@@ -5213,7 +5213,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L271",
       "id": "core_location_match_rationale_271",
-      "community": 66,
+      "community": 49,
       "norm_label": "api publica: true si `text` es solo cortesia/relleno/afirmacion y no     contie"
     },
     {
@@ -5222,7 +5222,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L287",
       "id": "core_location_match_rationale_287",
-      "community": 66,
+      "community": 49,
       "norm_label": "fraccion de tokens de contenido del input que encuentran un equivalente     fue"
     },
     {
@@ -5231,7 +5231,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L314",
       "id": "core_location_match_rationale_314",
-      "community": 107,
+      "community": 49,
       "norm_label": "nombres canonicos del catalogo local (barrios + landmarks de popayan).      pe"
     },
     {
@@ -5267,7 +5267,7 @@
       "source_file": "core/logger.py",
       "source_location": "L1",
       "id": "core_logger",
-      "community": 5,
+      "community": 100,
       "norm_label": "logger.py"
     },
     {
@@ -5276,7 +5276,7 @@
       "source_file": "core/logger.py",
       "source_location": "L6",
       "id": "core_logger_setup_logger",
-      "community": 5,
+      "community": 100,
       "norm_label": "setup_logger()"
     },
     {
@@ -5285,7 +5285,7 @@
       "source_file": "core/logger.py",
       "source_location": "L6",
       "id": "core_logger_py_str",
-      "community": 5,
+      "community": 100,
       "norm_label": "str"
     },
     {
@@ -5294,7 +5294,7 @@
       "source_file": "core/logger.py",
       "source_location": "L7",
       "id": "core_logger_rationale_7",
-      "community": 5,
+      "community": 100,
       "norm_label": "configura un logger estandar con salida a consola y archivo rotativo."
     },
     {
@@ -5339,7 +5339,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L1",
       "id": "core_streaming_pipeline",
-      "community": 36,
+      "community": 12,
       "norm_label": "streaming_pipeline.py"
     },
     {
@@ -5348,7 +5348,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L53",
       "id": "core_streaming_pipeline_partialtranscript",
-      "community": 19,
+      "community": 109,
       "norm_label": "partialtranscript"
     },
     {
@@ -5411,7 +5411,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L98",
       "id": "core_streaming_pipeline_streamingsttbuffer_finalize",
-      "community": 19,
+      "community": 109,
       "norm_label": ".finalize()"
     },
     {
@@ -5429,7 +5429,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L131",
       "id": "core_streaming_pipeline_streamingsttbuffer_elapsed_seconds",
-      "community": 19,
+      "community": 13,
       "norm_label": ".elapsed_seconds()"
     },
     {
@@ -5474,7 +5474,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L176",
       "id": "core_streaming_pipeline_partialintentdetector_process_partial",
-      "community": 72,
+      "community": 12,
       "norm_label": ".process_partial()"
     },
     {
@@ -5483,7 +5483,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L176",
       "id": "conversationmemory",
-      "community": 93,
+      "community": 86,
       "norm_label": "conversationmemory"
     },
     {
@@ -5510,7 +5510,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L248",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller",
-      "community": 104,
+      "community": 19,
       "norm_label": "adaptiveendpointcontroller"
     },
     {
@@ -5519,7 +5519,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L262",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_init",
-      "community": 104,
+      "community": 86,
       "norm_label": ".__init__()"
     },
     {
@@ -5528,7 +5528,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L262",
       "id": "core_streaming_pipeline_py_audioqualityprofile",
-      "community": 104,
+      "community": 86,
       "norm_label": "audioqualityprofile"
     },
     {
@@ -5555,7 +5555,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L279",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_on_empty_response",
-      "community": 104,
+      "community": 19,
       "norm_label": ".on_empty_response()"
     },
     {
@@ -5582,7 +5582,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L289",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_get_parameters",
-      "community": 93,
+      "community": 19,
       "norm_label": ".get_parameters()"
     },
     {
@@ -5591,7 +5591,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L289",
       "id": "core_streaming_pipeline_py_bool",
-      "community": 93,
+      "community": 19,
       "norm_label": "bool"
     },
     {
@@ -5627,7 +5627,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L489",
       "id": "core_streaming_pipeline_turnprocessor",
-      "community": 104,
+      "community": 13,
       "norm_label": "turnprocessor"
     },
     {
@@ -5636,7 +5636,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L497",
       "id": "core_streaming_pipeline_turnprocessor_init",
-      "community": 104,
+      "community": 86,
       "norm_label": ".__init__()"
     },
     {
@@ -5654,7 +5654,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L591",
       "id": "core_streaming_pipeline_turnprocessor_classify_quality",
-      "community": 104,
+      "community": 19,
       "norm_label": "._classify_quality()"
     },
     {
@@ -5690,7 +5690,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L1",
       "id": "core_streaming_pipeline_rationale_1",
-      "community": 36,
+      "community": 12,
       "norm_label": "core/streaming_pipeline.py \u2014 pipeline de streaming incremental para lyra.  imp"
     },
     {
@@ -5717,7 +5717,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L99",
       "id": "core_streaming_pipeline_rationale_99",
-      "community": 19,
+      "community": 109,
       "norm_label": "marca la transcripcion como final y aplica todas las correcciones.         reto"
     },
     {
@@ -5762,7 +5762,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L182",
       "id": "core_streaming_pipeline_rationale_182",
-      "community": 72,
+      "community": 12,
       "norm_label": "procesa texto parcial y retorna estado de intencion actualizado."
     },
     {
@@ -5771,7 +5771,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L249",
       "id": "core_streaming_pipeline_rationale_249",
-      "community": 104,
+      "community": 19,
       "norm_label": "adapta los parametros de vad/endpointing de twilio basado en:     - perfil de a"
     },
     {
@@ -5780,7 +5780,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L290",
       "id": "core_streaming_pipeline_rationale_290",
-      "community": 93,
+      "community": 19,
       "norm_label": "retorna los parametros optimos para el proximo <gather>.                  stat"
     },
     {
@@ -5816,7 +5816,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L490",
       "id": "core_streaming_pipeline_rationale_490",
-      "community": 104,
+      "community": 13,
       "norm_label": "procesa un turno completo de la conversacion.     integra: stt buffer \u2192 correcc"
     },
     {
@@ -5861,7 +5861,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L1",
       "id": "core_stt_enhancer",
-      "community": 36,
+      "community": 92,
       "norm_label": "stt_enhancer.py"
     },
     {
@@ -5870,7 +5870,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L24",
       "id": "core_stt_enhancer_strip_accents",
-      "community": 72,
+      "community": 97,
       "norm_label": "strip_accents()"
     },
     {
@@ -5924,7 +5924,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L256",
       "id": "core_stt_enhancer_correct_stt_errors",
-      "community": 117,
+      "community": 109,
       "norm_label": "correct_stt_errors()"
     },
     {
@@ -5933,7 +5933,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L290",
       "id": "core_stt_enhancer_normalize_street_abbreviations",
-      "community": 117,
+      "community": 92,
       "norm_label": "_normalize_street_abbreviations()"
     },
     {
@@ -5942,7 +5942,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L305",
       "id": "core_stt_enhancer_fuzzy_match_location",
-      "community": 92,
+      "community": 72,
       "norm_label": "fuzzy_match_location()"
     },
     {
@@ -5951,7 +5951,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L525",
       "id": "core_stt_enhancer_alias_covers_input",
-      "community": 116,
+      "community": 17,
       "norm_label": "_alias_covers_input()"
     },
     {
@@ -5969,7 +5969,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L546",
       "id": "core_stt_enhancer_resolve_human_reference",
-      "community": 72,
+      "community": 17,
       "norm_label": "resolve_human_reference()"
     },
     {
@@ -5978,7 +5978,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L610",
       "id": "core_stt_enhancer_build_phonetic_repair_index",
-      "community": 36,
+      "community": 92,
       "norm_label": "_build_phonetic_repair_index()"
     },
     {
@@ -6005,7 +6005,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L767",
       "id": "core_stt_enhancer_expand_number_words_in_streets",
-      "community": 91,
+      "community": 109,
       "norm_label": "expand_number_words_in_streets()"
     },
     {
@@ -6014,7 +6014,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L792",
       "id": "core_stt_enhancer_repair_mangled_street_address",
-      "community": 91,
+      "community": 87,
       "norm_label": "repair_mangled_street_address()"
     },
     {
@@ -6095,7 +6095,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L901",
       "id": "core_stt_enhancer_audioqualityprofile_recommended_speech_timeout",
-      "community": 86,
+      "community": 116,
       "norm_label": ".recommended_speech_timeout()"
     },
     {
@@ -6131,7 +6131,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L1",
       "id": "core_stt_enhancer_rationale_1",
-      "community": 36,
+      "community": 92,
       "norm_label": "core/stt_enhancer.py \u2014 motor de mejora de stt para audio telefonico colombiano."
     },
     {
@@ -6140,7 +6140,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L25",
       "id": "core_stt_enhancer_rationale_25",
-      "community": 72,
+      "community": 97,
       "norm_label": "quita tildes para comparaciones foneticas."
     },
     {
@@ -6176,7 +6176,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L257",
       "id": "core_stt_enhancer_rationale_257",
-      "community": 117,
+      "community": 109,
       "norm_label": "aplica correcciones stt en orden de especificidad:     1. match exacto     2."
     },
     {
@@ -6185,7 +6185,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L291",
       "id": "core_stt_enhancer_rationale_291",
-      "community": 117,
+      "community": 92,
       "norm_label": "normaliza abreviaturas de calle a forma canonica.     cl, cll, c/ \u2192 calle | cra"
     },
     {
@@ -6194,7 +6194,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L310",
       "id": "core_stt_enhancer_rationale_310",
-      "community": 92,
+      "community": 72,
       "norm_label": "busca el candidato mas similar al input usando score combinado.     retorna el"
     },
     {
@@ -6203,7 +6203,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L526",
       "id": "core_stt_enhancer_rationale_526",
-      "community": 116,
+      "community": 17,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas."
     },
     {
@@ -6212,7 +6212,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L547",
       "id": "core_stt_enhancer_rationale_547",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic"
     },
     {
@@ -6239,7 +6239,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L768",
       "id": "core_stt_enhancer_rationale_768",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre"
     },
     {
@@ -6248,7 +6248,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L793",
       "id": "core_stt_enhancer_rationale_793",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car"
     },
     {
@@ -6293,7 +6293,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L902",
       "id": "core_stt_enhancer_rationale_902",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario."
     },
     {
@@ -6581,7 +6581,7 @@
       "source_file": "main.py",
       "source_location": "L39",
       "id": "fastapi",
-      "community": 100,
+      "community": 47,
       "norm_label": "fastapi"
     },
     {
@@ -6941,7 +6941,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L1",
       "id": "interceptors_helpers",
-      "community": 89,
+      "community": 104,
       "norm_label": "helpers.py"
     },
     {
@@ -6959,7 +6959,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L35",
       "id": "orchestrator_interceptors_helpers_py_str",
-      "community": 89,
+      "community": 104,
       "norm_label": "str"
     },
     {
@@ -6968,7 +6968,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L50",
       "id": "interceptors_helpers_is_generic_query",
-      "community": 89,
+      "community": 104,
       "norm_label": "_is_generic_query()"
     },
     {
@@ -6977,7 +6977,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L50",
       "id": "orchestrator_interceptors_helpers_py_bool",
-      "community": 89,
+      "community": 104,
       "norm_label": "bool"
     },
     {
@@ -6986,7 +6986,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L82",
       "id": "interceptors_helpers_find_anchored_id_in_messages",
-      "community": 89,
+      "community": 117,
       "norm_label": "_find_anchored_id_in_messages()"
     },
     {
@@ -6995,7 +6995,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L82",
       "id": "orchestrator_interceptors_helpers_py_int",
-      "community": 89,
+      "community": 117,
       "norm_label": "int"
     },
     {
@@ -7004,7 +7004,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L114",
       "id": "interceptors_helpers_recover_last_businesses_from_history",
-      "community": 89,
+      "community": 104,
       "norm_label": "_recover_last_businesses_from_history()"
     },
     {
@@ -7013,7 +7013,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L148",
       "id": "interceptors_helpers_recover_last_search_args_from_history",
-      "community": 89,
+      "community": 104,
       "norm_label": "_recover_last_search_args_from_history()"
     },
     {
@@ -7031,7 +7031,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L252",
       "id": "interceptors_helpers_normalize_time",
-      "community": 89,
+      "community": 104,
       "norm_label": "_normalize_time()"
     },
     {
@@ -7040,7 +7040,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L1",
       "id": "interceptors_helpers_rationale_1",
-      "community": 89,
+      "community": 104,
       "norm_label": "orchestrator/interceptors/helpers.py ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ uti"
     },
     {
@@ -7058,7 +7058,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L51",
       "id": "interceptors_helpers_rationale_51",
-      "community": 89,
+      "community": 104,
       "norm_label": "retorna true si el texto parece referirse a una entidad generica     (pronombre"
     },
     {
@@ -7067,7 +7067,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L83",
       "id": "interceptors_helpers_rationale_83",
-      "community": 89,
+      "community": 117,
       "norm_label": "busca el ultimo id de negocio anclado en el historial de mensajes."
     },
     {
@@ -7076,7 +7076,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L115",
       "id": "interceptors_helpers_rationale_115",
-      "community": 89,
+      "community": 104,
       "norm_label": "recupera la lista de negocios del ultimo resultado de herramienta en el historia"
     },
     {
@@ -7085,7 +7085,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L149",
       "id": "interceptors_helpers_rationale_149",
-      "community": 89,
+      "community": 104,
       "norm_label": "recupera la categoria y ciudad de la ultima busqueda de negocios."
     },
     {
@@ -7103,7 +7103,7 @@
       "source_file": "orchestrator/interceptors/helpers.py",
       "source_location": "L253",
       "id": "interceptors_helpers_rationale_253",
-      "community": 89,
+      "community": 104,
       "norm_label": "normaliza una cadena de hora a formato hh:mm."
     },
     {
@@ -7202,7 +7202,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L32",
       "id": "interceptors_nexiservice_bookingstate",
-      "community": 89,
+      "community": 126,
       "norm_label": "bookingstate"
     },
     {
@@ -7373,7 +7373,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L734",
       "id": "interceptors_nexiservice_handle_conversational",
-      "community": 89,
+      "community": 125,
       "norm_label": "_handle_conversational()"
     },
     {
@@ -7409,7 +7409,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L879",
       "id": "interceptors_nexiservice_handle_get_business_services",
-      "community": 89,
+      "community": 10,
       "norm_label": "_handle_get_business_services()"
     },
     {
@@ -7418,7 +7418,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L916",
       "id": "interceptors_nexiservice_handle_get_business_reviews",
-      "community": 89,
+      "community": 117,
       "norm_label": "_handle_get_business_reviews()"
     },
     {
@@ -7427,7 +7427,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L934",
       "id": "interceptors_nexiservice_handle_get_business_availability",
-      "community": 89,
+      "community": 117,
       "norm_label": "_handle_get_business_availability()"
     },
     {
@@ -7463,7 +7463,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L33",
       "id": "interceptors_nexiservice_rationale_33",
-      "community": 89,
+      "community": 126,
       "norm_label": "estados posibles del flujo de reserva.     el estado se persiste en final_data["
     },
     {
@@ -7544,7 +7544,7 @@
       "source_file": "orchestrator/interceptors/nexiservice.py",
       "source_location": "L735",
       "id": "interceptors_nexiservice_rationale_735",
-      "community": 89,
+      "community": 125,
       "norm_label": "maneja intents conversacionales (greeting, farewell, identity, capabilities)."
     },
     {
@@ -7958,7 +7958,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L127",
       "id": "orchestrator_response_engine_generate_response",
-      "community": 76,
+      "community": 125,
       "norm_label": "generate_response()"
     },
     {
@@ -8030,7 +8030,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L134",
       "id": "orchestrator_response_engine_rationale_134",
-      "community": 76,
+      "community": 125,
       "norm_label": "genera una respuesta a partir de las plantillas yaml.      args:         conv"
     },
     {
@@ -8048,7 +8048,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L1",
       "id": "orchestrator_tool_adapter",
-      "community": 41,
+      "community": 107,
       "norm_label": "tool_adapter.py"
     },
     {
@@ -8057,7 +8057,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L7",
       "id": "orchestrator_tool_adapter_legacytooladapter",
-      "community": 41,
+      "community": 107,
       "norm_label": "legacytooladapter"
     },
     {
@@ -8066,7 +8066,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L12",
       "id": "orchestrator_tool_adapter_legacytooladapter_init",
-      "community": 41,
+      "community": 107,
       "norm_label": ".__init__()"
     },
     {
@@ -8075,7 +8075,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L12",
       "id": "orchestrator_tool_adapter_py_str",
-      "community": 41,
+      "community": 107,
       "norm_label": "str"
     },
     {
@@ -8084,7 +8084,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L12",
       "id": "orchestrator_tool_adapter_py_any",
-      "community": 41,
+      "community": 107,
       "norm_label": "any"
     },
     {
@@ -8093,7 +8093,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L17",
       "id": "orchestrator_tool_adapter_legacytooladapter_execute",
-      "community": 41,
+      "community": 107,
       "norm_label": ".execute()"
     },
     {
@@ -8102,7 +8102,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L55",
       "id": "orchestrator_tool_adapter_legacytooladapter_get_schema",
-      "community": 41,
+      "community": 107,
       "norm_label": ".get_schema()"
     },
     {
@@ -8111,7 +8111,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L8",
       "id": "orchestrator_tool_adapter_rationale_8",
-      "community": 41,
+      "community": 107,
       "norm_label": "envuelve herramientas antiguas que no siguen el contrato tool_schema/execute."
     },
     {
@@ -8120,7 +8120,7 @@
       "source_file": "orchestrator/tool_adapter.py",
       "source_location": "L18",
       "id": "orchestrator_tool_adapter_rationale_18",
-      "community": 41,
+      "community": 107,
       "norm_label": "ejecuta la funcion legacy inyectando el contexto si es necesario          o sim"
     },
     {
@@ -8129,7 +8129,7 @@
       "source_file": "orchestrator/tool_registry.py",
       "source_location": "L1",
       "id": "orchestrator_tool_registry",
-      "community": 41,
+      "community": 107,
       "norm_label": "tool_registry.py"
     },
     {
@@ -8138,7 +8138,7 @@
       "source_file": "orchestrator/tool_registry.py",
       "source_location": "L10",
       "id": "orchestrator_tool_registry_toolregistry",
-      "community": 41,
+      "community": 20,
       "norm_label": "toolregistry"
     },
     {
@@ -8147,7 +8147,7 @@
       "source_file": "orchestrator/tool_registry.py",
       "source_location": "L11",
       "id": "orchestrator_tool_registry_toolregistry_init",
-      "community": 41,
+      "community": 20,
       "norm_label": ".__init__()"
     },
     {
@@ -8282,7 +8282,7 @@
       "source_file": "orchestrator/tool_registry.py",
       "source_location": "L79",
       "id": "orchestrator_tool_registry_rationale_79",
-      "community": 41,
+      "community": 107,
       "norm_label": "# todo: en el futuro, buscar clases que hereden de basetool."
     },
     {
@@ -8435,7 +8435,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L504",
       "id": "orchestrator_tool_runner_extract_tastes_from_history",
-      "community": 20,
+      "community": 23,
       "norm_label": "_extract_tastes_from_history()"
     },
     {
@@ -8453,7 +8453,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L564",
       "id": "orchestrator_tool_runner_build_schedule_clarification",
-      "community": 20,
+      "community": 23,
       "norm_label": "_build_schedule_clarification()"
     },
     {
@@ -8480,7 +8480,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L628",
       "id": "orchestrator_tool_runner_resolve_personality",
-      "community": 118,
+      "community": 20,
       "norm_label": "_resolve_personality()"
     },
     {
@@ -8489,7 +8489,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L634",
       "id": "orchestrator_tool_runner_resp",
-      "community": 118,
+      "community": 20,
       "norm_label": "_resp()"
     },
     {
@@ -8633,7 +8633,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L505",
       "id": "orchestrator_tool_runner_rationale_505",
-      "community": 20,
+      "community": 23,
       "norm_label": "analiza el historial para extraer categorias o temas de interes recurrentes."
     },
     {
@@ -8669,7 +8669,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L629",
       "id": "orchestrator_tool_runner_rationale_629",
-      "community": 118,
+      "community": 20,
       "norm_label": "resuelve el nombre de la personalidad activa desde project_config."
     },
     {
@@ -8678,7 +8678,7 @@
       "source_file": "orchestrator/tool_runner.py",
       "source_location": "L635",
       "id": "orchestrator_tool_runner_rationale_635",
-      "community": 118,
+      "community": 20,
       "norm_label": "atajo para generate_response con resolucion automatica de personalidad."
     },
     {
@@ -8698,6 +8698,33 @@
       "id": "scripts_cleanup_backend_rentus",
       "community": 61,
       "norm_label": "cleanup_backend_rentus.ps1"
+    },
+    {
+      "label": "diagnose_lowprec_cache.py",
+      "file_type": "code",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L1",
+      "id": "scripts_diagnose_lowprec_cache",
+      "community": 98,
+      "norm_label": "diagnose_lowprec_cache.py"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L22",
+      "id": "scripts_diagnose_lowprec_cache_main",
+      "community": 98,
+      "norm_label": "main()"
+    },
+    {
+      "label": "scripts/diagnose_lowprec_cache.py \u2014 Diagn\u00f3stico (solo lectura).  Cuenta cu\u00e1ntas",
+      "file_type": "rationale",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L1",
+      "id": "scripts_diagnose_lowprec_cache_rationale_1",
+      "community": 98,
+      "norm_label": "scripts/diagnose_lowprec_cache.py \u2014 diagnostico (solo lectura).  cuenta cuantas"
     },
     {
       "label": "__init__.py",
@@ -8732,7 +8759,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L28",
       "id": "services_chat_service_py_str",
-      "community": 98,
+      "community": 5,
       "norm_label": "str"
     },
     {
@@ -8741,7 +8768,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L39",
       "id": "services_chat_service_chatservice",
-      "community": 98,
+      "community": 26,
       "norm_label": "chatservice"
     },
     {
@@ -8750,7 +8777,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L40",
       "id": "services_chat_service_chatservice_init",
-      "community": 98,
+      "community": 5,
       "norm_label": ".__init__()"
     },
     {
@@ -8759,7 +8786,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L40",
       "id": "services_chat_service_py_settings",
-      "community": 98,
+      "community": 5,
       "norm_label": "settings"
     },
     {
@@ -8768,7 +8795,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L40",
       "id": "services_chat_service_py_any",
-      "community": 98,
+      "community": 5,
       "norm_label": "any"
     },
     {
@@ -8804,7 +8831,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L249",
       "id": "services_chat_service_chatservice_get_session_history",
-      "community": 98,
+      "community": 5,
       "norm_label": ".get_session_history()"
     },
     {
@@ -8831,7 +8858,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L250",
       "id": "services_chat_service_rationale_250",
-      "community": 98,
+      "community": 5,
       "norm_label": "returns the conversation history for a given session."
     },
     {
@@ -8840,7 +8867,7 @@
       "source_file": "services/geo.py",
       "source_location": "L1",
       "id": "services_geo",
-      "community": 53,
+      "community": 26,
       "norm_label": "geo.py"
     },
     {
@@ -8849,7 +8876,7 @@
       "source_file": "services/geo.py",
       "source_location": "L56",
       "id": "services_geo_reverse_geocode",
-      "community": 53,
+      "community": 26,
       "norm_label": "reverse_geocode()"
     },
     {
@@ -8858,7 +8885,7 @@
       "source_file": "services/geo.py",
       "source_location": "L56",
       "id": "services_geo_py_float",
-      "community": 53,
+      "community": 26,
       "norm_label": "float"
     },
     {
@@ -8867,7 +8894,7 @@
       "source_file": "services/geo.py",
       "source_location": "L109",
       "id": "services_geo_forward_geocode",
-      "community": 53,
+      "community": 26,
       "norm_label": "forward_geocode()"
     },
     {
@@ -8876,7 +8903,7 @@
       "source_file": "services/geo.py",
       "source_location": "L109",
       "id": "services_geo_py_str",
-      "community": 53,
+      "community": 26,
       "norm_label": "str"
     },
     {
@@ -8885,7 +8912,7 @@
       "source_file": "services/geo.py",
       "source_location": "L150",
       "id": "services_geo_resolve_city_coords",
-      "community": 53,
+      "community": 26,
       "norm_label": "resolve_city_coords()"
     },
     {
@@ -8894,7 +8921,7 @@
       "source_file": "services/geo.py",
       "source_location": "L178",
       "id": "services_geo_resolve_city_coords_async",
-      "community": 53,
+      "community": 26,
       "norm_label": "resolve_city_coords_async()"
     },
     {
@@ -8903,7 +8930,7 @@
       "source_file": "services/geo.py",
       "source_location": "L237",
       "id": "services_geo_extract_city_from_google",
-      "community": 53,
+      "community": 26,
       "norm_label": "_extract_city_from_google()"
     },
     {
@@ -8912,7 +8939,7 @@
       "source_file": "services/geo.py",
       "source_location": "L246",
       "id": "services_geo_format_google_results",
-      "community": 53,
+      "community": 26,
       "norm_label": "_format_google_results()"
     },
     {
@@ -8921,7 +8948,7 @@
       "source_file": "services/geo.py",
       "source_location": "L1",
       "id": "services_geo_rationale_1",
-      "community": 53,
+      "community": 26,
       "norm_label": "services/geo.py \u2014 servicio de geocodificacion centralizado para lyra ai.  cons"
     },
     {
@@ -8930,7 +8957,7 @@
       "source_file": "services/geo.py",
       "source_location": "L57",
       "id": "services_geo_rationale_57",
-      "community": 53,
+      "community": 26,
       "norm_label": "convierte coordenadas gps en un nombre de ciudad.     intenta google maps prime"
     },
     {
@@ -8939,7 +8966,7 @@
       "source_file": "services/geo.py",
       "source_location": "L110",
       "id": "services_geo_rationale_110",
-      "community": 53,
+      "community": 26,
       "norm_label": "geocodifica una direccion o lugar a coordenadas.     intenta google maps primer"
     },
     {
@@ -8948,7 +8975,7 @@
       "source_file": "services/geo.py",
       "source_location": "L153",
       "id": "services_geo_rationale_153",
-      "community": 53,
+      "community": 26,
       "norm_label": "resuelve nombre de ciudad a coordenadas, usando:     1. registro local de ciuda"
     },
     {
@@ -8957,7 +8984,7 @@
       "source_file": "services/geo.py",
       "source_location": "L181",
       "id": "services_geo_rationale_181",
-      "community": 53,
+      "community": 26,
       "norm_label": "resuelve nombre de ciudad a coordenadas con fallback http a nominatim.     siem"
     },
     {
@@ -8966,7 +8993,7 @@
       "source_file": "services/geo.py",
       "source_location": "L238",
       "id": "services_geo_rationale_238",
-      "community": 53,
+      "community": 26,
       "norm_label": "extrae el nombre de ciudad desde la respuesta de google geocoding api."
     },
     {
@@ -8975,7 +9002,7 @@
       "source_file": "services/geo.py",
       "source_location": "L247",
       "id": "services_geo_rationale_247",
-      "community": 53,
+      "community": 26,
       "norm_label": "convierte resultados de google geocoding al formato compatible con nominatim/fro"
     },
     {
@@ -9227,7 +9254,7 @@
       "source_file": "services/telephony/backend_client.py",
       "source_location": "L19",
       "id": "telephony_backend_client_telephonybackendclient",
-      "community": 2,
+      "community": 97,
       "norm_label": "telephonybackendclient"
     },
     {
@@ -9335,7 +9362,7 @@
       "source_file": "services/telephony/backend_client.py",
       "source_location": "L20",
       "id": "telephony_backend_client_rationale_20",
-      "community": 2,
+      "community": 97,
       "norm_label": "envia solicitudes telefonicas al backend intellitaxi."
     },
     {
@@ -10172,7 +10199,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L208",
       "id": "telephony_session_store_get_session_store",
-      "community": 75,
+      "community": 9,
       "norm_label": "get_session_store()"
     },
     {
@@ -10307,7 +10334,7 @@
       "source_file": "services/telephony/stt_service.py",
       "source_location": "L128",
       "id": "telephony_stt_service_telephonysttservice",
-      "community": 2,
+      "community": 9,
       "norm_label": "telephonysttservice"
     },
     {
@@ -10478,7 +10505,7 @@
       "source_file": "services/telephony/stt_service.py",
       "source_location": "L129",
       "id": "telephony_stt_service_rationale_129",
-      "community": 2,
+      "community": 9,
       "norm_label": "convierte audio telefonico (\u03bc-law/pcm/wav) a texto."
     },
     {
@@ -10559,7 +10586,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L30",
       "id": "services_telephony_tts_file_store_py_str",
-      "community": 30,
+      "community": 113,
       "norm_label": "str"
     },
     {
@@ -10568,7 +10595,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L35",
       "id": "telephony_tts_file_store_ttsfilestore",
-      "community": 30,
+      "community": 113,
       "norm_label": "ttsfilestore"
     },
     {
@@ -10577,7 +10604,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L36",
       "id": "telephony_tts_file_store_ttsfilestore_init",
-      "community": 30,
+      "community": 113,
       "norm_label": ".__init__()"
     },
     {
@@ -10586,7 +10613,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L40",
       "id": "telephony_tts_file_store_ttsfilestore_prune",
-      "community": 30,
+      "community": 113,
       "norm_label": "._prune()"
     },
     {
@@ -10595,7 +10622,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L50",
       "id": "telephony_tts_file_store_ttsfilestore_save_telephony_audio",
-      "community": 30,
+      "community": 113,
       "norm_label": ".save_telephony_audio()"
     },
     {
@@ -10604,7 +10631,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L50",
       "id": "path",
-      "community": 30,
+      "community": 113,
       "norm_label": "path"
     },
     {
@@ -10613,7 +10640,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L85",
       "id": "telephony_tts_file_store_ttsfilestore_get_path",
-      "community": 30,
+      "community": 113,
       "norm_label": ".get_path()"
     },
     {
@@ -10712,7 +10739,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L57",
       "id": "telephony_tts_file_store_rationale_57",
-      "community": 30,
+      "community": 113,
       "norm_label": "persiste audio telefonico como wav 8khz mono.          returns: (audio_id, abs"
     },
     {
@@ -10739,7 +10766,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L16",
       "id": "telephony_tts_service_telephonyttsservice",
-      "community": 2,
+      "community": 84,
       "norm_label": "telephonyttsservice"
     },
     {
@@ -10748,7 +10775,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L19",
       "id": "telephony_tts_service_telephonyttsservice_init",
-      "community": 30,
+      "community": 121,
       "norm_label": ".__init__()"
     },
     {
@@ -10757,7 +10784,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L19",
       "id": "services_telephony_tts_service_py_str",
-      "community": 30,
+      "community": 121,
       "norm_label": "str"
     },
     {
@@ -10766,7 +10793,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L23",
       "id": "telephony_tts_service_telephonyttsservice_synthesize_mp3",
-      "community": 30,
+      "community": 121,
       "norm_label": ".synthesize_mp3()"
     },
     {
@@ -10775,7 +10802,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L23",
       "id": "services_telephony_tts_service_py_bytes",
-      "community": 30,
+      "community": 121,
       "norm_label": "bytes"
     },
     {
@@ -10784,7 +10811,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L30",
       "id": "telephony_tts_service_telephonyttsservice_synthesize_for_telephony",
-      "community": 30,
+      "community": 121,
       "norm_label": ".synthesize_for_telephony()"
     },
     {
@@ -10811,7 +10838,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L17",
       "id": "telephony_tts_service_rationale_17",
-      "community": 2,
+      "community": 84,
       "norm_label": "genera audio de respuesta para llamadas telefonicas."
     },
     {
@@ -10820,7 +10847,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L31",
       "id": "telephony_tts_service_rationale_31",
-      "community": 30,
+      "community": 121,
       "norm_label": "genera audio listo para telefonia.          returns:             {"
     },
     {
@@ -10838,7 +10865,7 @@
       "source_file": "services/telephony/voice_call_engine.py",
       "source_location": "L1",
       "id": "telephony_voice_call_engine",
-      "community": 72,
+      "community": 24,
       "norm_label": "voice_call_engine.py"
     },
     {
@@ -11009,7 +11036,7 @@
       "source_file": "services/telephony/voice_call_engine.py",
       "source_location": "L1",
       "id": "telephony_voice_call_engine_rationale_1",
-      "community": 72,
+      "community": 24,
       "norm_label": "motor conversacional agnostico del canal telefonico.  no importa twilio ni fre"
     },
     {
@@ -11027,7 +11054,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L1",
       "id": "telephony_ws_audio_buffer",
-      "community": 52,
+      "community": 115,
       "norm_label": "ws_audio_buffer.py"
     },
     {
@@ -11036,7 +11063,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L24",
       "id": "telephony_ws_audio_buffer_max_utterance_sec",
-      "community": 52,
+      "community": 115,
       "norm_label": "_max_utterance_sec()"
     },
     {
@@ -11045,7 +11072,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L24",
       "id": "services_telephony_ws_audio_buffer_py_float",
-      "community": 52,
+      "community": 115,
       "norm_label": "float"
     },
     {
@@ -11108,7 +11135,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L59",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_gate_playback",
-      "community": 52,
+      "community": 115,
       "norm_label": ".gate_playback()"
     },
     {
@@ -11144,7 +11171,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L75",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_max_bytes",
-      "community": 52,
+      "community": 2,
       "norm_label": ".max_bytes()"
     },
     {
@@ -11171,7 +11198,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L89",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_should_flush",
-      "community": 52,
+      "community": 2,
       "norm_label": ".should_flush()"
     },
     {
@@ -11189,7 +11216,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L1",
       "id": "telephony_ws_audio_buffer_rationale_1",
-      "community": 52,
+      "community": 115,
       "norm_label": "acumulador de audio websocket \u2014 segmentacion por duracion + vad."
     },
     {
@@ -11198,7 +11225,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L25",
       "id": "telephony_ws_audio_buffer_rationale_25",
-      "community": 52,
+      "community": 115,
       "norm_label": "duracion maxima de locucion antes de forzar flush (env-driven)."
     },
     {
@@ -11207,7 +11234,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L60",
       "id": "telephony_ws_audio_buffer_rationale_60",
-      "community": 52,
+      "community": 115,
       "norm_label": "silencia la captura durante un playback y descarta lo ya acumulado."
     },
     {
@@ -11279,7 +11306,7 @@
       "source_file": "services/twilio/navigation.py",
       "source_location": "L116",
       "id": "twilio_navigation_navigationparser",
-      "community": 29,
+      "community": 3,
       "norm_label": "navigationparser"
     },
     {
@@ -11405,7 +11432,7 @@
       "source_file": "services/twilio/navigation.py",
       "source_location": "L117",
       "id": "twilio_navigation_rationale_117",
-      "community": 29,
+      "community": 3,
       "norm_label": "parser de descripciones de navegacion relativa comunes en colombia/popayan."
     },
     {
@@ -11486,7 +11513,7 @@
       "source_file": "services/twilio/speech_processor.py",
       "source_location": "L1",
       "id": "twilio_speech_processor",
-      "community": 7,
+      "community": 3,
       "norm_label": "speech_processor.py"
     },
     {
@@ -12071,7 +12098,7 @@
       "source_file": "services/whatsapp_service.py",
       "source_location": "L1",
       "id": "services_whatsapp_service",
-      "community": 26,
+      "community": 24,
       "norm_label": "whatsapp_service.py"
     },
     {
@@ -12818,7 +12845,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L1",
       "id": "tests_test_geocoder_pipeline",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_geocoder_pipeline.py"
     },
     {
@@ -12827,7 +12854,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L25",
       "id": "tests_test_geocoder_pipeline_candidate",
-      "community": 1,
+      "community": 16,
       "norm_label": "_candidate()"
     },
     {
@@ -12836,7 +12863,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L25",
       "id": "tests_test_geocoder_pipeline_py_locationtype",
-      "community": 1,
+      "community": 53,
       "norm_label": "locationtype"
     },
     {
@@ -12845,7 +12872,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L25",
       "id": "tests_test_geocoder_pipeline_py_str",
-      "community": 1,
+      "community": 53,
       "norm_label": "str"
     },
     {
@@ -12854,7 +12881,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L25",
       "id": "tests_test_geocoder_pipeline_py_geocandidate",
-      "community": 1,
+      "community": 53,
       "norm_label": "geocandidate"
     },
     {
@@ -12863,7 +12890,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L39",
       "id": "tests_test_geocoder_pipeline_patched_pipeline",
-      "community": 1,
+      "community": 16,
       "norm_label": "patched_pipeline()"
     },
     {
@@ -12872,7 +12899,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L72",
       "id": "tests_test_geocoder_pipeline_test_geometric_center_never_autoaccepted_even_when_numbers_match",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_geometric_center_never_autoaccepted_even_when_numbers_match()"
     },
     {
@@ -12881,7 +12908,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L85",
       "id": "tests_test_geocoder_pipeline_test_approximate_never_autoaccepted",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_approximate_never_autoaccepted()"
     },
     {
@@ -12890,7 +12917,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L94",
       "id": "tests_test_geocoder_pipeline_test_nominatim_low_never_autoaccepted",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_nominatim_low_never_autoaccepted()"
     },
     {
@@ -12899,7 +12926,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L105",
       "id": "tests_test_geocoder_pipeline_test_rooftop_still_accepted",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_rooftop_still_accepted()"
     },
     {
@@ -12908,7 +12935,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L114",
       "id": "tests_test_geocoder_pipeline_test_range_interpolated_still_accepted",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_range_interpolated_still_accepted()"
     },
     {
@@ -12917,7 +12944,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L124",
       "id": "tests_test_geocoder_pipeline_test_requery_after_disambiguation_upgrades_to_rooftop",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_requery_after_disambiguation_upgrades_to_rooftop()"
     },
     {
@@ -12926,7 +12953,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L150",
       "id": "tests_test_geocoder_pipeline_test_requery_still_low_precision_keeps_asking",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_requery_still_low_precision_keeps_asking()"
     },
     {
@@ -12935,7 +12962,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L176",
       "id": "tests_test_geocoder_pipeline_test_low_precision_failed_at_max_attempts_no_silent_accept",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_low_precision_failed_at_max_attempts_no_silent_accept()"
     },
     {
@@ -12944,7 +12971,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L190",
       "id": "tests_test_geocoder_pipeline_test_handle_user_context_exhaustion_returns_failed_not_accept",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_handle_user_context_exhaustion_returns_failed_not_accept()"
     },
     {
@@ -12953,8 +12980,35 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L216",
       "id": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback",
-      "community": 1,
+      "community": 16,
       "norm_label": "test_freeswitch_geo_context_exhaustion_triggers_safe_fallback()"
+    },
+    {
+      "label": "test_low_precision_mem_cache_hit_not_served()",
+      "file_type": "code",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L250",
+      "id": "tests_test_geocoder_pipeline_test_low_precision_mem_cache_hit_not_served",
+      "community": 16,
+      "norm_label": "test_low_precision_mem_cache_hit_not_served()"
+    },
+    {
+      "label": "test_low_precision_db_cache_hit_not_served()",
+      "file_type": "code",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L262",
+      "id": "tests_test_geocoder_pipeline_test_low_precision_db_cache_hit_not_served",
+      "community": 16,
+      "norm_label": "test_low_precision_db_cache_hit_not_served()"
+    },
+    {
+      "label": "test_high_precision_cache_hit_still_served()",
+      "file_type": "code",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L272",
+      "id": "tests_test_geocoder_pipeline_test_high_precision_cache_hit_still_served",
+      "community": 16,
+      "norm_label": "test_high_precision_cache_hit_still_served()"
     },
     {
       "label": "tests/test_geocoder_pipeline.py \u2014 Task 2 (bug item 7).  Verifica que run_pipelin",
@@ -12962,7 +13016,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L1",
       "id": "tests_test_geocoder_pipeline_rationale_1",
-      "community": 1,
+      "community": 16,
       "norm_label": "tests/test_geocoder_pipeline.py \u2014 task 2 (bug item 7).  verifica que run_pipelin"
     },
     {
@@ -12971,7 +13025,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L40",
       "id": "tests_test_geocoder_pipeline_rationale_40",
-      "community": 1,
+      "community": 16,
       "norm_label": "aisla run_pipeline de red y db. el test inyecta los candidatos que devuelve"
     },
     {
@@ -12980,7 +13034,7 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L217",
       "id": "tests_test_geocoder_pipeline_rationale_217",
-      "community": 1,
+      "community": 16,
       "norm_label": "freeswitch: cuando run_pipeline devuelve failed (intentos agotados, aun baja"
     },
     {
@@ -13052,7 +13106,7 @@
       "source_file": "tests/test_location_match.py",
       "source_location": "L78",
       "id": "tests_test_location_match_test_phonetic_does_not_override_substring",
-      "community": 113,
+      "community": 21,
       "norm_label": "test_phonetic_does_not_override_substring()"
     },
     {
@@ -13088,7 +13142,7 @@
       "source_file": "tests/test_location_match.py",
       "source_location": "L115",
       "id": "tests_test_location_match_test_villa_del_norte_not_routed_to_sena",
-      "community": 120,
+      "community": 21,
       "norm_label": "test_villa_del_norte_not_routed_to_sena()"
     },
     {
@@ -13187,7 +13241,7 @@
       "source_file": "tests/test_location_match.py",
       "source_location": "L79",
       "id": "tests_test_location_match_rationale_79",
-      "community": 113,
+      "community": 21,
       "norm_label": "un substring cubierto (textual) debe ganar a cualquier casi-acierto     fonetic"
     },
     {
@@ -13196,7 +13250,7 @@
       "source_file": "tests/test_location_match.py",
       "source_location": "L116",
       "id": "tests_test_location_match_rationale_116",
-      "community": 120,
+      "community": 21,
       "norm_label": "villa del norte' es un barrio; no debe convertirse en 'sena norte' por     la p"
     },
     {
@@ -13358,7 +13412,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L122",
       "id": "tests_test_stt_repair_test_filler_is_detected_for_greetings",
-      "community": 66,
+      "community": 49,
       "norm_label": "test_filler_is_detected_for_greetings()"
     },
     {
@@ -13403,7 +13457,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L1",
       "id": "tools_intellitaxi",
-      "community": 24,
+      "community": 34,
       "norm_label": "intellitaxi.py"
     },
     {
@@ -13448,7 +13502,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L181",
       "id": "tools_intellitaxi_cancelar_servicio",
-      "community": 24,
+      "community": 34,
       "norm_label": "cancelar_servicio()"
     },
     {
@@ -13457,7 +13511,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L190",
       "id": "tools_intellitaxi_cancelarserviciotool",
-      "community": 24,
+      "community": 34,
       "norm_label": "cancelarserviciotool"
     },
     {
@@ -13466,7 +13520,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L198",
       "id": "tools_intellitaxi_cancelarserviciotool_execute",
-      "community": 24,
+      "community": 34,
       "norm_label": ".execute()"
     },
     {
@@ -13502,7 +13556,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L266",
       "id": "tools_intellitaxi_geocodificar_direccion",
-      "community": 24,
+      "community": 34,
       "norm_label": "geocodificar_direccion()"
     },
     {
@@ -13511,7 +13565,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L320",
       "id": "tools_intellitaxi_geocodificardirecciontool",
-      "community": 24,
+      "community": 34,
       "norm_label": "geocodificardirecciontool"
     },
     {
@@ -13520,7 +13574,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L337",
       "id": "tools_intellitaxi_geocodificardirecciontool_execute",
-      "community": 24,
+      "community": 34,
       "norm_label": ".execute()"
     },
     {
@@ -13529,7 +13583,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L1",
       "id": "tools_intellitaxi_rationale_1",
-      "community": 24,
+      "community": 34,
       "norm_label": "tools/intellitaxi.py \u2014 tool functions for the intellitaxi project.  integrates"
     },
     {
@@ -13547,7 +13601,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L182",
       "id": "tools_intellitaxi_rationale_182",
-      "community": 24,
+      "community": 34,
       "norm_label": "cancela una solicitud de taxi activa."
     },
     {
@@ -13565,7 +13619,7 @@
       "source_file": "tools/intellitaxi.py",
       "source_location": "L269",
       "id": "tools_intellitaxi_rationale_269",
-      "community": 24,
+      "community": 34,
       "norm_label": "geocodifica una direccion en popayan y devuelve coordenadas.          pipeline"
     },
     {
@@ -13655,7 +13709,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L84",
       "id": "tools_nexiservice_format_logo",
-      "community": 10,
+      "community": 124,
       "norm_label": "_format_logo()"
     },
     {
@@ -13664,7 +13718,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L104",
       "id": "tools_nexiservice_get_active_cities_data",
-      "community": 47,
+      "community": 98,
       "norm_label": "_get_active_cities_data()"
     },
     {
@@ -13736,7 +13790,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L785",
       "id": "tools_nexiservice_get_businesses_comparison",
-      "community": 10,
+      "community": 124,
       "norm_label": "get_businesses_comparison()"
     },
     {
@@ -13745,7 +13799,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L885",
       "id": "tools_nexiservice_get_business_reviews",
-      "community": 10,
+      "community": 117,
       "norm_label": "get_business_reviews()"
     },
     {
@@ -13799,7 +13853,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L1300",
       "id": "tools_nexiservice_get_service_professionals",
-      "community": 10,
+      "community": 14,
       "norm_label": "get_service_professionals()"
     },
     {
@@ -13898,7 +13952,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L85",
       "id": "tools_nexiservice_rationale_85",
-      "community": 10,
+      "community": 124,
       "norm_label": "format business logo to absolute url."
     },
     {
@@ -13907,7 +13961,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L105",
       "id": "tools_nexiservice_rationale_105",
-      "community": 47,
+      "community": 98,
       "norm_label": "retorna lista de ciudades con presencia real de negocios en nexiservice (dinamic"
     },
     {
@@ -13925,7 +13979,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L231",
       "id": "tools_nexiservice_rationale_231",
-      "community": 10,
+      "community": 124,
       "norm_label": "formatea la ruta del logo para que sea accesible desde el frontend."
     },
     {
@@ -13970,7 +14024,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L786",
       "id": "tools_nexiservice_rationale_786",
-      "community": 10,
+      "community": 124,
       "norm_label": "obtiene datos comparativos para una lista de negocios."
     },
     {
@@ -13979,7 +14033,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L888",
       "id": "tools_nexiservice_rationale_888",
-      "community": 10,
+      "community": 117,
       "norm_label": "obtiene las resenas y calificaciones de un negocio."
     },
     {
@@ -14024,7 +14078,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L1301",
       "id": "tools_nexiservice_rationale_1301",
-      "community": 10,
+      "community": 14,
       "norm_label": "obtiene la lista de profesionales/responsables que pueden prestar un servicio es"
     },
     {
@@ -14231,7 +14285,7 @@
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L2143",
       "id": "tools_popayan_geodata_get_nearby_barrios",
-      "community": 7,
+      "community": 18,
       "norm_label": "get_nearby_barrios()"
     },
     {
@@ -14375,7 +14429,7 @@
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L2144",
       "id": "tools_popayan_geodata_rationale_2144",
-      "community": 7,
+      "community": 18,
       "norm_label": "barrios dentro de radius_km de las coordenadas dadas, ordenados por distancia."
     },
     {
@@ -15122,7 +15176,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L603",
       "id": "shared_utils_resolve_personality",
-      "community": 118,
+      "community": 6,
       "norm_label": "resolve_personality()"
     },
     {
@@ -15329,7 +15383,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L604",
       "id": "shared_utils_rationale_604",
-      "community": 118,
+      "community": 6,
       "norm_label": "resuelve el nombre de la personalidad activa desde project_config."
     },
     {
@@ -17046,8 +17100,44 @@
       "label": "Extrae el t\u00e9rmino geogr\u00e1fico \u00fatil del texto libre del usuario para enrichment.",
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
+      "source_location": "L1059",
+      "community": 66,
+      "norm_label": "extrae el termino geografico util del texto libre del usuario para enrichment.",
+      "id": "core_geocoder_service_rationale_1059"
+    },
+    {
+      "label": "Procesa respuesta del usuario a CONTEXT_GATHERING o NEEDS_DISAMBIGUATION.",
+      "file_type": "rationale",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1152",
+      "community": 66,
+      "norm_label": "procesa respuesta del usuario a context_gathering o needs_disambiguation.",
+      "id": "core_geocoder_service_rationale_1152"
+    },
+    {
+      "label": "Intenta mapear la respuesta del usuario a uno de los candidatos conocidos.",
+      "file_type": "rationale",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1223",
+      "community": 66,
+      "norm_label": "intenta mapear la respuesta del usuario a uno de los candidatos conocidos.",
+      "id": "core_geocoder_service_rationale_1223"
+    },
+    {
+      "label": "Shortcut para resoluci\u00f3n directa (sin CONTEXT_GATHERING interactivo).     Retor",
+      "file_type": "rationale",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1256",
+      "community": 123,
+      "norm_label": "shortcut para resolucion directa (sin context_gathering interactivo).     retor",
+      "id": "core_geocoder_service_rationale_1256"
+    },
+    {
+      "label": "Extrae el t\u00e9rmino geogr\u00e1fico \u00fatil del texto libre del usuario para enrichment.",
+      "file_type": "rationale",
+      "source_file": "core/geocoder_service.py",
       "source_location": "L1041",
-      "community": 1,
+      "community": 66,
       "norm_label": "extrae el termino geografico util del texto libre del usuario para enrichment.",
       "id": "core_geocoder_service_rationale_1041"
     },
@@ -17056,7 +17146,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1134",
-      "community": 1,
+      "community": 66,
       "norm_label": "procesa respuesta del usuario a context_gathering o needs_disambiguation.",
       "id": "core_geocoder_service_rationale_1134"
     },
@@ -17065,7 +17155,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1205",
-      "community": 1,
+      "community": 66,
       "norm_label": "intenta mapear la respuesta del usuario a uno de los candidatos conocidos.",
       "id": "core_geocoder_service_rationale_1205"
     },
@@ -17074,7 +17164,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1238",
-      "community": 1,
+      "community": 123,
       "norm_label": "shortcut para resolucion directa (sin context_gathering interactivo).     retor",
       "id": "core_geocoder_service_rationale_1238"
     },
@@ -17137,7 +17227,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L238",
-      "community": 102,
+      "community": 42,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_238"
     },
@@ -17191,7 +17281,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L451",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_451"
     },
@@ -17200,7 +17290,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L464",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_464"
     },
@@ -17236,7 +17326,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L800",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_800"
     },
@@ -17254,7 +17344,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L896",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h",
       "id": "routers_twilio_rationale_896"
     },
@@ -17299,7 +17389,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1021",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1021"
     },
@@ -17380,7 +17470,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2571",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket para twilio media streams.      permite streaming de audio bidirecci",
       "id": "routers_twilio_rationale_2571"
     },
@@ -17389,7 +17479,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L645",
-      "community": 73,
+      "community": 72,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod",
       "id": "core_address_utils_rationale_645"
     },
@@ -17434,7 +17524,7 @@
       "file_type": "code",
       "source_file": "core/geocoder_service.py",
       "source_location": "L151",
-      "community": 1,
+      "community": 53,
       "norm_label": "locationtype",
       "id": "locationtype"
     },
@@ -17461,7 +17551,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L995",
-      "community": 1,
+      "community": 66,
       "norm_label": "extrae el termino geografico util del texto libre del usuario para enrichment.",
       "id": "core_geocoder_service_rationale_995"
     },
@@ -17470,7 +17560,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1088",
-      "community": 1,
+      "community": 66,
       "norm_label": "procesa respuesta del usuario a context_gathering o needs_disambiguation.",
       "id": "core_geocoder_service_rationale_1088"
     },
@@ -17479,7 +17569,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1159",
-      "community": 1,
+      "community": 66,
       "norm_label": "intenta mapear la respuesta del usuario a uno de los candidatos conocidos.",
       "id": "core_geocoder_service_rationale_1159"
     },
@@ -17488,7 +17578,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L1192",
-      "community": 1,
+      "community": 123,
       "norm_label": "shortcut para resolucion directa (sin context_gathering interactivo).     retor",
       "id": "core_geocoder_service_rationale_1192"
     },
@@ -17506,7 +17596,7 @@
       "file_type": "rationale",
       "source_file": "core/config.py",
       "source_location": "L98",
-      "community": 30,
+      "community": 102,
       "norm_label": "resolve model path relative to project root.",
       "id": "core_config_rationale_98"
     },
@@ -17578,7 +17668,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L206",
-      "community": 9,
+      "community": 111,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_206"
     },
@@ -17587,7 +17677,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L223",
-      "community": 9,
+      "community": 111,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_223"
     },
@@ -17596,7 +17686,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L238",
-      "community": 9,
+      "community": 118,
       "norm_label": "head para que freeswitch valide existencia del wav sin descargar cuerpo.",
       "id": "routers_freeswitch_rationale_238"
     },
@@ -17614,7 +17704,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L429",
-      "community": 96,
+      "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json.",
       "id": "routers_freeswitch_rationale_429"
     },
@@ -17632,7 +17722,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L478",
-      "community": 2,
+      "community": 75,
       "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n",
       "id": "routers_freeswitch_rationale_478"
     },
@@ -17641,7 +17731,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L569",
-      "community": 2,
+      "community": 75,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_569"
     },
@@ -17659,7 +17749,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L684",
-      "community": 111,
+      "community": 120,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar.",
       "id": "routers_freeswitch_rationale_684"
     },
@@ -17704,7 +17794,7 @@
       "file_type": "rationale",
       "source_file": "core/config.py",
       "source_location": "L84",
-      "community": 30,
+      "community": 102,
       "norm_label": "resolve model path relative to project root.",
       "id": "core_config_rationale_84"
     },
@@ -17749,7 +17839,7 @@
       "file_type": "rationale",
       "source_file": "core/conversation_repair.py",
       "source_location": "L416",
-      "community": 12,
+      "community": 119,
       "norm_label": "detecta si el texto parcial indica intencion de interrumpir.         se usa con",
       "id": "core_conversation_repair_rationale_416"
     },
@@ -17857,7 +17947,7 @@
       "file_type": "rationale",
       "source_file": "services/telephony/stt_service.py",
       "source_location": "L89",
-      "community": 2,
+      "community": 9,
       "norm_label": "convierte audio telefonico (\u03bc-law/pcm/wav) a texto.",
       "id": "telephony_stt_service_rationale_89"
     },
@@ -17920,7 +18010,7 @@
       "file_type": "rationale",
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L46",
-      "community": 52,
+      "community": 115,
       "norm_label": "silencia la captura durante un playback y descarta lo ya acumulado.",
       "id": "telephony_ws_audio_buffer_rationale_46"
     },
@@ -17938,7 +18028,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L252",
-      "community": 66,
+      "community": 49,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'b",
       "id": "core_location_match_rationale_252"
     },
@@ -17947,7 +18037,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L261",
-      "community": 66,
+      "community": 49,
       "norm_label": "api publica: true si `text` es solo cortesia/relleno/afirmacion y no     contie",
       "id": "core_location_match_rationale_261"
     },
@@ -17956,7 +18046,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L277",
-      "community": 66,
+      "community": 49,
       "norm_label": "fraccion de tokens de contenido del input que encuentran un equivalente     fue",
       "id": "core_location_match_rationale_277"
     },
@@ -17992,7 +18082,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L525",
-      "community": 116,
+      "community": 17,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_525"
     },
@@ -18001,7 +18091,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L546",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic",
       "id": "core_stt_enhancer_rationale_546"
     },
@@ -18028,7 +18118,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L767",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre",
       "id": "core_stt_enhancer_rationale_767"
     },
@@ -18037,7 +18127,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L792",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_792"
     },
@@ -18082,7 +18172,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L901",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario.",
       "id": "core_stt_enhancer_rationale_901"
     },
@@ -18136,7 +18226,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L510",
-      "community": 116,
+      "community": 17,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_510"
     },
@@ -18145,7 +18235,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L531",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic",
       "id": "core_stt_enhancer_rationale_531"
     },
@@ -18172,7 +18262,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L752",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre",
       "id": "core_stt_enhancer_rationale_752"
     },
@@ -18226,7 +18316,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L886",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario.",
       "id": "core_stt_enhancer_rationale_886"
     },
@@ -18253,7 +18343,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L74",
-      "community": 111,
+      "community": 9,
       "norm_label": "limpieza stt compartida con el gateway twilio (preprocess_stt): elimina     fra",
       "id": "routers_freeswitch_rationale_74"
     },
@@ -18280,7 +18370,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L203",
-      "community": 9,
+      "community": 111,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_203"
     },
@@ -18289,7 +18379,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L220",
-      "community": 9,
+      "community": 111,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_220"
     },
@@ -18298,7 +18388,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L235",
-      "community": 9,
+      "community": 118,
       "norm_label": "head para que freeswitch valide existencia del wav sin descargar cuerpo.",
       "id": "routers_freeswitch_rationale_235"
     },
@@ -18316,7 +18406,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L426",
-      "community": 96,
+      "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json.",
       "id": "routers_freeswitch_rationale_426"
     },
@@ -18334,7 +18424,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L475",
-      "community": 2,
+      "community": 75,
       "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n",
       "id": "routers_freeswitch_rationale_475"
     },
@@ -18343,7 +18433,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L566",
-      "community": 2,
+      "community": 75,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_566"
     },
@@ -18361,7 +18451,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L681",
-      "community": 111,
+      "community": 120,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar.",
       "id": "routers_freeswitch_rationale_681"
     },
@@ -18406,7 +18496,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L154",
-      "community": 9,
+      "community": 111,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_154"
     },
@@ -18415,7 +18505,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L171",
-      "community": 9,
+      "community": 111,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_171"
     },
@@ -18424,7 +18514,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L186",
-      "community": 9,
+      "community": 118,
       "norm_label": "head para que freeswitch valide existencia del wav sin descargar cuerpo.",
       "id": "routers_freeswitch_rationale_186"
     },
@@ -18442,7 +18532,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L377",
-      "community": 96,
+      "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json.",
       "id": "routers_freeswitch_rationale_377"
     },
@@ -18460,7 +18550,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L517",
-      "community": 2,
+      "community": 75,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_517"
     },
@@ -18478,7 +18568,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L632",
-      "community": 111,
+      "community": 120,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar.",
       "id": "routers_freeswitch_rationale_632"
     },
@@ -18505,7 +18595,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L150",
-      "community": 9,
+      "community": 111,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_150"
     },
@@ -18514,7 +18604,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L167",
-      "community": 9,
+      "community": 111,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_167"
     },
@@ -18523,7 +18613,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L182",
-      "community": 9,
+      "community": 118,
       "norm_label": "head para que freeswitch valide existencia del wav sin descargar cuerpo.",
       "id": "routers_freeswitch_rationale_182"
     },
@@ -18541,7 +18631,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L373",
-      "community": 96,
+      "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json.",
       "id": "routers_freeswitch_rationale_373"
     },
@@ -18559,7 +18649,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L422",
-      "community": 2,
+      "community": 75,
       "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n",
       "id": "routers_freeswitch_rationale_422"
     },
@@ -18568,7 +18658,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L513",
-      "community": 2,
+      "community": 75,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_513"
     },
@@ -18586,7 +18676,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L628",
-      "community": 111,
+      "community": 120,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar.",
       "id": "routers_freeswitch_rationale_628"
     },
@@ -18604,7 +18694,7 @@
       "file_type": "code",
       "source_file": "api/dependencies.py",
       "source_location": "L38",
-      "community": 98,
+      "community": 26,
       "norm_label": "twilioservice",
       "id": "twilioservice"
     },
@@ -18622,7 +18712,7 @@
       "file_type": "code",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2570",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket",
       "id": "websocket"
     },
@@ -18631,7 +18721,7 @@
       "file_type": "rationale",
       "source_file": "core/config.py",
       "source_location": "L56",
-      "community": 30,
+      "community": 102,
       "norm_label": "resolve model path relative to project root.",
       "id": "core_config_rationale_56"
     },
@@ -18694,7 +18784,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L234",
-      "community": 102,
+      "community": 42,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_234"
     },
@@ -18748,7 +18838,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L447",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_447"
     },
@@ -18757,7 +18847,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L460",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_460"
     },
@@ -18793,7 +18883,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L796",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_796"
     },
@@ -18811,7 +18901,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L892",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h",
       "id": "routers_twilio_rationale_892"
     },
@@ -18847,7 +18937,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1017",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1017"
     },
@@ -18928,7 +19018,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2516",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket para twilio media streams.      permite streaming de audio bidirecci",
       "id": "routers_twilio_rationale_2516"
     },
@@ -18937,7 +19027,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L251",
-      "community": 66,
+      "community": 49,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'bu",
       "id": "core_location_match_rationale_251"
     },
@@ -18946,7 +19036,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L267",
-      "community": 66,
+      "community": 49,
       "norm_label": "fraccion de tokens de contenido del input que encuentran un equivalente     fuer",
       "id": "core_location_match_rationale_267"
     },
@@ -18982,7 +19072,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L225",
-      "community": 66,
+      "community": 49,
       "norm_label": "fraccion de tokens de contenido del input que encuentran un equivalente     fuer",
       "id": "core_location_match_rationale_225"
     },
@@ -19063,7 +19153,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L233",
-      "community": 102,
+      "community": 42,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_233"
     },
@@ -19108,7 +19198,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L446",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_446"
     },
@@ -19117,7 +19207,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L459",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_459"
     },
@@ -19153,7 +19243,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L795",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_795"
     },
@@ -19171,7 +19261,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L886",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h",
       "id": "routers_twilio_rationale_886"
     },
@@ -19216,7 +19306,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1011",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1011"
     },
@@ -19297,7 +19387,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2510",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket para twilio media streams.      permite streaming de audio bidirecci",
       "id": "routers_twilio_rationale_2510"
     },
@@ -19315,7 +19405,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L388",
-      "community": 104,
+      "community": 13,
       "norm_label": "procesa un turno completo de la conversacion.     integra: stt buffer \u2192 correcc",
       "id": "core_streaming_pipeline_rationale_388"
     },
@@ -19360,7 +19450,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L24",
-      "community": 72,
+      "community": 97,
       "norm_label": "quita tildes para comparaciones foneticas.",
       "id": "core_stt_enhancer_rationale_24"
     },
@@ -19396,7 +19486,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L256",
-      "community": 117,
+      "community": 109,
       "norm_label": "aplica correcciones stt en orden de especificidad:     1. match exacto     2.",
       "id": "core_stt_enhancer_rationale_256"
     },
@@ -19405,7 +19495,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L290",
-      "community": 117,
+      "community": 92,
       "norm_label": "normaliza abreviaturas de calle a forma canonica.     cl, cll, c/ \u2192 calle | cra",
       "id": "core_stt_enhancer_rationale_290"
     },
@@ -19414,7 +19504,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L309",
-      "community": 92,
+      "community": 72,
       "norm_label": "busca el candidato mas similar al input usando score combinado.     retorna el",
       "id": "core_stt_enhancer_rationale_309"
     },
@@ -19423,7 +19513,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L509",
-      "community": 116,
+      "community": 17,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_509"
     },
@@ -19432,7 +19522,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L530",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic",
       "id": "core_stt_enhancer_rationale_530"
     },
@@ -19441,7 +19531,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L598",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre",
       "id": "core_stt_enhancer_rationale_598"
     },
@@ -19450,7 +19540,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L623",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_623"
     },
@@ -19495,7 +19585,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L732",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario.",
       "id": "core_stt_enhancer_rationale_732"
     },
@@ -19540,7 +19630,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_location_match.py",
       "source_location": "L74",
-      "community": 113,
+      "community": 21,
       "norm_label": "un substring cubierto (textual) debe ganar a cualquier casi-acierto     fonetico",
       "id": "tests_test_location_match_rationale_74"
     },
@@ -19549,7 +19639,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_location_match.py",
       "source_location": "L111",
-      "community": 120,
+      "community": 21,
       "norm_label": "villa del norte' es un barrio; no debe convertirse en 'sena norte' por     la pa",
       "id": "tests_test_location_match_rationale_111"
     },
@@ -19648,7 +19738,7 @@
       "file_type": "rationale",
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L2143",
-      "community": 7,
+      "community": 18,
       "norm_label": "barrios dentro de radius_km de las coordenadas dadas, ordenados por distancia.",
       "id": "tools_popayan_geodata_rationale_2143"
     },
@@ -19747,7 +19837,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L232",
-      "community": 102,
+      "community": 42,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_232"
     },
@@ -19801,7 +19891,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L443",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_443"
     },
@@ -19810,7 +19900,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L456",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_456"
     },
@@ -19846,7 +19936,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L792",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_792"
     },
@@ -19864,7 +19954,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L883",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h",
       "id": "routers_twilio_rationale_883"
     },
@@ -19882,7 +19972,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L992",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_992"
     },
@@ -19954,7 +20044,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2470",
-      "community": 115,
+      "community": 13,
       "norm_label": "websocket para twilio media streams.      permite streaming de audio bidirecci",
       "id": "routers_twilio_rationale_2470"
     },
@@ -19981,7 +20071,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L501",
-      "community": 116,
+      "community": 17,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_501"
     },
@@ -19990,7 +20080,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L522",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic",
       "id": "core_stt_enhancer_rationale_522"
     },
@@ -19999,7 +20089,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L630",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre",
       "id": "core_stt_enhancer_rationale_630"
     },
@@ -20008,7 +20098,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L655",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_655"
     },
@@ -20053,7 +20143,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L764",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario.",
       "id": "core_stt_enhancer_rationale_764"
     },
@@ -20098,7 +20188,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L442",
-      "community": 102,
+      "community": 110,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_442"
     },
@@ -20107,7 +20197,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L455",
-      "community": 42,
+      "community": 80,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_455"
     },
@@ -20143,7 +20233,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L791",
-      "community": 112,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_791"
     },
@@ -20161,7 +20251,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L882",
-      "community": 106,
+      "community": 0,
       "norm_label": "clasifica la calidad del turno de voz.      filosofia (corregida): twilio ya h",
       "id": "routers_twilio_rationale_882"
     },
@@ -20179,7 +20269,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L991",
-      "community": 0,
+      "community": 72,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_991"
     },
@@ -20296,7 +20386,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L635",
-      "community": 73,
+      "community": 72,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod",
       "id": "core_address_utils_rationale_635"
     },
@@ -20341,7 +20431,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L387",
-      "community": 104,
+      "community": 13,
       "norm_label": "procesa un turno completo de la conversacion.     integra: stt buffer \u2192 correcc",
       "id": "core_streaming_pipeline_rationale_387"
     },
@@ -20386,7 +20476,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L488",
-      "community": 72,
+      "community": 17,
       "norm_label": "convierte una referencia humana informal a datos estructurados.     retorna dic",
       "id": "core_stt_enhancer_rationale_488"
     },
@@ -20395,7 +20485,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L575",
-      "community": 91,
+      "community": 109,
       "norm_label": "convierte palabras-numero a digitos solo cuando estan en contexto de calle/carre",
       "id": "core_stt_enhancer_rationale_575"
     },
@@ -20404,7 +20494,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L600",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_600"
     },
@@ -20449,7 +20539,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L709",
-      "community": 86,
+      "community": 116,
       "norm_label": "recomienda el speechtimeout de twilio basado en el perfil del usuario.",
       "id": "core_stt_enhancer_rationale_709"
     },
@@ -38834,6 +38924,17 @@
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L16",
+      "weight": 1.0,
+      "source": "scripts_diagnose_lowprec_cache",
+      "target": "core_database",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
       "source_file": "tests/test_booking_flow.py",
       "source_location": "L18",
       "weight": 1.0,
@@ -39048,6 +39149,28 @@
       "confidence_score": 1.0,
       "source": "orchestrator_memory_manager_update_user_personality",
       "target": "core_database_get_connection"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L16",
+      "weight": 1.0,
+      "source": "scripts_diagnose_lowprec_cache",
+      "target": "core_database_get_connection",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L23",
+      "weight": 1.0,
+      "source": "scripts_diagnose_lowprec_cache_main",
+      "target": "core_database_get_connection",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports",
@@ -40691,9 +40814,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L226",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback",
-      "target": "core_geo_types_georesolution",
-      "confidence_score": 1.0
+      "target": "core_geo_types_georesolution"
     },
     {
       "relation": "calls",
@@ -40702,9 +40825,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L193",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_test_handle_user_context_exhaustion_returns_failed_not_accept",
-      "target": "core_geo_types_georesolution",
-      "confidence_score": 1.0
+      "target": "core_geo_types_georesolution"
     },
     {
       "relation": "calls",
@@ -42408,7 +42531,17 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L1059",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_geocoder_service_rationale_1059",
+      "target": "core_geocoder_service_extract_geo_context"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1075",
+      "weight": 1.0,
+      "source": "core_geocoder_service_rationale_1075",
       "target": "core_geocoder_service_extract_geo_context",
       "confidence_score": 1.0
     },
@@ -42459,7 +42592,17 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L1152",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_geocoder_service_rationale_1152",
+      "target": "core_geocoder_service_handle_user_context"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1168",
+      "weight": 1.0,
+      "source": "core_geocoder_service_rationale_1168",
       "target": "core_geocoder_service_handle_user_context",
       "confidence_score": 1.0
     },
@@ -42500,7 +42643,17 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L1223",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_geocoder_service_rationale_1223",
+      "target": "core_geocoder_service_match_user_to_candidate"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1239",
+      "weight": 1.0,
+      "source": "core_geocoder_service_rationale_1239",
       "target": "core_geocoder_service_match_user_to_candidate",
       "confidence_score": 1.0
     },
@@ -42530,7 +42683,17 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L1256",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_geocoder_service_rationale_1256",
+      "target": "core_geocoder_service_geocode"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "core/geocoder_service.py",
+      "source_location": "L1272",
+      "weight": 1.0,
+      "source": "core_geocoder_service_rationale_1272",
       "target": "core_geocoder_service_geocode",
       "confidence_score": 1.0
     },
@@ -55141,6 +55304,26 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "scripts_diagnose_lowprec_cache",
+      "target": "scripts_diagnose_lowprec_cache_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/diagnose_lowprec_cache.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "scripts_diagnose_lowprec_cache_rationale_1",
+      "target": "scripts_diagnose_lowprec_cache",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "services/chat_service.py",
       "source_location": "L39",
       "weight": 1.0,
@@ -58914,9 +59097,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L223",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline",
-      "target": "telephony_session_store_callsession",
-      "confidence_score": 1.0
+      "target": "telephony_session_store_callsession"
     },
     {
       "relation": "uses",
@@ -58924,9 +59107,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L223",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "tests_test_geocoder_pipeline_py_geocandidate",
-      "target": "telephony_session_store_callsession",
-      "confidence_score": 0.5
+      "target": "telephony_session_store_callsession"
     },
     {
       "relation": "uses",
@@ -58934,9 +59117,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L223",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "tests_test_geocoder_pipeline_py_locationtype",
-      "target": "telephony_session_store_callsession",
-      "confidence_score": 0.5
+      "target": "telephony_session_store_callsession"
     },
     {
       "relation": "uses",
@@ -58944,9 +59127,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L223",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "tests_test_geocoder_pipeline_py_str",
-      "target": "telephony_session_store_callsession",
-      "confidence_score": 0.5
+      "target": "telephony_session_store_callsession"
     },
     {
       "relation": "calls",
@@ -58955,9 +59138,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L233",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback",
-      "target": "telephony_session_store_callsession",
-      "confidence_score": 1.0
+      "target": "telephony_session_store_callsession"
     },
     {
       "relation": "calls",
@@ -66044,9 +66227,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L216",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline",
-      "target": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback",
-      "confidence_score": 1.0
+      "target": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback"
     },
     {
       "relation": "contains",
@@ -66064,8 +66247,28 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L190",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline",
-      "target": "tests_test_geocoder_pipeline_test_handle_user_context_exhaustion_returns_failed_not_accept",
+      "target": "tests_test_geocoder_pipeline_test_handle_user_context_exhaustion_returns_failed_not_accept"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L272",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline",
+      "target": "tests_test_geocoder_pipeline_test_high_precision_cache_hit_still_served",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L262",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline",
+      "target": "tests_test_geocoder_pipeline_test_low_precision_db_cache_hit_not_served",
       "confidence_score": 1.0
     },
     {
@@ -66074,8 +66277,18 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L176",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline",
-      "target": "tests_test_geocoder_pipeline_test_low_precision_failed_at_max_attempts_no_silent_accept",
+      "target": "tests_test_geocoder_pipeline_test_low_precision_failed_at_max_attempts_no_silent_accept"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L250",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline",
+      "target": "tests_test_geocoder_pipeline_test_low_precision_mem_cache_hit_not_served",
       "confidence_score": 1.0
     },
     {
@@ -66200,7 +66413,29 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L202",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_test_handle_user_context_exhaustion_returns_failed_not_accept",
+      "target": "tests_test_geocoder_pipeline_candidate"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L273",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline_test_high_precision_cache_hit_still_served",
+      "target": "tests_test_geocoder_pipeline_candidate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L263",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline_test_low_precision_db_cache_hit_not_served",
       "target": "tests_test_geocoder_pipeline_candidate",
       "confidence_score": 1.0
     },
@@ -66211,7 +66446,18 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L180",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_test_low_precision_failed_at_max_attempts_no_silent_accept",
+      "target": "tests_test_geocoder_pipeline_candidate"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_geocoder_pipeline.py",
+      "source_location": "L252",
+      "weight": 1.0,
+      "source": "tests_test_geocoder_pipeline_test_low_precision_mem_cache_hit_not_served",
       "target": "tests_test_geocoder_pipeline_candidate",
       "confidence_score": 1.0
     },
@@ -66286,9 +66532,9 @@
       "source_file": "tests/test_geocoder_pipeline.py",
       "source_location": "L217",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "tests_test_geocoder_pipeline_rationale_217",
-      "target": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback",
-      "confidence_score": 1.0
+      "target": "tests_test_geocoder_pipeline_test_freeswitch_geo_context_exhaustion_triggers_safe_fallback"
     },
     {
       "relation": "contains",
@@ -73728,5 +73974,5 @@
       "source_file": "ARCHITECTURE.md"
     }
   ],
-  "built_at_commit": "280cab59c922642ab2aabf45790e41d14a8bad79"
+  "built_at_commit": "75f0a3249b2f94ece2df40207b1c2fc4b42f8ead"
 }

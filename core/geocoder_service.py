@@ -764,6 +764,46 @@ _NEVER_AUTOACCEPT = {
     LocationType.NOMINATIM_LOW,
 }
 
+# Señal A (discriminador): ¿el texto normalizado trae un indicador de TIPO DE
+# VÍA (calle/carrera/avenida/…)? Si sí → es una dirección de calle (Caso 1:
+# falta el número de casa → pedir número/referencia). Si no → es un nombre
+# propio de lugar (Caso 2: landmark/barrio, no tiene número de casa).
+# Tras normalize_colombian_address las vías quedan como "Cl."/"Cra."/"Av."/etc.
+_VIA_TYPE_RE = re.compile(
+    r'\b(?:cl|cra|cr|kr|kra|av|tr|diag|calle|carrera|avenida|transversal|diagonal)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_via_query(normalized: str) -> bool:
+    """True si la query parece una vía (tiene keyword de calle/carrera/…)."""
+    return bool(_VIA_TYPE_RE.search(normalized))
+
+
+def _accept_low_precision(candidate: "GeoCandidate", normalized: str) -> bool:
+    """
+    Decide si un resultado de baja precisión (en _NEVER_AUTOACCEPT) es aceptable
+    TAL CUAL, sin pedir desambiguación.
+
+    Caso 2 (nombre propio de lugar conocido): el usuario nombró un landmark o
+    barrio que NO tiene número de casa; un GEOMETRIC_CENTER dentro del área
+    urbana es la granularidad correcta (el centroide del lugar). Se acepta y el
+    canal confirma el origen aguas abajo.
+
+    Caso 1 (vía con keyword de calle/carrera): NO aceptar — falta el número de
+    casa, hay que pedir número o referencia.
+
+    Esta función es la ÚNICA fuente de verdad y se usa tanto al servir desde
+    cache (sobre el canonical_query guardado) como al decidir un resultado
+    fresco, para que ambos caminos sean consistentes.
+    """
+    if _is_via_query(normalized):
+        return False
+    return (
+        candidate.location_type == LocationType.GEOMETRIC_CENTER
+        and candidate.in_urban_bbox()
+    )
+
 
 def _build_disambiguation_question(candidates: list[GeoCandidate]) -> str:
     """
@@ -832,8 +872,15 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
     #    se re-geocodifica, para que pase por el guard _NEVER_AUTOACCEPT. Sin
     #    esto, un cache hit sería un bypass del guard (entradas viejas pre-fix
     #    quedan asociadas a coordenadas de baja precisión como si fueran válidas).
+    #    Un hit de baja precisión solo se sirve si es un nombre propio aceptable
+    #    (_accept_low_precision sobre el canonical_query): así un landmark/barrio
+    #    GEOMETRIC_CENTER urbano se sirve, pero una vía sin número ('Cl. 4') se
+    #    ignora y se re-geocodifica.
     cached = _mem_get(normalized)
-    if cached and cached.location_type not in _NEVER_AUTOACCEPT:
+    if cached and (
+        cached.location_type not in _NEVER_AUTOACCEPT
+        or _accept_low_precision(cached, normalized)
+    ):
         logger.info(f"[PIPELINE] memory cache hit: {normalized!r}")
         return GeoResolution(
             status=ResolutionStatus.RESOLVED,
@@ -847,9 +894,10 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
             f"[{cached.location_type.value}] → re-geocoding"
         )
 
-    # 3. Cache en DB (misma revalidación contra _NEVER_AUTOACCEPT).
+    # 3. Cache en DB (misma revalidación).
     db_cached = _db_get(normalized)
-    if db_cached and db_cached.location_type in _NEVER_AUTOACCEPT:
+    if db_cached and db_cached.location_type in _NEVER_AUTOACCEPT \
+            and not _accept_low_precision(db_cached, normalized):
         logger.warning(
             f"[PIPELINE] stale low-precision db cache ignored: {normalized!r} "
             f"[{db_cached.location_type.value}] → re-geocoding"
@@ -978,12 +1026,34 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
         # ROOFTOP/RANGE_INTERPOLATED se acepta. El tope MAX_PIPELINE_ATTEMPTS
         # corta el ciclo si nunca mejora.
         if best.location_type in _NEVER_AUTOACCEPT:
-            # Intentos agotados y sigue siendo baja precisión: NUNCA caer a
-            # aceptar el resultado solo porque se acabaron los reintentos (eso
-            # reabriría el bug item 7 en el caso límite). Se devuelve FAILED y el
-            # caller dispara su fallback seguro. El tope se centraliza aquí para
-            # que aplique a TODOS los callers (Twilio vía handle_user_context y
-            # FreeSWITCH que llama run_pipeline directamente).
+            # Caso 2 (nombre propio): el usuario nombró un landmark/barrio (sin
+            # keyword de vía) que resolvió a GEOMETRIC_CENTER urbano. Ese
+            # centroide es la granularidad correcta — el lugar no tiene número de
+            # casa. Se acepta y el canal confirma el origen aguas abajo
+            # ("¿confirmas Universidad del Cauca?"). Pedir "número de casa" aquí
+            # no tendría sentido.
+            if _accept_low_precision(best, normalized):
+                logger.info(
+                    f"[PIPELINE] named-place accepted "
+                    f"({best.location_type.value} urban, no via keyword): "
+                    f"{best.display_name!r} for {normalized!r}"
+                )
+                if _cache_worthy(best, normalized):
+                    _mem_set(normalized, best)
+                    _db_set(normalized, best)
+                return GeoResolution(
+                    status=ResolutionStatus.RESOLVED,
+                    query=normalized,
+                    attempt=attempt,
+                    candidates=in_bbox,
+                    selected=best,
+                )
+
+            # Caso 1 (vía sin número) o nombre propio demasiado grueso
+            # (APPROXIMATE / NOMINATIM_LOW / fuera del área urbana): NUNCA
+            # auto-aceptar. Intentos agotados → FAILED (el caller dispara su
+            # fallback seguro); el tope se centraliza aquí para todos los callers
+            # (Twilio vía handle_user_context y FreeSWITCH directo).
             if attempt >= MAX_PIPELINE_ATTEMPTS:
                 logger.warning(
                     f"[PIPELINE] {best.location_type.value} still low-precision "
@@ -996,17 +1066,25 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
                     attempt=attempt,
                     candidates=in_bbox,
                 )
+
+            # Vía → pedir número de casa/referencia. Nombre propio grueso → pedir
+            # barrio/referencia general (no "número de casa", que no existe).
+            is_via = _is_via_query(normalized)
+            question = (
+                _build_house_number_question() if is_via
+                else _build_context_question()
+            )
             logger.warning(
-                f"[PIPELINE] {best.location_type.value} never auto-accepted "
-                f"(attempt {attempt}): {best.display_name!r} for {normalized!r} "
-                f"→ CONTEXT_GATHERING (need house number/landmark)"
+                f"[PIPELINE] {best.location_type.value} not auto-accepted "
+                f"(attempt {attempt}, via={is_via}): {best.display_name!r} for "
+                f"{normalized!r} → CONTEXT_GATHERING"
             )
             return GeoResolution(
                 status=ResolutionStatus.CONTEXT_GATHERING,
                 query=normalized,
                 attempt=attempt,
                 candidates=in_bbox,
-                disambiguation_question=_build_house_number_question(),
+                disambiguation_question=question,
             )
 
         # Mismatch de baja precisión SOLO en el primer intento → pedir barrio.

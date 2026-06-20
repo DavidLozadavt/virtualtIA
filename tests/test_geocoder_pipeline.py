@@ -276,3 +276,86 @@ def test_high_precision_cache_hit_still_served(patched_pipeline, monkeypatch):
     res = asyncio.run(gs.run_pipeline("Cl. 4 # 26"))
     assert res.status == ResolutionStatus.RESOLVED
     assert res.selected.location_type == LocationType.ROOFTOP
+
+
+# ── Caso 2: nombre propio (landmark/barrio) sin keyword de vía ────────────────
+
+def test_named_place_geometric_accepted_no_house_number_question(patched_pipeline):
+    # "Universidad del Cauca" no tiene número de casa: GEOMETRIC urbano se acepta.
+    patched_pipeline["geocoding"] = [
+        _candidate(LocationType.GEOMETRIC_CENTER, "Universidad del Cauca, Popayán")
+    ]
+    res = asyncio.run(gs.run_pipeline("Universidad del Cauca"))
+    assert res.status == ResolutionStatus.RESOLVED
+    assert res.selected is not None
+    assert res.selected.location_type == LocationType.GEOMETRIC_CENTER
+
+
+def test_named_place_terminal_geometric_accepted(patched_pipeline):
+    patched_pipeline["geocoding"] = [
+        _candidate(LocationType.GEOMETRIC_CENTER, "Terminal de Transportes, Popayán")
+    ]
+    res = asyncio.run(gs.run_pipeline("Terminal de Transportes"))
+    assert res.status == ResolutionStatus.RESOLVED
+    assert res.selected.location_type == LocationType.GEOMETRIC_CENTER
+
+
+def test_named_place_coarse_asks_general_not_house_number(patched_pipeline):
+    # Nombre propio pero precisión más gruesa (APPROXIMATE) → preguntar barrio
+    # general, NO "número de casa".
+    patched_pipeline["geocoding"] = [
+        _candidate(LocationType.APPROXIMATE, "Valle del Ortigal, Popayán")
+    ]
+    res = asyncio.run(gs.run_pipeline("Valle del Ortigal"))
+    assert res.status == ResolutionStatus.CONTEXT_GATHERING
+    assert res.selected is None
+    assert "número de la casa" not in res.disambiguation_question
+    assert res.disambiguation_question == gs._build_context_question()
+
+
+def test_via_without_number_still_asks_house_number(patched_pipeline):
+    # Caso 1 sin cambios: vía sin número → pedir número de casa/referencia.
+    patched_pipeline["geocoding"] = [
+        _candidate(LocationType.GEOMETRIC_CENTER, "Cl. 4, Popayán")
+    ]
+    res = asyncio.run(gs.run_pipeline("Cl. 4"))
+    assert res.status == ResolutionStatus.CONTEXT_GATHERING
+    assert "número de la casa" in res.disambiguation_question
+
+
+def test_named_place_geometric_served_from_cache(patched_pipeline, monkeypatch):
+    # Un landmark GEOMETRIC SÍ se sirve desde cache (no es stale): consistencia
+    # entre el camino de cache y el de geocodificación fresca.
+    cand = _candidate(LocationType.GEOMETRIC_CENTER, "Terminal de Transportes, Popayán")
+    monkeypatch.setattr(gs, "_mem_get", lambda k: cand)
+    res = asyncio.run(gs.run_pipeline("Terminal de Transportes"))
+    assert res.status == ResolutionStatus.RESOLVED
+    assert res.selected.location_type == LocationType.GEOMETRIC_CENTER
+
+
+# ── Clasificación de la muestra real revisada con el usuario ──────────────────
+
+def test_via_classification_matches_reviewed_plan():
+    # Caso 1 (vía): piden número de casa.
+    assert gs._is_via_query("Cl. 4") is True
+    assert gs._is_via_query("Cra. 3") is True
+    # Caso 2 (nombre propio): no son vías.
+    assert gs._is_via_query("Terminal de Transportes") is False
+    assert gs._is_via_query("Universidad del Cauca") is False
+    assert gs._is_via_query("Santa Clara") is False
+    assert gs._is_via_query("Valle del Ortigal") is False
+    assert gs._is_via_query("Estadio de Popayán") is False
+
+
+def test_accept_low_precision_classification():
+    geo = _candidate(LocationType.GEOMETRIC_CENTER, "x, Popayán")  # urbano
+    # Caso 2 nombre propio GEOMETRIC urbano → aceptable.
+    assert gs._accept_low_precision(geo, "Terminal de Transportes") is True
+    assert gs._accept_low_precision(geo, "Universidad del Cauca") is True
+    assert gs._accept_low_precision(geo, "Santa Clara") is True
+    # Caso 1 vía → no aceptable (pide número).
+    assert gs._accept_low_precision(geo, "Cl. 4") is False
+    assert gs._accept_low_precision(geo, "Cra. 3") is False
+    # Nombre propio pero precisión gruesa (no GEOMETRIC) → no aceptable tal cual.
+    approx = _candidate(LocationType.APPROXIMATE, "x, Popayán")
+    assert gs._accept_low_precision(approx, "Valle del Ortigal") is False
