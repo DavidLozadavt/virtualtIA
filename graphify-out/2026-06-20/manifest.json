@@ -410,8 +410,8 @@
     "semantic_hash": "4b59dba9a2608c8997c2b85ca1655958"
   },
   "requirements.txt": {
-    "mtime": 1781983509.0114732,
-    "ast_hash": "e2487f819264d1c9ebf6a1c25fb18b01",
+    "mtime": 1781980523.9488125,
+    "ast_hash": "64ffeaf13efae6f0ef6bddba930248f1",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
@@ -505,8 +505,8 @@
     "semantic_hash": ""
   },
   "services/telephony/stt_service.py": {
-    "mtime": 1781983496.506089,
-    "ast_hash": "a47a3c92f904d70e889974562d24e87d",
+    "mtime": 1781982349.664131,
+    "ast_hash": "1a40c7b615e1e42ee95fada88b12ac47",
     "semantic_hash": ""
   },
   "services/telephony/tts_file_store.py": {
@@ -537,16 +537,6 @@
   "docs/freeswitch/VPS_DEPLOY.md": {
     "mtime": 1781980523.8661983,
     "ast_hash": "ee8e083457ff2f71ece9c29ff30aa146",
-    "semantic_hash": ""
-  },
-  "tests/test_audio_resample.py": {
-    "mtime": 1781983532.7804067,
-    "ast_hash": "012ebeb2d938eb20c6f345e4d960eb51",
-    "semantic_hash": ""
-  },
-  "docs/freeswitch_audio_config.md": {
-    "mtime": 1781983468.89576,
-    "ast_hash": "8331009fbdc6077c4eed5daf2a4b4c29",
     "semantic_hash": ""
   }
 }

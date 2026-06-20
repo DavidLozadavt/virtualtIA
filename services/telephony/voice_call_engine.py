@@ -24,6 +24,7 @@ from core.address_utils import (
     normalize_address,
     normalize_colombian_address,
 )
+from core.conversation_repair import get_progressive_retry_message
 from core.geocoder_service import run_pipeline
 from core.geo_types import ResolutionStatus
 from core.location_match import decide, is_filler, resolve_location_entity, Decision
@@ -294,7 +295,11 @@ class VoiceCallEngine:
                 trusted = True
             elif is_filler(text):
                 session.retry_count += 1
-                msg = "No logré identificar la ubicación. ¿Podrías repetirla?"
+                # Reintentos consecutivos (>=2): simplificar y pedir por partes
+                # (barrio primero) en vez de repetir "no entendí".
+                msg = get_progressive_retry_message(session.retry_count) or (
+                    "No logré identificar la ubicación. ¿Podrías repetirla?"
+                )
                 session.last_message = msg
                 return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
             else:
@@ -312,7 +317,10 @@ class VoiceCallEngine:
 
         if not trusted and not looks_like_place(origen) and not looks_like_place(text):
             session.retry_count += 1
-            msg = "Disculpa, no te entendí. ¿Me puedes repetir la dirección?"
+            # Reintentos consecutivos (>=2): pedir la dirección por partes.
+            msg = get_progressive_retry_message(session.retry_count) or (
+                "Disculpa, no te entendí. ¿Me puedes repetir la dirección?"
+            )
             session.last_message = msg
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 

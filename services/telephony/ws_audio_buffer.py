@@ -14,8 +14,22 @@ from services.telephony.audio_vad import detect_end_of_utterance, detect_end_of_
 AudioEncoding = Literal["pcm16", "mulaw"]
 
 MIN_SEC = 1.5
-MAX_SEC = 3.0
+# Fallback si FS_MAX_UTTERANCE_SEC no está en el entorno. NO 3.0: cortaba a la
+# mitad las direcciones dictadas pausado por adultos mayores. El valor real se
+# toma de settings.FS_MAX_UTTERANCE_SEC (12.0 por defecto en .env).
+MAX_SEC_FALLBACK = 12.0
 VAD_CHECK_EVERY_CHUNKS = 10
+
+
+def _max_utterance_sec() -> float:
+    """Duración máxima de locución antes de forzar flush (env-driven)."""
+    val = getattr(settings, "FS_MAX_UTTERANCE_SEC", None)
+    try:
+        sec = float(val) if val is not None else MAX_SEC_FALLBACK
+    except (TypeError, ValueError):
+        sec = MAX_SEC_FALLBACK
+    # Guardia: un valor absurdamente bajo reintroduce el bug de corte.
+    return sec if sec >= MIN_SEC else MAX_SEC_FALLBACK
 
 
 def resolve_ws_encoding(hint: Optional[str] = None) -> AudioEncoding:
@@ -59,7 +73,7 @@ class WsAudioBuffer:
 
     @property
     def max_bytes(self) -> int:
-        return int(self.bytes_per_second * MAX_SEC)
+        return int(self.bytes_per_second * _max_utterance_sec())
 
     def append(self, chunk: bytes) -> None:
         if not chunk:

@@ -19,6 +19,46 @@ logger = logging.getLogger("lyra.telephony.stt")
 _OPENAI_TRANSCRIBE_DEFAULT = "gpt-4o-mini-transcribe"
 _GROQ_WHISPER_DEFAULT = "whisper-large-v3"
 
+# Términos prioritarios fijos (la ciudad, vías y palabras de guía). El resto de
+# barrios se añade dinámicamente desde el catálogo de core/location_match.
+_STT_PROMPT_PRIORITY = [
+    "Popayán", "Cauca", "Campanario", "Pubenza", "Yanaconas",
+    "Valle del Ortigal", "calle", "carrera", "barrio",
+]
+
+_STT_PROMPT_CACHE: str | None = None
+
+
+def _build_stt_prompt() -> str:
+    """Vocabulario local para sesgar el STT hacia nombres propios de Popayán.
+
+    Combina términos prioritarios fijos con los barrios/landmarks del catálogo
+    (si está disponible). Se construye una sola vez y se cachea.
+    """
+    global _STT_PROMPT_CACHE
+    if _STT_PROMPT_CACHE is not None:
+        return _STT_PROMPT_CACHE
+
+    terms: list[str] = []
+    try:
+        from core.location_match import catalog_terms
+
+        terms = catalog_terms(40)
+    except Exception as e:  # catálogo opcional: nunca romper el STT
+        logger.debug("[stt] catalog prompt skipped: %s", e)
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    for term in _STT_PROMPT_PRIORITY + terms:
+        t = (term or "").strip()
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            merged.append(t)
+
+    _STT_PROMPT_CACHE = ", ".join(merged)
+    return _STT_PROMPT_CACHE
+
 
 def _openai_stt_api_key() -> str:
     """API key OpenAI para STT (nunca OpenRouter sk-or)."""
@@ -235,6 +275,13 @@ class TelephonySTTService:
                 "file": audio_file,
             }
 
+            # Sesgo de vocabulario local (barrios/vías de Popayán). Tanto Whisper
+            # como gpt-4o-transcribe aceptan `prompt`; sin él se pierde toda ayuda
+            # contextual para nombres propios.
+            stt_prompt = _build_stt_prompt()
+            if stt_prompt:
+                create_kwargs["prompt"] = stt_prompt
+
             if _is_whisper_model(self.model):
                 create_kwargs["language"] = self.language if self.language else None
                 create_kwargs["response_format"] = "verbose_json" if verbose else "json"
@@ -302,24 +349,57 @@ def _guess_encoding(audio_bytes: bytes) -> str:
     return "pcm16"
 
 
-def _pcm16_to_wav(pcm_data: bytes, sample_rate: int) -> bytes:
+# Whisper opera internamente a 16 kHz. Si le mandamos 8 kHz, el remuestreo lo
+# hace el lado del proveedor de forma implícita y naive, sin filtro anti-alias
+# de calidad → degrada la precisión. Remuestreamos localmente con un filtro
+# polifásico (banda limitada) antes de enviar.
+_TARGET_SAMPLE_RATE = 16000
+
+
+def _resample_pcm16(pcm: bytes, src_rate: int, dst_rate: int = _TARGET_SAMPLE_RATE) -> tuple[bytes, int]:
+    """Remuestrea PCM16 mono a `dst_rate` con `scipy.signal.resample_poly`.
+
+    Usa un filtro FIR polifásico (banda limitada), no interpolación lineal.
+    Si scipy/numpy no están disponibles, degrada con gracia devolviendo el audio
+    original sin remuestrear (nunca rompe el STT).
+
+    Returns: (pcm_bytes, sample_rate_real)
+    """
+    if not pcm or src_rate == dst_rate:
+        return pcm, src_rate
+
+    try:
+        from math import gcd
+
+        import numpy as np
+        from scipy.signal import resample_poly
+    except Exception as e:  # dependencia opcional: nunca romper el STT
+        logger.warning(
+            "[stt] resample no disponible (%s); enviando audio %d Hz sin remuestrear",
+            e,
+            src_rate,
+        )
+        return pcm, src_rate
+
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if samples.size == 0:
+        return pcm, src_rate
+
+    g = gcd(src_rate, dst_rate)
+    up = dst_rate // g
+    down = src_rate // g
+
+    # Trabajar en float para que el FIR no haga overflow de int16.
+    resampled = resample_poly(samples.astype(np.float64), up, down)
+    # El FIR puede sobre-oscilar (Gibbs) por encima del pico original; recortar
+    # al rango int16 evita wraparound (clicks/artefactos), no introduce silencios.
+    resampled = np.clip(np.round(resampled), -32768, 32767).astype(np.int16)
+    return resampled.tobytes(), dst_rate
+
+
+def _write_wav(pcm: bytes, sample_rate: int) -> bytes:
     import wave
 
-    buf = BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm_data)
-    return buf.getvalue()
-
-
-def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int) -> bytes:
-    """Convierte µ-law a WAV PCM 16-bit (stdlib, sin dependencias extra)."""
-    import audioop
-    import wave
-
-    pcm = audioop.ulaw2lin(mulaw_data, 2)
     buf = BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
@@ -327,3 +407,17 @@ def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int) -> bytes:
         wf.setframerate(sample_rate)
         wf.writeframes(pcm)
     return buf.getvalue()
+
+
+def _pcm16_to_wav(pcm_data: bytes, sample_rate: int) -> bytes:
+    pcm, rate = _resample_pcm16(pcm_data, sample_rate)
+    return _write_wav(pcm, rate)
+
+
+def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int) -> bytes:
+    """Convierte µ-law a WAV PCM 16-bit, remuestreado a 16 kHz para Whisper."""
+    import audioop
+
+    pcm = audioop.ulaw2lin(mulaw_data, 2)
+    pcm, rate = _resample_pcm16(pcm, sample_rate)
+    return _write_wav(pcm, rate)
