@@ -826,9 +826,14 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
             attempt=attempt,
         )
 
-    # 2. Cache en memoria
+    # 2. Cache en memoria.
+    #    Un hit NO se sirve a ciegas: si la precisión guardada es de baja
+    #    confianza (GEOMETRIC_CENTER / APPROXIMATE / NOMINATIM_LOW) se ignora y
+    #    se re-geocodifica, para que pase por el guard _NEVER_AUTOACCEPT. Sin
+    #    esto, un cache hit sería un bypass del guard (entradas viejas pre-fix
+    #    quedan asociadas a coordenadas de baja precisión como si fueran válidas).
     cached = _mem_get(normalized)
-    if cached:
+    if cached and cached.location_type not in _NEVER_AUTOACCEPT:
         logger.info(f"[PIPELINE] memory cache hit: {normalized!r}")
         return GeoResolution(
             status=ResolutionStatus.RESOLVED,
@@ -836,9 +841,20 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
             attempt=attempt,
             selected=cached,
         )
+    if cached:
+        logger.warning(
+            f"[PIPELINE] stale low-precision mem cache ignored: {normalized!r} "
+            f"[{cached.location_type.value}] → re-geocoding"
+        )
 
-    # 3. Cache en DB
+    # 3. Cache en DB (misma revalidación contra _NEVER_AUTOACCEPT).
     db_cached = _db_get(normalized)
+    if db_cached and db_cached.location_type in _NEVER_AUTOACCEPT:
+        logger.warning(
+            f"[PIPELINE] stale low-precision db cache ignored: {normalized!r} "
+            f"[{db_cached.location_type.value}] → re-geocoding"
+        )
+        db_cached = None
     if db_cached:
         logger.info(f"[PIPELINE] db cache hit: {normalized!r}")
         _mem_set(normalized, db_cached)
