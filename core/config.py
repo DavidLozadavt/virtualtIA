@@ -16,7 +16,8 @@ class Settings(BaseSettings):
 
     # LLM Settings
     LLM_PROVIDER: str = "openrouter"
-    OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""          # OpenAI directo (sk-... / sk-proj-...). Tambien STT.
+    OPENROUTER_API_KEY: str = ""      # OpenRouter (sk-or-...). Credencial distinta a OpenAI.
     OPENAI_MODEL: str = "openai/gpt-4o-mini"
     
     # STT Settings (because OpenRouter does not support audio)
@@ -93,6 +94,23 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    def llm_api_key(self) -> str:
+        """Credencial para llamadas de chat al LLM.
+
+        OpenRouter y OpenAI usan sistemas de keys distintos, por eso se eligen
+        por proveedor. Las keys de STT se resuelven aparte (voice_engine /
+        stt_service) porque OpenRouter no soporta audio.
+        """
+        if self.LLM_PROVIDER == "openrouter":
+            return self.OPENROUTER_API_KEY
+        return self.OPENAI_API_KEY
+
+    def llm_base_url(self) -> str:
+        """Base URL del endpoint LLM segun proveedor."""
+        if self.LLM_PROVIDER == "openrouter":
+            return "https://openrouter.ai/api/v1"
+        return "https://api.openai.com/v1"
 
     def get_absolute_model_path(self) -> str:
         """Resolve model path relative to project root."""

@@ -68,6 +68,22 @@ async def lifespan(app: FastAPI):
     logger.info(f"Tool Registries initialized: {list(app.state.tool_registries.keys())}")
 
     logger.info(f"LLM Provider: {settings.LLM_PROVIDER} | Model: {settings.OPENAI_MODEL}")
+
+    # Fail-fast: detectar credencial LLM ausente al arrancar, no en la primera
+    # llamada real de un usuario (causa del 401 "Missing Authentication header").
+    if not settings.llm_api_key():
+        expected = "OPENROUTER_API_KEY" if settings.LLM_PROVIDER == "openrouter" else "OPENAI_API_KEY"
+        logger.error(
+            "LLM_PROVIDER=%s pero %s esta vacio/ausente. Las llamadas al LLM "
+            "fallaran con 401. Configura %s en el .env del servidor.",
+            settings.LLM_PROVIDER, expected, expected,
+        )
+    elif settings.LLM_PROVIDER == "openrouter" and not settings.OPENROUTER_API_KEY.startswith("sk-or"):
+        logger.error(
+            "LLM_PROVIDER=openrouter pero OPENROUTER_API_KEY no parece una key de "
+            "OpenRouter (esperado prefijo 'sk-or-'). Revisa que no sea una key de OpenAI."
+        )
+
     logger.info(f"Lyra running on http://{settings.HOST}:{settings.PORT}")
     
     app.state.is_running = True

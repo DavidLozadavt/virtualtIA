@@ -17,18 +17,17 @@ def get_openai_client() -> Optional[OpenAI]:
     if _client is not None:
         return _client
 
-    if not settings.OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY not found in settings.")
+    api_key = settings.llm_api_key()
+    if not api_key:
+        logger.warning(
+            "No LLM API key for provider '%s' (expected %s).",
+            settings.LLM_PROVIDER,
+            "OPENROUTER_API_KEY" if settings.LLM_PROVIDER == "openrouter" else "OPENAI_API_KEY",
+        )
         return None
 
     try:
-        if settings.LLM_PROVIDER == "openrouter":
-            _client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=settings.OPENAI_API_KEY,
-            )
-        else:
-            _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        _client = OpenAI(base_url=settings.llm_base_url(), api_key=api_key)
         return _client
     except Exception as e:
         logger.error(f"Error creating OpenAI client: {e}")
@@ -43,18 +42,17 @@ def get_async_openai_client() -> Optional[AsyncOpenAI]:
     if _async_client is not None:
         return _async_client
 
-    if not settings.OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY not found in settings.")
+    api_key = settings.llm_api_key()
+    if not api_key:
+        logger.warning(
+            "No LLM API key for provider '%s' (expected %s).",
+            settings.LLM_PROVIDER,
+            "OPENROUTER_API_KEY" if settings.LLM_PROVIDER == "openrouter" else "OPENAI_API_KEY",
+        )
         return None
 
     try:
-        if settings.LLM_PROVIDER == "openrouter":
-            _async_client = AsyncOpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=settings.OPENAI_API_KEY,
-            )
-        else:
-            _async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        _async_client = AsyncOpenAI(base_url=settings.llm_base_url(), api_key=api_key)
         return _async_client
     except Exception as e:
         logger.error(f"Error creating AsyncOpenAI client: {e}")
