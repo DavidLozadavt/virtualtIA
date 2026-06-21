@@ -200,9 +200,9 @@ class TelephonySTTService:
             enc = _guess_encoding(audio_bytes)
 
         if enc in ("pcm16", "linear", "l16", "s16le"):
-            wav_bytes = _pcm16_to_wav(audio_bytes, self.sample_rate)
+            wav_bytes = _pcm16_to_wav(audio_bytes, self.sample_rate, call_uuid=call_uuid)
         else:
-            wav_bytes = _mulaw_to_wav(audio_bytes, self.sample_rate)
+            wav_bytes = _mulaw_to_wav(audio_bytes, self.sample_rate, call_uuid=call_uuid)
 
         return await self._transcribe_wav_bytes(
             wav_bytes,
@@ -228,7 +228,7 @@ class TelephonySTTService:
                 "error": "Deepgram streaming not yet wired — use batch provider for now",
             }
 
-        wav_bytes = _mulaw_to_wav(mulaw_bytes, self.sample_rate)
+        wav_bytes = _mulaw_to_wav(mulaw_bytes, self.sample_rate, call_uuid=call_uuid)
         return await self._transcribe_wav_bytes(
             wav_bytes,
             call_uuid=call_uuid,
@@ -351,50 +351,14 @@ def _guess_encoding(audio_bytes: bytes) -> str:
 
 # Whisper opera internamente a 16 kHz. Si le mandamos 8 kHz, el remuestreo lo
 # hace el lado del proveedor de forma implícita y naive, sin filtro anti-alias
-# de calidad → degrada la precisión. Remuestreamos localmente con un filtro
-# polifásico (banda limitada) antes de enviar.
-_TARGET_SAMPLE_RATE = 16000
-
-
-def _resample_pcm16(pcm: bytes, src_rate: int, dst_rate: int = _TARGET_SAMPLE_RATE) -> tuple[bytes, int]:
-    """Remuestrea PCM16 mono a `dst_rate` con `scipy.signal.resample_poly`.
-
-    Usa un filtro FIR polifásico (banda limitada), no interpolación lineal.
-    Si scipy/numpy no están disponibles, degrada con gracia devolviendo el audio
-    original sin remuestrear (nunca rompe el STT).
-
-    Returns: (pcm_bytes, sample_rate_real)
-    """
-    if not pcm or src_rate == dst_rate:
-        return pcm, src_rate
-
-    try:
-        from math import gcd
-
-        import numpy as np
-        from scipy.signal import resample_poly
-    except Exception as e:  # dependencia opcional: nunca romper el STT
-        logger.warning(
-            "[stt] resample no disponible (%s); enviando audio %d Hz sin remuestrear",
-            e,
-            src_rate,
-        )
-        return pcm, src_rate
-
-    samples = np.frombuffer(pcm, dtype=np.int16)
-    if samples.size == 0:
-        return pcm, src_rate
-
-    g = gcd(src_rate, dst_rate)
-    up = dst_rate // g
-    down = src_rate // g
-
-    # Trabajar en float para que el FIR no haga overflow de int16.
-    resampled = resample_poly(samples.astype(np.float64), up, down)
-    # El FIR puede sobre-oscilar (Gibbs) por encima del pico original; recortar
-    # al rango int16 evita wraparound (clicks/artefactos), no introduce silencios.
-    resampled = np.clip(np.round(resampled), -32768, 32767).astype(np.int16)
-    return resampled.tobytes(), dst_rate
+# de calidad → degrada la precisión. Pre-procesamos localmente (resample +
+# high-pass + normalización de pico) antes de enviar. Toda la lógica de DSP vive
+# en services.telephony.audio_preprocess; aquí solo se construye el WAV.
+from services.telephony.audio_preprocess import (  # noqa: E402
+    _TARGET_SAMPLE_RATE,
+    preprocess_pcm16,
+    resample_pcm16 as _resample_pcm16,  # re-export compat (tests/llamadas previas)
+)
 
 
 def _write_wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -409,15 +373,15 @@ def _write_wav(pcm: bytes, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _pcm16_to_wav(pcm_data: bytes, sample_rate: int) -> bytes:
-    pcm, rate = _resample_pcm16(pcm_data, sample_rate)
+def _pcm16_to_wav(pcm_data: bytes, sample_rate: int, *, call_uuid: str = "") -> bytes:
+    pcm, rate = preprocess_pcm16(pcm_data, sample_rate, call_uuid=call_uuid)
     return _write_wav(pcm, rate)
 
 
-def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int) -> bytes:
-    """Convierte µ-law a WAV PCM 16-bit, remuestreado a 16 kHz para Whisper."""
+def _mulaw_to_wav(mulaw_data: bytes, sample_rate: int, *, call_uuid: str = "") -> bytes:
+    """Convierte µ-law a WAV PCM16 16 kHz para Whisper (resample+HPF+normalize)."""
     import audioop
 
     pcm = audioop.ulaw2lin(mulaw_data, 2)
-    pcm, rate = _resample_pcm16(pcm, sample_rate)
+    pcm, rate = preprocess_pcm16(pcm, sample_rate, call_uuid=call_uuid)
     return _write_wav(pcm, rate)
