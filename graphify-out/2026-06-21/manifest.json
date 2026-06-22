@@ -505,8 +505,8 @@
     "semantic_hash": ""
   },
   "services/telephony/stt_service.py": {
-    "mtime": 1781983496.506089,
-    "ast_hash": "a47a3c92f904d70e889974562d24e87d",
+    "mtime": 1782084620.4780886,
+    "ast_hash": "c68306e124cb5ea46ceb3ab30c64296b",
     "semantic_hash": ""
   },
   "services/telephony/tts_file_store.py": {
@@ -572,6 +572,16 @@
   "tests/test_voice_engine_landmark.py": {
     "mtime": 1781991524.1580114,
     "ast_hash": "ea11c76695d7d1d32613dd0251858fbf",
+    "semantic_hash": ""
+  },
+  "services/telephony/audio_preprocess.py": {
+    "mtime": 1782084575.4030046,
+    "ast_hash": "bc377b0c3695b59b860435191011cfb8",
+    "semantic_hash": ""
+  },
+  "tests/test_audio_preprocess.py": {
+    "mtime": 1782084476.6807756,
+    "ast_hash": "4f4ae6e8567a6aca9551d561378e0dc6",
     "semantic_hash": ""
   }
 }

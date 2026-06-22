@@ -625,6 +625,120 @@ def resolve_human_reference(text: str) -> Optional[dict]:
     }
 
 
+# ── Limpieza de intención de dirección (ruido conversacional) ──────────────────
+#
+# Capa ANTERIOR a los clasificadores (is_street / looks_like_place). El usuario
+# suele anteponer cortesía y nombres propios a la dirección real:
+#   "buenas tardes osvaldo valle del ortigal"  →  "valle del ortigal"
+# Quitar ese ruido ANTES de clasificar evita que el gate anti-basura rechace una
+# dirección perfectamente válida por culpa de tokens iniciales que no aportan.
+#
+# Conservador por diseño: si el texto ya parece un lugar, se devuelve intacto; si
+# tras limpiar queda vacío o sin contenido de lugar, se devuelve el original.
+# Nunca degrada a algo peor que la entrada.
+
+# Saludos a eliminar al inicio (admite coma/punto/espacios después). Se aplica en
+# bucle, así "hola buenas tardes ..." se limpia por completo.
+_GREETING_PREFIX_RE = re.compile(
+    r"^\s*(?:"
+    r"buen[oa]s?\s+(?:tardes|noches|d[ií]as|d[ií]a)"
+    r"|buen\s+d[ií]a"
+    r"|buen[oa]s?"
+    r"|hola"
+    r"|al[oó]"
+    r"|ola"
+    r"|hey"
+    r"|qu[ieé]\s*hubo|quihubo|qhubo"
+    r"|diga|d[ií]game"
+    r")"
+    r"[\s,.;:!¡¿?\-]*",
+    re.IGNORECASE,
+)
+
+# Palabras-clave de vía/nomenclatura. Si el primer token tras el saludo es una de
+# estas, es parte de la dirección (no un nombre propio suelto) → no se descarta.
+_VIA_KEYWORDS = frozenset({
+    "calle", "cl", "cll", "carrera", "cra", "cr", "kr", "kra", "k",
+    "avenida", "av", "avda", "avd", "diagonal", "diag", "dg",
+    "transversal", "tv", "tr", "via", "autopista", "anillo", "circunvalar",
+    "manzana", "mz", "numero", "no", "nro", "calle.", "cra.",
+})
+
+_STREET_NUM_RE = re.compile(
+    r"\b(?:calle|carrera|cra|cr|cl|cll|kr|kra|av|avenida|avda|diagonal|diag|"
+    r"transversal|tv|tr)\s*\.?\s*\d",
+    re.IGNORECASE,
+)
+
+
+def _is_street(text: str) -> bool:
+    """True si `text` tiene nomenclatura de vía con número (calle/cra/av + dígito)."""
+    return bool(text) and bool(_STREET_NUM_RE.search(strip_accents(text.lower())))
+
+
+def strip_conversational_prefix(text: str) -> str:
+    """Limpia ruido conversacional al inicio de un transcript de dirección.
+
+    1. Quita saludos iniciales ("buenas tardes", "hola", "aló"...).
+    2. Quita un nombre propio suelto al inicio que precede a una dirección
+       reconocible (ej. "osvaldo valle del ortigal" → "valle del ortigal").
+
+    Reglas de seguridad:
+    - Si el texto (sin saludo) ya pasa looks_like_place o is_street, se devuelve
+      tal cual — no se toca lo que ya funciona.
+    - Si tras limpiar el resultado queda vacío o sin contenido de lugar, se
+      devuelve el original. Nunca degrada.
+    """
+    if not text or not text.strip():
+        return text
+    original = text.strip()
+
+    # Import perezoso: address_utils importa de este módulo (ciclo si fuera top).
+    try:
+        from core.address_utils import looks_like_place
+    except Exception:
+        return text
+
+    def _is_place(s: str) -> bool:
+        return bool(s and s.strip()) and (looks_like_place(s) or _is_street(s))
+
+    # 1) Quitar saludos iniciales (posiblemente varios).
+    work = original
+    while True:
+        nxt = _GREETING_PREFIX_RE.sub("", work, count=1).strip()
+        if nxt == work or not nxt:
+            if not nxt:
+                work = ""
+            else:
+                work = nxt
+            break
+        work = nxt
+
+    # Saludo se comió todo el texto → no había dirección. Original intacto.
+    if not work:
+        return original
+
+    # 2) Si lo que queda ya parece un lugar, devolverlo (limpio de saludo).
+    if _is_place(work):
+        return work
+
+    # 3) Nombre propio suelto al inicio: si el primer token no es vía ni lugar
+    #    conocido y el resto SÍ es una dirección reconocible, descartarlo.
+    tokens = work.split()
+    if len(tokens) >= 2:
+        first_norm = strip_accents(tokens[0].lower()).strip(".,;:")
+        rest = " ".join(tokens[1:]).strip()
+        if (
+            first_norm not in _VIA_KEYWORDS
+            and not _is_place(tokens[0])
+            and _is_place(rest)
+        ):
+            return rest
+
+    # 4) Nada seguro que limpiar → nunca degradar.
+    return original
+
+
 # ── Reparación fonética de transcripción de ubicaciones ────────────────────────
 #
 # Capa ANTERIOR al resolver. Repara la GRAFÍA de nombres de lugar mal transcritos
