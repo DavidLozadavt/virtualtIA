@@ -1,16 +1,16 @@
 # Graph Report - virtualtIA  (2026-06-21)
 
 ## Corpus Check
-- 109 files · ~135,197 words
+- 109 files · ~136,006 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2461 nodes · 5229 edges · 125 communities (116 shown, 9 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 449 edges (avg confidence: 0.52)
+- 2516 nodes · 5305 edges · 120 communities (110 shown, 10 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 449 edges (avg confidence: 0.52)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5ba1a784`
+- Built from commit: `4c6f5cd3`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -121,16 +121,11 @@
 - [[_COMMUNITY_Community 111|Community 111]]
 - [[_COMMUNITY_Community 112|Community 112]]
 - [[_COMMUNITY_Community 113|Community 113]]
-- [[_COMMUNITY_Community 114|Community 114]]
-- [[_COMMUNITY_Community 115|Community 115]]
 - [[_COMMUNITY_Community 116|Community 116]]
 - [[_COMMUNITY_Community 117|Community 117]]
 - [[_COMMUNITY_Community 118|Community 118]]
-- [[_COMMUNITY_Community 119|Community 119]]
 - [[_COMMUNITY_Community 120|Community 120]]
-- [[_COMMUNITY_Community 122|Community 122]]
 - [[_COMMUNITY_Community 123|Community 123]]
-- [[_COMMUNITY_Community 126|Community 126]]
 - [[_COMMUNITY_Community 128|Community 128]]
 
 ## God Nodes (most connected - your core abstractions)
@@ -138,11 +133,11 @@
 2. `str` - 54 edges
 3. `Decision` - 52 edges
 4. `resolve_location_entity()` - 48 edges
-5. `ConversationMemory` - 45 edges
-6. `AudioQualityProfile` - 45 edges
-7. `process_speech()` - 44 edges
+5. `process_speech()` - 46 edges
+6. `AudioQualityProfile` - 46 edges
+7. `ConversationMemory` - 45 edges
 8. `ResolutionStatus` - 43 edges
-9. `VoiceCallEngine` - 42 edges
+9. `VoiceCallEngine` - 43 edges
 10. `CallSession` - 39 edges
 
 ## Surprising Connections (you probably didn't know these)
@@ -152,9 +147,9 @@
   CONTRIBUTING.md → ARCHITECTURE.md
 - `get_db()` --calls--> `get_connection()`  [EXTRACTED]
   api/dependencies.py → core/database.py
-- `FastAPI` --uses--> `RateLimitMiddleware`  [INFERRED]
-  main.py → api/middleware.py
 - `Request` --uses--> `RateLimitMiddleware`  [INFERRED]
+  main.py → api/middleware.py
+- `RequestValidationError` --uses--> `RateLimitMiddleware`  [INFERRED]
   main.py → api/middleware.py
 
 ## Import Cycles
@@ -167,67 +162,67 @@
 - **All Lyra Project YAML Configurations** — projects_intellitaxi_yaml, projects_nexiservice_yaml, projects_rentus_yaml, projects_schoolsena_yaml [EXTRACTED 1.00]
 - **Lyra Hybrid Engine Processing Flow** — architecture_intent_router, architecture_interceptor_pattern, architecture_tool_registry, architecture_orchestrator_layer, architecture_llm_as_fallback [EXTRACTED 1.00]
 
-## Communities (125 total, 9 thin omitted)
+## Communities (120 total, 10 thin omitted)
 
 ### Community 0 - "Twilio Voice Router"
-Cohesion: 0.12
-Nodes (31): str, _cfg_int(), es_numero_troncal_o_empresa(), extract_address(), extract_destination_address(), extract_pickup_address(), _gather_action_url(), _get_process_speech_url() (+23 more)
+Cohesion: 0.04
+Nodes (80): str, _build_speech_attrs(), _cfg(), _cfg_int(), _create_service(), _deepgram_language(), es_numero_troncal_o_empresa(), extract_address() (+72 more)
 
 ### Community 1 - "Geocoding Types & Candidates"
 Cohesion: 0.11
-Nodes (42): Solo ROOFTOP y RANGE_INTERPOLATED dentro del área urbana se auto-aceptan., _build_context_question(), _build_disambiguation_question(), _build_house_number_question(), _cache_worthy(), _db_set(), _extract_neighborhood_google(), _google_autocomplete() (+34 more)
+Nodes (46): _accept_low_precision(), _build_context_question(), _build_disambiguation_question(), _build_house_number_question(), _cache_worthy(), _db_set(), _extract_neighborhood_google(), _google_autocomplete() (+38 more)
 
 ### Community 2 - "STT Enhancement & Local Search"
-Cohesion: 0.12
-Nodes (40): ndarray, bytes, float, int, str, highpass_filter(), _peak_dbfs(), peak_normalize() (+32 more)
+Cohesion: 0.18
+Nodes (24): ndarray, Remuestrea PCM16 mono a `dst_rate` con `scipy.signal.resample_poly`.      Usa un, resample_pcm16(), _band_energy(), _peak(), bytes, float, int (+16 more)
 
 ### Community 3 - "Google Geocoding Service"
-Cohesion: 0.06
-Nodes (32): bool, float, str, bool, int, str, int, str (+24 more)
+Cohesion: 0.12
+Nodes (18): bool, str, int, str, CallSession, CallState, Procesa el input de voz y retorna el siguiente paso TwiML., Crea el servicio, limpia la sesión y retorna TwiML de cierre. (+10 more)
 
 ### Community 4 - "Browser Voice & TTS"
-Cohesion: 0.06
-Nodes (57): float, str, get_pusher_client(), str, trigger_pusher_event(), _clean_for_tts(), _edge_tts_sync_bytes(), get_voice_engine() (+49 more)
+Cohesion: 0.14
+Nodes (19): _clean_for_tts(), _edge_tts_sync_bytes(), _is_gibberish(), bool, bytes, float, str, core/voice_engine.py — Centralized Speech-to-Text and Text-to-Speech engine for (+11 more)
 
 ### Community 5 - "App Config & Logging"
-Cohesion: 0.11
-Nodes (30): ChatResponse, get_conversation_history(), get_conversation_message_count(), get_or_create_conversation(), get_or_create_user(), int, str, orchestrator/memory_manager.py — CRUD historial en MySQL, compresión de contexto (+22 more)
+Cohesion: 0.10
+Nodes (33): ChatResponse, str, Configura un logger estándar con salida a consola y archivo rotativo., setup_logger(), get_conversation_history(), get_conversation_message_count(), get_or_create_conversation(), get_or_create_user() (+25 more)
 
 ### Community 6 - "Scheduling & Shared Utils"
-Cohesion: 0.08
-Nodes (51): orchestrator/tool_runner.py — Agent loop con límite estricto de herramientas., Normaliza fecha/hora preferidas desde args del LLM o el historial reciente., _resolve_schedule_datetime(), build_schedule_clarification(), extract_session_today(), extract_session_user_id(), extract_tastes_from_history(), find_anchored_id_in_messages() (+43 more)
+Cohesion: 0.09
+Nodes (47): orchestrator/tool_runner.py — Agent loop con límite estricto de herramientas., Normaliza fecha/hora preferidas desde args del LLM o el historial reciente., _resolve_schedule_datetime(), build_schedule_clarification(), extract_session_today(), extract_session_user_id(), extract_tastes_from_history(), find_anchored_id_in_messages() (+39 more)
 
 ### Community 7 - "Popayan Geodata Index"
-Cohesion: 0.15
-Nodes (16): _content_tokens(), _has_content(), float, str, Fracción de tokens de contenido del input que encuentran un equivalente     fuer, Fracción de tokens de contenido del input que encuentran un equivalente     fuer, Fracción de tokens de contenido del input que encuentran un equivalente     fue, Fracción de tokens de contenido del input que encuentran un equivalente     fue (+8 more)
+Cohesion: 0.24
+Nodes (10): catalog_terms(), _key(), MatchType, float, int, _rank(), Nombres canónicos del catálogo local (barrios + landmarks de Popayán).      Pe, Orden = prioridad. Un tipo superior siempre vence a uno inferior aunque     el (+2 more)
 
 ### Community 8 - "Nexiservice Booking Interceptor"
-Cohesion: 0.16
-Nodes (33): Any, AsyncClient, bool, CallSession, float, str, SessionStore, Cliente HTTP para crear solicitudes de taxi en el backend Laravel.  Mantiene e (+25 more)
+Cohesion: 0.24
+Nodes (25): Any, AsyncClient, bool, CallSession, float, str, SessionStore, build_audio_response() (+17 more)
 
 ### Community 9 - "Admin Session Management"
-Cohesion: 0.11
-Nodes (28): _collapse_adjacent_duplicate_phrases(), correct_stt_errors(), Aplica correcciones STT en orden de especificidad:     1. Match exacto     2., Aplica correcciones STT en orden de especificidad:     1. Match exacto     2., Aplica correcciones STT en orden de especificidad:     1. Match exacto     2., Colapsa frases idénticas adyacentes:       "valle del valle del ortigal" → "val, Repara la grafía de nombres de lugar en `text` usando el catálogo, vía     simi, Repara la grafía de nombres de lugar en `text` usando el catálogo, vía     simi (+20 more)
+Cohesion: 0.05
+Nodes (56): _build_hint_vocab(), _get_contextual_hints(), Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos)., Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos)., Construye la cadena de hints model-aware desde los catálogos (cacheada)., Genera hints de vocabulario según el estado y el modelo STT.      - Captura (w, _build_phonetic_repair_index(), _collapse_adjacent_duplicate_phrases() (+48 more)
 
 ### Community 10 - "Nexiservice Tools"
 Cohesion: 0.16
 Nodes (4): int, str, _MemoryBackend, _RedisBackend
 
 ### Community 11 - "Admin Config Management"
-Cohesion: 0.07
-Nodes (36): clear_cache(), ConfigUpdate, create_version(), get_config(), _get_config_value(), _get_current_version(), get_status(), health_check() (+28 more)
+Cohesion: 0.09
+Nodes (31): clear_cache(), ConfigUpdate, create_version(), _get_config_value(), _get_current_version(), get_status(), health_check(), health_incidents() (+23 more)
 
 ### Community 12 - "Conversation Repair"
-Cohesion: 0.08
-Nodes (28): ConversationMemory, ConversationRepair, _extract_partial_location(), get_progressive_retry_message(), get_repair_message(), infer_intent(), float, int (+20 more)
+Cohesion: 0.07
+Nodes (24): ConversationRepair, get_progressive_retry_message(), get_repair_message(), bool, float, int, str, Genera respuestas de reparación inteligentes cuando el STT falla o     el texto (+16 more)
 
 ### Community 13 - "Voice Session State"
-Cohesion: 0.13
-Nodes (30): AsyncClient, AudioQualityProfile, bool, bytes, float, int, Request, AsyncClient (+22 more)
+Cohesion: 0.05
+Nodes (72): AsyncClient, AudioQualityProfile, bool, bytes, float, int, Request, WebSocket (+64 more)
 
 ### Community 14 - "Booking Flow Tests"
-Cohesion: 0.13
-Nodes (28): fail(), get_all_businesses(), get_first_tercero(), get_professionals_for_service(), get_services_for_business(), info(), _normalize(), ok() (+20 more)
+Cohesion: 0.14
+Nodes (26): fail(), get_all_businesses(), get_first_tercero(), get_professionals_for_service(), get_services_for_business(), info(), _normalize(), ok() (+18 more)
 
 ### Community 15 - "SENA Learning Tools"
 Cohesion: 0.09
@@ -238,60 +233,60 @@ Cohesion: 0.13
 Nodes (24): _candidate(), patched_pipeline(), tests/test_geocoder_pipeline.py — Task 2 (bug item 7).  Verifica que run_pipelin, FreeSWITCH: cuando run_pipeline devuelve FAILED (intentos agotados, aún baja, Aísla run_pipeline de red y DB. El test inyecta los candidatos que devuelve, test_accept_low_precision_classification(), test_approximate_never_autoaccepted(), test_freeswitch_geo_context_exhaustion_triggers_safe_fallback() (+16 more)
 
 ### Community 17 - "Tool Adapter & Registry"
-Cohesion: 0.25
-Nodes (8): _aggressive_place_recovery(), Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, test_aggressive_recovery_rejects_filler()
+Cohesion: 0.22
+Nodes (9): _aggressive_place_recovery(), Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l, Último recurso para rescatar un lugar de una transcripción mala.      Cuando l (+1 more)
 
 ### Community 18 - "WhatsApp Channel Router"
 Cohesion: 0.13
 Nodes (32): bool, int, Request, str, BackgroundTasks, clean_map_location(), _create_wp_service(), _finalizar_taxi() (+24 more)
 
 ### Community 19 - "Address Normalization Core"
-Cohesion: 0.16
-Nodes (17): Request, Decision, test_create_service(), TestCreateServiceRequest, AsyncClient, bool, CallSession, float (+9 more)
+Cohesion: 0.19
+Nodes (12): AsyncClient, CallSession, float, str, _disambiguation_question(), Procesa turnos de conversación telefónica., Procesa turnos de conversación telefónica., Procesa turnos de conversación telefónica. (+4 more)
 
 ### Community 20 - "Tool Runner Utilities"
-Cohesion: 0.11
-Nodes (21): _build_schedule_clarification(), _extract_session_user_id(), _extract_tastes_from_history(), _is_generic_query(), _match_property_id_in_reply(), _normalize(), bool, str (+13 more)
+Cohesion: 0.08
+Nodes (28): _build_schedule_clarification(), _extract_session_user_id(), _extract_tastes_from_history(), _find_anchored_id_in_messages(), _get_recent_user_messages(), _is_generic_query(), _match_property_id_in_reply(), _normalize() (+20 more)
 
 ### Community 21 - "LLM Engine & Middleware"
-Cohesion: 0.10
-Nodes (36): decide(), Mapea un LocationMatch a la acción del flujo. Precisión sobre recall.      La, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: lis, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: lis, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l (+28 more)
+Cohesion: 0.12
+Nodes (33): decide(), Mapea un LocationMatch a la acción del flujo. Precisión sobre recall.      La, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: lis, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: lis, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l, Resuelve `text` a una entidad del catálogo con tipo y confianza.      scope: l (+25 more)
 
 ### Community 22 - "Rentus Property Tools"
 Cohesion: 0.11
 Nodes (20): get_property_detail(), GetPropertyDetailTool, _parse_properties_from_response(), float, int, str, tools/rentus.py — Tool functions for the Rentus project., Obtiene el detalle completo de una propiedad por ID. (+12 more)
 
 ### Community 24 - "IntelliTaxi Tools"
-Cohesion: 0.13
-Nodes (31): _build_local_match_index(), _clean_stt_text(), _compound_num_replace(), _correct_speech(), extract_datetime_local(), extract_datetime_with_llm(), _geocode_cache_get(), _geocode_cache_set() (+23 more)
+Cohesion: 0.12
+Nodes (30): _clean_stt_text(), _compound_num_replace(), _correct_speech(), extract_datetime_local(), extract_datetime_with_llm(), _geocode_cache_get(), _geocode_cache_set(), _in_popayan_bbox() (+22 more)
 
 ### Community 25 - "Orchestrator Tool Runner"
-Cohesion: 0.06
-Nodes (61): catalog_terms(), Nombres canónicos del catálogo local (barrios + landmarks de Popayán).      Pe, bool, bytes, int, str, _build_stt_prompt(), _extract_transcription_text() (+53 more)
+Cohesion: 0.09
+Nodes (35): bool, bytes, int, str, _build_stt_prompt(), _extract_transcription_text(), _guess_encoding(), _is_whisper_model() (+27 more)
 
 ### Community 26 - "API Dependency Injection"
 Cohesion: 0.05
-Nodes (56): SessionUpdate, get_chat_service(), get_db(), get_llm(), get_settings(), get_tool_registries(), get_twilio_service(), get_whatsapp_service() (+48 more)
+Nodes (57): get_chat_service(), get_db(), get_llm(), get_settings(), get_tool_registries(), get_twilio_service(), get_whatsapp_service(), ChatService (+49 more)
 
 ### Community 27 - "Interceptor Helpers"
 Cohesion: 0.08
 Nodes (24): 1. Filosofía de Diseño, 2. El Motor Híbrido — Cerebro Rápido + Cerebro Lento, 3. Capas del Sistema, 4. Patrones Implementados, 5. Flujos de Datos Detallados, 6. Gestión de Configuración, 7. Observabilidad, 8. Decisiones Arquitectónicas (ADRs) (+16 more)
 
 ### Community 28 - "Navigation & UI Tools"
-Cohesion: 0.09
-Nodes (48): _clean_search_query(), confirm_appointment(), fly_to_business(), _format_logo(), get_business_availability(), get_business_mission_vision(), get_business_reviews(), get_business_services() (+40 more)
+Cohesion: 0.12
+Nodes (37): _clean_search_query(), confirm_appointment(), fly_to_business(), get_business_availability(), get_business_mission_vision(), get_business_reviews(), get_business_services(), get_general_info() (+29 more)
 
 ### Community 29 - "Adaptive Endpoint Control"
-Cohesion: 0.13
-Nodes (20): bool, float, int, str, GeographicMatcher, _haversine(), _is_in_popayan(), NavigationParser (+12 more)
+Cohesion: 0.12
+Nodes (21): bool, float, int, str, float, GeographicMatcher, _haversine(), _is_in_popayan() (+13 more)
 
 ### Community 30 - "Context Builder & Prompt"
-Cohesion: 0.20
-Nodes (9): BaseSettings, str, Base URL del endpoint LLM segun proveedor., Resolve model path relative to project root., Resolve model path relative to project root., Resolve model path relative to project root., Resolve model path relative to project root., Credencial para llamadas de chat al LLM.          OpenRouter y OpenAI usan sis (+1 more)
+Cohesion: 0.07
+Nodes (31): BaseSettings, str, Base URL del endpoint LLM segun proveedor., Resolve model path relative to project root., Resolve model path relative to project root., Resolve model path relative to project root., Resolve model path relative to project root., Credencial para llamadas de chat al LLM.          OpenRouter y OpenAI usan sis (+23 more)
 
 ### Community 31 - "Response Engine & Templates"
-Cohesion: 0.11
-Nodes (22): _build_dtmf_gather(), _build_speech_attrs(), _cfg(), _deepgram_language(), Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo     "es, Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo     "es, Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo     "es, Idioma para los modelos Deepgram. nova-2/nova-3 NO soportan es-CO; solo     "es (+14 more)
+Cohesion: 0.15
+Nodes (11): bool, str, Procesamiento de voz para el flujo de taxi en Popayán.     Responsabilidades: l, Construye un índice (alias_normalizado, canónico) ordenado de mayor a menor long, Elimina artefactos comunes del STT de Twilio., Elimina saludos y preámbulos conversacionales., Normalización fonética simple para español colombiano., Aplica correcciones STT para topónimos de Popayán.         Estrategias en orden (+3 more)
 
 ### Community 32 - "Architecture Overview Docs"
 Cohesion: 0.14
@@ -302,8 +297,8 @@ Cohesion: 0.15
 Nodes (15): Motor Híbrido — Cerebro Rápido + Cerebro Lento, Intent Router (Regex + Keywords Classifier), Interceptor Pattern (AOP-lite Pre/Post LLM), LegacyToolAdapter — Gradual Migration Pattern, LLM as Auxiliary Fallback — ADR-002, Orchestrator Layer (orchestrator/), Tool Contract (TOOL_NAME, TOOL_SCHEMA, execute), Tool Registry with Auto-Discovery (+7 more)
 
 ### Community 34 - "LLM Utility Functions"
-Cohesion: 0.13
-Nodes (17): normalize_address(), Estandariza nomenclatura (Calle → Cl, etc.), Estandariza nomenclatura (Calle → Cl, etc.), cancelar_servicio(), CancelarServicioTool, consultar_conductores_disponibles(), ConsultarConductoresTool, geocodificar_direccion() (+9 more)
+Cohesion: 0.17
+Nodes (10): normalize_address(), Estandariza nomenclatura (Calle → Cl, etc.), Estandariza nomenclatura (Calle → Cl, etc.), consultar_conductores_disponibles(), ConsultarConductoresTool, str, Consulta conductores disponibles en una zona., Crea una solicitud de taxi enviando los datos al backend Laravel.     Geocodifi (+2 more)
 
 ### Community 35 - "Geocoding Architecture Docs"
 Cohesion: 0.14
@@ -314,28 +309,28 @@ Cohesion: 0.12
 Nodes (22): AsyncOpenAI, call_llm(), call_llm_async(), extract_json_object(), get_async_openai_client(), get_model(), get_openai_client(), Any (+14 more)
 
 ### Community 37 - "SENA Interceptors"
-Cohesion: 0.15
-Nodes (10): int, Request, RateLimitMiddleware, gateway/middleware.py — Rate limiting en memoria (dict + timestamp).  Simple i, Per-IP rate limiter.     max_requests: maximum requests per window.     window, BaseHTTPMiddleware, str, Configura un logger estándar con salida a consola y archivo rotativo. (+2 more)
+Cohesion: 0.13
+Nodes (14): int, Request, RateLimitMiddleware, gateway/middleware.py — Rate limiting en memoria (dict + timestamp).  Simple i, Per-IP rate limiter.     max_requests: maximum requests per window.     window, Request, str, BaseHTTPMiddleware (+6 more)
 
 ### Community 38 - "Audio Quality Profiling"
-Cohesion: 0.08
-Nodes (22): bool, True si la llamada tiene calidad consistentemente baja., True si el usuario habla en frases largas (muchas palabras por turno)., True si el usuario usa frases muy cortas., True si la llamada tiene calidad consistentemente baja., True si el usuario habla en frases largas (muchas palabras por turno)., Repara la grafía de nombres de lugar en `text` usando el catálogo, vía     simi, True si la llamada tiene calidad consistentemente baja. (+14 more)
+Cohesion: 0.07
+Nodes (25): bool, True si la llamada tiene calidad consistentemente baja., True si el usuario habla en frases largas (muchas palabras por turno)., True si el usuario usa frases muy cortas., True si la llamada tiene calidad consistentemente baja., True si el usuario habla en frases largas (muchas palabras por turno)., True si el usuario usa frases muy cortas., True si la llamada tiene calidad consistentemente baja. (+17 more)
 
 ### Community 39 - "Streaming Pipeline Entry"
-Cohesion: 0.15
-Nodes (13): _cache_audio(), Almacena audio en cache y retorna un ID único., Almacena audio en cache y retorna un ID único., Almacena audio en cache y retorna un ID único., Almacena audio en cache y retorna un ID único., Almacena audio en cache y retorna un ID único., TwiML que reproduce mensaje y cuelga, usando voz de Lyra., TwiML que reproduce mensaje y cuelga, usando voz de Lyra. (+5 more)
+Cohesion: 0.14
+Nodes (22): float, str, get_pusher_client(), str, trigger_pusher_event(), get_voice_engine(), Retorna el singleton VoiceEngine, creándolo si aún no existe., load_project_config() (+14 more)
 
 ### Community 40 - "Interceptor Manager"
 Cohesion: 0.33
 Nodes (8): Runs logic before tool execution (e.g. arg patching, guards).     Called from t, Runs logic after tool execution (e.g. updating UI state, map center)., Runs all registered pre-LLM interceptors. Returns a response dict if intercepted, run_post_execution_interceptors(), run_pre_execution_interceptors(), run_pre_llm_interceptors(), Any, str
 
 ### Community 41 - "Colombian Address Extraction"
-Cohesion: 0.10
-Nodes (21): Request, validation_exception_handler(), LegacyToolAdapter, Any, str, Ejecuta la función legacy inyectando el contexto si es necesario          o sim, Envuelve herramientas antiguas que no siguen el contrato TOOL_SCHEMA/execute., Any (+13 more)
+Cohesion: 0.16
+Nodes (12): Request, validation_exception_handler(), Any, str, Registra una herramienta moderna que cumple con el contrato:         - TOOL_NAM, Registra una función antigua envolviéndola en un LegacyToolAdapter., Retorna todos los esquemas registrados para el LLM., Ejecuta una herramienta por nombre con manejo de errores estandarizado. (+4 more)
 
 ### Community 42 - "Chat Service"
 Cohesion: 0.22
-Nodes (9): WebSocket, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, WebSocket para Twilio Media Streams.      Permite streaming de audio bidirecci, voice_stream() (+1 more)
+Nodes (21): Remuestrea PCM16 mono a `dst_rate` con `scipy.signal.resample_poly`.      Usa, _resample_pcm16(), bytes, float, int, Tests del remuestreo 8 kHz → 16 kHz previo a Whisper (stt_service)., _read_wav(), _rms() (+13 more)
 
 ### Community 43 - "Geocoding Overview & Rentus"
 Cohesion: 0.18
@@ -350,12 +345,12 @@ Cohesion: 0.11
 Nodes (18): Archivos ACTUALIZADOS, Archivos NO MODIFICADOS (pero relacionados), Archivos NUEVOS, Archivos REESCRITOS, `core/address_utils.py`, `core/address_utils.py`, `core/geo_types.py`, `core/geocoder_service.py` (+10 more)
 
 ### Community 46 - "Response Generation"
-Cohesion: 0.13
-Nodes (10): AdaptiveEndpointController, bool, float, Segundos desde la última actividad de voz., Estima palabras por segundo basado en el texto acumulado y el tiempo.         Ú, Adapta los parámetros de VAD/endpointing de Twilio basado en:     - Perfil de a, Retorna los parámetros óptimos para el próximo <Gather>.                  stat, Procesa el texto final de STT de un turno.                  Retorna: (+2 more)
+Cohesion: 0.29
+Nodes (16): build_system_prompt(), _extract_anchored_ids(), _is_followup_reference(), _is_new_request(), _is_trivial_input(), _normalize_text(), _project_system_content(), bool (+8 more)
 
 ### Community 47 - "Project Configurations"
-Cohesion: 0.15
-Nodes (11): float, Duración del WAV local para esperar a que termine el playback antes de colgar., Duración del WAV local para esperar a que termine el playback antes de colgar., Duración del WAV local para esperar a que termine el playback antes de colgar., Duración del WAV local para esperar a que termine el playback antes de colgar., Duración del WAV local para esperar a que termine el playback antes de colgar., _wav_duration_seconds(), bool (+3 more)
+Cohesion: 0.16
+Nodes (25): Any, bool, bytes, float, Request, WebSocket, Decision, InboundCallRequest (+17 more)
 
 ### Community 48 - "Appointment Utilities"
 Cohesion: 0.11
@@ -363,15 +358,15 @@ Nodes (17): Arquitectura del Sistema, Convenciones de Desarrollo, Cómo Agregar 
 
 ### Community 49 - "TTS Audio Router"
 Cohesion: 0.13
-Nodes (21): _base_decision(), _best_for_entity(), _build_catalog(), _Entity, _key(), LocationMatch, MatchType, _norm() (+13 more)
+Nodes (21): _base_decision(), _best_for_entity(), _build_catalog(), _Entity, LocationMatch, _norm(), core/location_match.py — Resolución de ubicaciones tipada y precision-first., Decisión por tipo+confianza, SIN considerar desambiguación. Una     coincidenci (+13 more)
 
 ### Community 51 - "Model Path Config"
-Cohesion: 0.22
-Nodes (11): Any, AsyncClient, bool, float, str, Geocodifica origen/destino y crea el servicio en Laravel.         Usado por tes, Geocodifica origen/destino y crea el servicio en Laravel.         Usado por tes, Envía solicitudes telefónicas al backend IntelliTaxi. (+3 more)
+Cohesion: 0.23
+Nodes (9): Any, AsyncClient, bool, float, str, Geocodifica origen/destino y crea el servicio en Laravel.         Usado por tes, Geocodifica origen/destino y crea el servicio en Laravel.         Usado por tes, POST al backend Laravel.          Returns: (success, user_message, response_js (+1 more)
 
 ### Community 52 - "Barge-In Interruption"
-Cohesion: 0.10
-Nodes (34): bool, bytes, float, int, float, str, _adaptive_threshold(), _detect_end() (+26 more)
+Cohesion: 0.14
+Nodes (28): bool, bytes, float, int, str, _adaptive_threshold(), _detect_end(), detect_end_of_utterance() (+20 more)
 
 ### Community 53 - "Booking State"
 Cohesion: 0.17
@@ -382,8 +377,8 @@ Cohesion: 0.13
 Nodes (14): 1. Estándares de Código, 2. Contrato de Tools, 3. Cómo Agregar una Nueva Tool, 4. Cómo Agregar un Nuevo Proyecto, 5. Cómo Agregar un Interceptor, 6. Cómo Agregar un Nuevo Canal de Mensajería, 7. Checklist de Pull Request, 8. Convenciones de Commits (+6 more)
 
 ### Community 66 - "Twilio Init"
-Cohesion: 0.10
-Nodes (20): Elimina saludos y relleno del inicio/fin del texto., _strip_preamble(), _extract_geo_context(), handle_user_context(), _match_user_to_candidate(), Extrae el término geográfico útil del texto libre del usuario para enrichment., Extrae el término geográfico útil del texto libre del usuario para enrichment., Extrae el término geográfico útil del texto libre del usuario para enrichment. (+12 more)
+Cohesion: 0.11
+Nodes (18): _extract_geo_context(), handle_user_context(), _match_user_to_candidate(), Extrae el término geográfico útil del texto libre del usuario para enrichment., Extrae el término geográfico útil del texto libre del usuario para enrichment., Extrae el término geográfico útil del texto libre del usuario para enrichment., Procesa respuesta del usuario a CONTEXT_GATHERING o NEEDS_DISAMBIGUATION., Procesa respuesta del usuario a CONTEXT_GATHERING o NEEDS_DISAMBIGUATION. (+10 more)
 
 ### Community 67 - "Community 67"
 Cohesion: 0.14
@@ -398,68 +393,68 @@ Cohesion: 0.15
 Nodes (12): 1. Problema identificado, 2. Causa raíz (diagnóstico), 3. Cambios realizados, 4. Configuración final recomendada (`.env`), 5. Antes vs Después, 6. Riesgos y limitaciones, 7. Mejora estructural futura (no implementada), Medium (end-of-speech) — `core/streaming_pipeline.py` (+4 more)
 
 ### Community 70 - "Community 70"
-Cohesion: 0.13
-Nodes (15): _generate_play_twiml(), Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento. (+7 more)
+Cohesion: 0.21
+Nodes (16): bytes, float, int, str, highpass_filter(), _peak_dbfs(), peak_normalize(), preprocess_pcm16() (+8 more)
 
 ### Community 71 - "Community 71"
 Cohesion: 0.20
 Nodes (10): Construcción de enriched_query, Geocodificación — Arquitectura Técnica, Máquina de Estados, Reglas de Auto-Aceptación, Separación de Responsabilidades, Tipos de Datos Core (`core/geo_types.py`), Umbrales Popayán, Verdad Humana: `geo_human_aliases` *(Fase 2 — diferida)* (+2 more)
 
 ### Community 72 - "Community 72"
-Cohesion: 0.13
-Nodes (15): _alias_covers_input(), Convierte una referencia humana informal a datos estructurados.     Retorna dic, True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., Convierte una referencia humana informal a datos estructurados.     Retorna dic, True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas. (+7 more)
+Cohesion: 0.29
+Nodes (7): _alias_covers_input(), True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas., True si el alias cubre el input sin dejar palabras de contenido sueltas.
 
 ### Community 73 - "Community 73"
-Cohesion: 0.15
-Nodes (14): extract_destination_address(), extract_pickup_address(), looks_like_place(), Valida que `text` parezca una ubicación real en Popayán, para descartar     ext, Valida que `text` parezca una ubicación real en Popayán, para descartar     ext, Valida que `text` parezca una ubicación real en Popayán, para descartar     ext, Extrae dirección de recogida del texto libre.     Retorna (dirección, None) o (, Extrae dirección de recogida del texto libre.     Retorna (dirección, None) o ( (+6 more)
+Cohesion: 0.09
+Nodes (24): _build_local_match_index(), extract_destination_address(), extract_pickup_address(), looks_like_place(), Elimina saludos y relleno del inicio/fin del texto., Búsqueda local en el catálogo de barrios/landmarks de Popayán     (popayan_geod, Búsqueda local en el catálogo de barrios/landmarks de Popayán     (popayan_geod, Búsqueda local en el catálogo de barrios/landmarks de Popayán     (popayan_geod (+16 more)
 
 ### Community 74 - "Community 74"
 Cohesion: 0.11
 Nodes (17): 1. Lyra Python (.env), 2. Redis, 3. Dependencias Lyra, 4. Apagar FreeSWITCH viejo (Twilio), 5. FreeSWITCH nuevo, Arquitectura objetivo, Checklist de despliegue, Checklist llamada real (+9 more)
 
 ### Community 75 - "Community 75"
-Cohesion: 0.07
-Nodes (33): Any, bytes, WebSocket, audio_stream(), Resuelve caller_number desde query string o metadata JSON., Resuelve caller_number desde query string o metadata JSON., Vincula sesión si inbound-call ya la creó o la crea aquí., Vincula sesión si inbound-call ya la creó o la crea aquí. (+25 more)
+Cohesion: 0.06
+Nodes (38): AudioEncoding, audio_stream(), _get_ws_buffer(), Resuelve call_uuid desde query string o metadata JSON., Resuelve call_uuid desde query string o metadata JSON., Resuelve caller_number desde query string o metadata JSON., Resuelve caller_number desde query string o metadata JSON., Resuelve call_uuid desde query string o metadata JSON. (+30 more)
 
 ### Community 76 - "Community 76"
-Cohesion: 0.17
-Nodes (10): ConversationMemory, AudioQualityProfile, AudioQualityProfile, Perfil de calidad de audio de una llamada.     Se actualiza turn a turn para ad, Perfil de calidad de audio de una llamada.     Se actualiza turn a turn para ad, Perfil de calidad de audio de una llamada.     Se actualiza turn a turn para ad, Perfil de calidad de audio de una llamada.     Se actualiza turn a turn para ad, Perfil de calidad de audio de una llamada.     Se actualiza turn a turn para ad (+2 more)
+Cohesion: 0.25
+Nodes (10): _empty_stats(), get_stats(), hourly_stats(), intent_stats(), _parse_period(), Intent breakdown (placeholder — Lyra uses LLM, not fixed intents)., Get usage statistics for a given period., Get hourly message distribution. (+2 more)
 
 ### Community 77 - "Community 77"
-Cohesion: 0.15
-Nodes (13): _get_cached_audio(), Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Recupera audio del cache. (+5 more)
+Cohesion: 0.13
+Nodes (15): _get_cached_audio(), Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio., Sirve los audios de TTS cacheados en memoria para Twilio. (+7 more)
 
 ### Community 78 - "Community 78"
 Cohesion: 0.14
 Nodes (13): 1. Forzar PCMU en el perfil SIP / gateway, 2. Desactivar VAD del perfil sofia, 3. Dialplan: codec, comfort-noise y AGC por llamada (recomendado), 4. (Si aplica) Quitar AGC/CNG residual, a) Trazar negociación SDP / codec activo, Archivos típicos a tocar en el servidor, b) Inspeccionar un canal en curso, c) Estado del perfil (+5 more)
 
 ### Community 79 - "Community 79"
-Cohesion: 0.26
-Nodes (12): normalize_colombian_address(), Normaliza al formato colombiano estándar.     'carrera cuarta a el # 17 b 28' →, Normaliza al formato colombiano estándar.     'carrera cuarta a el # 17 b 28' →, Garantiza que el número de casa y el landmark sobrevivan hasta la query del, reattach_address_details(), tests/test_address_recovery.py — Task 1 (bug item 7).  Verifica que reattach_add, test_empty_inputs_are_safe(), test_exact_bug_case_from_any_extractor_output() (+4 more)
+Cohesion: 0.22
+Nodes (13): normalize_colombian_address(), Normaliza al formato colombiano estándar.     'carrera cuarta a el # 17 b 28' →, Normaliza al formato colombiano estándar.     'carrera cuarta a el # 17 b 28' →, Garantiza que el número de casa y el landmark sobrevivan hasta la query del, reattach_address_details(), Motor conversacional agnóstico del canal telefónico.  No importa Twilio ni Fre, tests/test_address_recovery.py — Task 1 (bug item 7).  Verifica que reattach_add, test_empty_inputs_are_safe() (+5 more)
 
 ### Community 80 - "Community 80"
-Cohesion: 0.16
-Nodes (11): _normalize_street_abbreviations(), Normaliza abreviaturas de calle a forma canónica.     cl, cll, c/ → calle | cra, Normaliza abreviaturas de calle a forma canónica.     cl, cll, c/ → calle | cra, Normaliza abreviaturas de calle a forma canónica.     cl, cll, c/ → calle | cra, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car (+3 more)
+Cohesion: 0.27
+Nodes (6): LegacyToolAdapter, Any, str, Ejecuta la función legacy inyectando el contexto si es necesario          o sim, Envuelve herramientas antiguas que no siguen el contrato TOOL_SCHEMA/execute., # TODO: En el futuro, buscar clases que hereden de BaseTool.
 
 ### Community 83 - "Community 83"
 Cohesion: 0.24
 Nodes (7): LLMEngine, float, int, str, core/llm_engine.py — Tool calling para LLMs (OpenRouter/OpenAI-compatible).  N, Parse a failed_generation string like <function=name>{"k":v}</function>, Fix type mismatches: cast int→str, null→default, unwrap 'properties' wrapper.
 
 ### Community 84 - "Community 84"
-Cohesion: 0.21
-Nodes (9): lifespan(), FastAPI lifespan event.     Loads the GGUF model into memory at startup., FastAPI lifespan event.     Loads the GGUF model into memory at startup., Path, list_projects(), List all active projects in the database., str, Persiste audio telefónico como WAV 8kHz mono.          Returns: (audio_id, abs (+1 more)
+Cohesion: 0.25
+Nodes (8): Recupera tanto la ciudad como la categoría de la última búsqueda desde los tool, Recupera la ciudad sugerida en el último mensaje de la herramienta o del asisten, _recover_last_search_args_from_history(), _recover_suggested_city_from_history(), Recupera la ciudad sugerida en el último mensaje de la herramienta o del asisten, Recupera tanto la ciudad como la categoría de la última búsqueda., recover_last_search_args_from_history(), recover_suggested_city_from_history()
 
 ### Community 85 - "Community 85"
 Cohesion: 0.12
 Nodes (15): Archivos creados, Backend Laravel — checklist, Concurrencia (40–60 llamadas), Dialplan mínimo (ejemplo), Fase 1 — Validar backend sin Twilio, Fase 2 — Apagar FreeSWITCH viejo (Twilio), Fase 3 — FreeSWITCH nuevo (sin Twilio), Fase 4 — Prueba de llamada real (+7 more)
 
 ### Community 86 - "Community 86"
-Cohesion: 0.18
-Nodes (11): _find_anchored_id_in_messages(), _get_recent_user_messages(), float, int, Busca el ultimo ID anclado [ID: X] o [BIZ: X] en el historial visible., Recupera los detalles de una reserva pendiente de confirmación., Toma los ultimos mensajes del usuario para completar datos omitidos por el LLM., Main agent loop. Orchestrates interceptors, LLM calls, and tool execution. (+3 more)
+Cohesion: 0.25
+Nodes (6): float, _max_utterance_sec(), Acumulador de audio WebSocket — segmentación por duración + VAD., Duración máxima de locución antes de forzar flush (env-driven)., Silencia la captura durante un playback y descarta lo ya acumulado., Silencia la captura durante un playback y descarta lo ya acumulado.
 
 ### Community 87 - "Community 87"
-Cohesion: 0.22
-Nodes (8): int, Timeout total de <Gather> en segundos., Timeout total de <Gather> en segundos., Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Timeout total de <Gather> en segundos., Timeout total de <Gather> en segundos., Timeout total de <Gather> en segundos., Timeout total de <Gather> en segundos.
+Cohesion: 0.11
+Nodes (17): int, Timeout total de <Gather> en segundos., Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car, Timeout total de <Gather> en segundos., Timeout total de <Gather> en segundos., Repara direcciones callejeras mangled por STT.     'carrera 4 a eb 1728' → 'car (+9 more)
 
 ### Community 88 - "Community 88"
 Cohesion: 0.23
@@ -470,156 +465,132 @@ Cohesion: 0.05
 Nodes (75): _find_anchored_id_in_messages(), _is_generic_query(), _normalize(), _normalize_time(), orchestrator/interceptors/helpers.py ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Uti, Recupera la lista de negocios del último resultado de herramienta en el historia, Recupera la categoría y ciudad de la última búsqueda de negocios., Reconstruye el contexto completo de una reserva en curso desde el historial. (+67 more)
 
 ### Community 90 - "Community 90"
-Cohesion: 0.22
-Nodes (9): bool, float, int, str, StreamReader, FreeSwitchESLClient, Cliente ESL mínimo para FreeSWITCH — uuid_broadcast / uuid_kill., Conexión corta por comando (sin suscripción de eventos). (+1 more)
+Cohesion: 0.27
+Nodes (8): bool, float, int, str, StreamReader, FreeSwitchESLClient, Conexión corta por comando (sin suscripción de eventos)., Reproduce audio en la pata indicada (URL HTTP o ruta absoluta WAV).
 
 ### Community 91 - "Community 91"
-Cohesion: 0.14
-Nodes (14): _aggressive_normalize(), preprocess_stt(), Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli (+6 more)
+Cohesion: 0.12
+Nodes (16): _aggressive_normalize(), preprocess_stt(), Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli, Normalización agresiva previa, para audio telefónico muy degradado.      - Eli (+8 more)
 
 ### Community 92 - "Community 92"
-Cohesion: 0.10
-Nodes (25): _best_catalog_snap(), bigram_similarity(), _build_phonetic_repair_index(), combined_score(), fuzzy_match_location(), phonetic_key(), float, str (+17 more)
+Cohesion: 0.06
+Nodes (49): _extract_partial_location(), infer_intent(), core/conversation_repair.py — Motor de reparación conversacional inteligente par, Infiere la intención del usuario con scores de probabilidad.          Retorna:, Extrae cualquier fragmento que parezca un lugar (aún si el texto es incompleto)., Procesa texto parcial y retorna estado de intención actualizado., _best_catalog_snap(), bigram_similarity() (+41 more)
 
 ### Community 93 - "Community 93"
 Cohesion: 0.06
-Nodes (53): haversine(), Distancia en km entre dos coordenadas GPS (fórmula de Haversine).      Consoli, _build_alias_index(), _ensure_index(), _estimate_coords_from_street(), _find_similar_places(), fuzzy_search(), geocode_local() (+45 more)
+Nodes (50): haversine(), Distancia en km entre dos coordenadas GPS (fórmula de Haversine).      Consoli, _build_alias_index(), _ensure_index(), _estimate_coords_from_street(), _find_similar_places(), fuzzy_search(), geocode_local() (+42 more)
 
 ### Community 94 - "Community 94"
-Cohesion: 0.29
-Nodes (6): Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather.
+Cohesion: 0.12
+Nodes (15): Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Parámetros de endpointing adaptativos para el próximo Gather., Wrapper que usa los parámetros adaptativos de la sesión. (+7 more)
 
 ### Community 95 - "Community 95"
-Cohesion: 0.08
-Nodes (29): _generate_say_twiml(), _generate_tts_audio(), _get_base_url_for_twilio(), Webhook para procesar la respuesta en modo mantenimiento., Webhook inicial de Twilio para modo mantenimiento simple (dice el mensaje y cuel, Webhook para procesar la respuesta en modo mantenimiento., Webhook para procesar la respuesta en modo mantenimiento., Webhook para procesar la respuesta en modo mantenimiento. (+21 more)
+Cohesion: 0.03
+Nodes (88): _build_dtmf_gather(), _cache_audio(), _generate_play_twiml(), _generate_say_twiml(), _generate_tts_audio(), _get_base_url_for_twilio(), Almacena audio en cache y retorna un ID único., Almacena audio en cache y retorna un ID único. (+80 more)
 
 ### Community 96 - "Community 96"
 Cohesion: 0.33
 Nodes (8): Any, bool, str, es_numero_troncal_o_empresa(), limpiar_numero(), Utilidades de normalización de teléfono — agnósticas al canal., Resuelve el teléfono real del cliente desde número directo o headers SIP., resolve_caller_phone()
 
 ### Community 97 - "Community 97"
-Cohesion: 0.29
-Nodes (7): Expands street abbreviations so TTS reads full words instead of letters., Expands street abbreviations so TTS reads full words instead of letters., Expands street abbreviations so TTS reads full words instead of letters., Expands street abbreviations so TTS reads full words instead of letters., Expands street abbreviations so TTS reads full words instead of letters., Expands street abbreviations so TTS reads full words instead of letters., _tts_expand()
+Cohesion: 0.33
+Nodes (6): head_audio_file(), HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo., HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo., HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo., HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo., HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo.
 
 ### Community 98 - "Community 98"
-Cohesion: 0.25
-Nodes (9): _is_all_filler(), is_filler(), bool, True si el texto solo contiene cortesía/relleno (ningún token de lugar).     'bu, True si el texto solo contiene cortesía/relleno (ningún token de lugar).     'b, API pública: True si `text` es solo cortesía/relleno/afirmación y no     contie, True si el texto solo contiene cortesía/relleno (ningún token de lugar).     'b, API pública: True si `text` es solo cortesía/relleno/afirmación y no     contie (+1 more)
+Cohesion: 0.15
+Nodes (17): _content_tokens(), _has_content(), _is_all_filler(), is_filler(), bool, str, Fracción de tokens de contenido del input que encuentran un equivalente     fuer, True si el texto solo contiene cortesía/relleno (ningún token de lugar).     'bu (+9 more)
 
 ### Community 99 - "Community 99"
-Cohesion: 0.16
-Nodes (14): _disambiguation_question(), _extract_address_span(), Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Nombre corto para leer en voz alta (parte antes de la primera coma)., Construye la pregunta de desambiguación a partir de las sedes reales.     Gener, Nombre corto para leer en voz alta (parte antes de la primera coma). (+6 more)
+Cohesion: 0.13
+Nodes (17): _disambiguation_question(), _extract_address_span(), Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Recorta el ruido conversacional dejando solo la dirección.      El geocoder NO, Nombre corto para leer en voz alta (parte antes de la primera coma)., Construye la pregunta de desambiguación a partir de las sedes reales.     Gener (+9 more)
 
 ### Community 100 - "Community 100"
-Cohesion: 0.23
-Nodes (10): core/config.py — Configuración centralizada desde .env con pydantic-settings., str, ffmpeg_executable(), log_ffmpeg_diagnostics(), Ruta absoluta de ffmpeg para telefonía (subprocess sin depender de PATH)., Binario ffmpeg configurado (absoluto por defecto)., Log de diagnóstico antes de invocar ffmpeg., _mp3_to_mulaw() (+2 more)
+Cohesion: 0.50
+Nodes (3): cancelar_servicio(), CancelarServicioTool, Cancela una solicitud de taxi activa.
 
 ### Community 101 - "Community 101"
-Cohesion: 0.12
-Nodes (18): _lyra_tts_voice(), Voz principal de Lyra via edge_tts (Azure Neural)., Fallback Polly voice (solo se usa si edge_tts falla)., Fallback Polly voice (solo se usa si edge_tts falla)., Voz principal de Lyra via edge_tts (Azure Neural)., Voz principal de Lyra via edge_tts (Azure Neural)., Redirect con audio opcional (para transiciones de estado)., Redirect con audio opcional (para transiciones de estado). (+10 more)
-
-### Community 102 - "Community 102"
-Cohesion: 0.13
-Nodes (15): Webhook inicial de Twilio. Saluda y comienza a escuchar., Webhook inicial de Twilio. Saluda y comienza a escuchar., Webhook inicial de Twilio. Saluda y comienza a escuchar., Webhook inicial de Twilio. Saluda y comienza a escuchar., Webhook inicial de Twilio. Saluda y comienza a escuchar., Webhook inicial de Twilio. Saluda y comienza a escuchar., Wrapper que usa los parámetros adaptativos de la sesión., Wrapper que usa los parámetros adaptativos de la sesión. (+7 more)
+Cohesion: 0.67
+Nodes (3): _extract_session_today(), date, Extrae la fecha base de la sesión para resolver expresiones relativas.
 
 ### Community 103 - "Community 103"
 Cohesion: 0.38
 Nodes (8): _context(), _engine(), tests/test_voice_engine_landmark.py  Cubre el cierre del gap en _handle_waiting_, _session(), test_la_paz_first_turn_asks_disambiguation_without_geocoding(), test_trusted_landmark_coarse_falls_to_plain_confirm(), test_trusted_landmark_resolved_confirms(), test_untrusted_landmark_coarse_asks_context()
 
 ### Community 104 - "Community 104"
-Cohesion: 0.50
-Nodes (5): _accept_low_precision(), _is_via_query(), bool, True si la query parece una vía (tiene keyword de calle/carrera/…)., Decide si un resultado de baja precisión (en _NEVER_AUTOACCEPT) es aceptable
+Cohesion: 0.67
+Nodes (3): villa del norte' es un barrio; no debe convertirse en 'SENA Norte' por     la pa, villa del norte' es un barrio; no debe convertirse en 'SENA Norte' por     la p, test_villa_del_norte_not_routed_to_sena()
 
 ### Community 105 - "Community 105"
 Cohesion: 0.29
 Nodes (7): Geocoding Pipeline: Cache→Google→Nominatim→CONTEXT_GATHERING, intellitaxi.yaml — TaxBelalcazar Telephony Project Config, nexiservice.yaml — NexiService Colombia Project Config, personalities.yaml — Global Personality Catalog (lyra, nexo), rentus.yaml — Rentus Real Estate Assistant Project Config, response_templates.yaml — Response Template Bank (lyra, nexo, sena personalities), Projects in Production (NexiService, Rentus, IntelliTaxi)
 
 ### Community 106 - "Community 106"
-Cohesion: 0.07
-Nodes (36): delete_session(), export_sessions(), list_sessions(), Export sessions (basic JSON export)., Get full session with messages., Delete a session and its messages., List conversations (sessions) with pagination., Session aggregate stats. (+28 more)
+Cohesion: 0.09
+Nodes (28): get_config(), Get Lyra configuration., delete_session(), export_sessions(), list_sessions(), Export sessions (basic JSON export)., Get full session with messages., Delete a session and its messages. (+20 more)
 
 ### Community 107 - "Community 107"
-Cohesion: 0.08
-Nodes (25): generate_contextual_response(), PartialTranscript, int, str, Mejor texto disponible (final si existe, si no el último parcial)., Procesa un fragmento de speech parcial (de partialResultCallback).         Reto, Procesa un fragmento de speech parcial (de partialResultCallback).         Reto, Hace streaming del LLM y retorna el texto completo.     Llama on_chunk(texto_pa (+17 more)
+Cohesion: 0.50
+Nodes (4): Hace streaming del LLM y retorna el texto completo.     Llama on_chunk(texto_pa, Hace streaming del LLM y retorna el texto completo.     Llama on_chunk(texto_pa, Hace streaming del LLM y retorna el texto completo.     Llama on_chunk(texto_pa, stream_llm_response()
 
 ### Community 108 - "Community 108"
-Cohesion: 0.29
-Nodes (7): classify_speech_quality(), Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h
+Cohesion: 0.25
+Nodes (8): classify_speech_quality(), Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h, Clasifica la calidad del turno de voz.      Filosofía (corregida): Twilio YA h
 
 ### Community 109 - "Community 109"
-Cohesion: 0.25
-Nodes (7): Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario.
+Cohesion: 0.22
+Nodes (8): Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario., Recomienda el speechTimeout de Twilio basado en el perfil del usuario.
 
 ### Community 110 - "Community 110"
-Cohesion: 0.48
-Nodes (6): bytes, int, _mp3_bytes_to_wav_8k(), _mulaw_bytes_to_wav(), Almacén de archivos TTS para reproducción por FreeSWITCH (playback).  Genera W, _to_wav_8k_mono()
+Cohesion: 0.67
+Nodes (3): Un substring cubierto (textual) debe ganar a cualquier casi-acierto     fonético, Un substring cubierto (textual) debe ganar a cualquier casi-acierto     fonétic, test_phonetic_does_not_override_substring()
 
 ### Community 111 - "Community 111"
 Cohesion: 0.05
-Nodes (59): bool, str, AudioEncoding, object, _echo_tokens(), _flush_audio_turn(), freeswitch_health(), _get_ws_buffer() (+51 more)
+Nodes (59): str, core/config.py — Configuración centralizada desde .env con pydantic-settings., object, _echo_tokens(), _flush_audio_turn(), freeswitch_health(), inbound_call(), _inbound_use_file_mode() (+51 more)
 
 ### Community 112 - "Community 112"
-Cohesion: 0.40
-Nodes (4): in_urban_bbox(), in_wide_bbox(), bool, float
+Cohesion: 0.29
+Nodes (5): in_urban_bbox(), in_wide_bbox(), bool, float, Solo ROOFTOP y RANGE_INTERPOLATED dentro del área urbana se auto-aceptan.
 
 ### Community 113 - "Community 113"
 Cohesion: 0.50
 Nodes (4): Extrae la parte más útil del display_name completo., Extrae la parte más útil del display_name completo., Extrae la parte más útil del display_name completo., _short_display()
 
-### Community 114 - "Community 114"
-Cohesion: 0.33
-Nodes (6): _parse_inbound_body(), Acepta JSON o form-urlencoded (curl desde dialplan FreeSWITCH)., Acepta JSON o form-urlencoded (curl desde dialplan FreeSWITCH)., Acepta JSON o form-urlencoded (curl desde dialplan FreeSWITCH)., Acepta JSON o form-urlencoded (curl desde dialplan FreeSWITCH)., Limpieza STT compartida con el gateway Twilio (preprocess_stt): elimina     fra
-
-### Community 115 - "Community 115"
-Cohesion: 0.67
-Nodes (3): Un misspelling de una sola palabra que no está en el dict curado debe, al     me, Un misspelling de una sola palabra que no está en el dict curado debe, al     m, test_misspelling_confirms_not_silent()
-
 ### Community 116 - "Community 116"
-Cohesion: 0.10
-Nodes (21): partial_speech(), Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe (+13 more)
+Cohesion: 0.08
+Nodes (24): partial_speech(), Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe, Procesa resultados parciales de STT de Twilio (partialResultCallback).      Pe (+16 more)
 
 ### Community 117 - "Community 117"
-Cohesion: 0.25
-Nodes (5): bool, str, Idempotencia de creación de servicio por call_uuid (evita duplicados en reintent, Marca call_uuid como ya enviado al backend., SubmissionGuard
-
-### Community 119 - "Community 119"
-Cohesion: 0.14
-Nodes (14): _build_hint_vocab(), _get_contextual_hints(), _prioritized_canonical_names(), Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos)., Genera hints de vocabulario FOCALIZADOS según el estado (máx ~15 términos)., Nombres canónicos del catálogo, con los más relevantes al frente., Construye la cadena de hints model-aware desde los catálogos (cacheada)., Genera hints de vocabulario según el estado y el modelo STT.      - Captura (w (+6 more)
-
-### Community 122 - "Community 122"
 Cohesion: 0.24
-Nodes (5): bool, Detecta si el texto parcial indica intención de interrumpir.         Se usa con, Detecta si el texto parcial indica intención de interrumpir.         Se usa con, Después de una interrupción, extrae el contenido real.         "espera, quiero, Después de una interrupción, extrae el contenido real.         "espera, quiero
+Nodes (6): bool, str, get_submission_guard(), Idempotencia de creación de servicio por call_uuid (evita duplicados en reintent, Marca call_uuid como ya enviado al backend., SubmissionGuard
 
 ### Community 123 - "Community 123"
 Cohesion: 0.33
 Nodes (6): geocode(), Shortcut para resolución directa (sin CONTEXT_GATHERING interactivo).     Retor, Shortcut para resolución directa (sin CONTEXT_GATHERING interactivo).     Retor, Shortcut para resolución directa (sin CONTEXT_GATHERING interactivo).     Retor, Shortcut para resolución directa (sin CONTEXT_GATHERING interactivo).     Retor, Shortcut para resolución directa (sin CONTEXT_GATHERING interactivo).     Retor
 
-### Community 126 - "Community 126"
-Cohesion: 0.40
-Nodes (3): bytes, str, Genera audio listo para telefonía.          Returns:             {
-
 ### Community 128 - "Community 128"
-Cohesion: 0.40
-Nodes (4): navigate_to_company(), str, tools/navigation.py — Herramientas para la navegación programática en la UI., Activa la navegación automática hacia el perfil de una empresa específica.
+Cohesion: 0.12
+Nodes (17): navigate_to_company(), str, tools/navigation.py — Herramientas para la navegación programática en la UI., Activa la navegación automática hacia el perfil de una empresa específica., _format_logo(), get_businesses_comparison(), open_business_web(), bool (+9 more)
 
 ## Knowledge Gaps
 - **213 isolated node(s):** `PreToolUse`, `allow`, `int`, `Request`, `int` (+208 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `FastAPI` connect `Community 106` to `Twilio Voice Router`, `Browser Voice & TTS`, `SENA Interceptors`, `App Config & Logging`, `Colombian Address Extraction`, `Admin Config Management`, `Community 111`, `WhatsApp Channel Router`, `Community 83`, `Community 84`, `API Dependency Injection`?**
-  _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Why does `get_connection()` connect `Community 106` to `Geocoding Types & Candidates`, `App Config & Logging`, `Admin Config Management`, `Booking Flow Tests`, `Community 84`, `Booking State`, `Community 89`, `API Dependency Injection`, `Navigation & UI Tools`?**
-  _High betweenness centrality (0.077) - this node is a cross-community bridge._
-- **Why does `ToolRegistry` connect `Colombian Address Extraction` to `SENA Interceptors`, `Scheduling & Shared Utils`, `Community 106`, `Tool Runner Utilities`, `Community 86`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **Why does `FastAPI` connect `SENA Interceptors` to `Twilio Voice Router`, `App Config & Logging`, `Streaming Pipeline Entry`, `Colombian Address Extraction`, `Community 106`, `Admin Config Management`, `Community 76`, `Community 111`, `WhatsApp Channel Router`, `Community 83`, `API Dependency Injection`?**
+  _High betweenness centrality (0.091) - this node is a cross-community bridge._
+- **Why does `get_connection()` connect `Community 106` to `Community 128`, `Geocoding Types & Candidates`, `App Config & Logging`, `Admin Config Management`, `Community 76`, `Booking Flow Tests`, `Booking State`, `Community 89`, `API Dependency Injection`, `Navigation & UI Tools`?**
+  _High betweenness centrality (0.080) - this node is a cross-community bridge._
+- **Why does `Decision` connect `Project Configurations` to `Twilio Voice Router`, `Audio Quality Profiling`, `Nexiservice Booking Interceptor`, `Admin Session Management`, `Voice Session State`, `Community 111`, `Community 79`, `TTS Audio Router`, `Address Normalization Core`, `LLM Engine & Middleware`, `Booking State`, `Community 87`, `IntelliTaxi Tools`, `Community 92`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
 - **Are the 10 inferred relationships involving `str` (e.g. with `BargeInHandler` and `ConversationMemory`) actually correct?**
   _`str` has 10 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 41 inferred relationships involving `Decision` (e.g. with `Any` and `bool`) actually correct?**
   _`Decision` has 41 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 32 inferred relationships involving `ConversationMemory` (e.g. with `AsyncClient` and `AudioQualityProfile`) actually correct?**
-  _`ConversationMemory` has 32 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `PreToolUse`, `allow`, `int` to the rest of the system?**
-  _1138 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _1182 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Twilio Voice Router` be split into smaller, more focused modules?**
+  _Cohesion score 0.04245709123757904 - nodes in this community are weakly interconnected._

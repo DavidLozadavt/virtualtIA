@@ -29,7 +29,12 @@ from core.conversation_repair import get_progressive_retry_message
 from core.geocoder_service import run_pipeline
 from core.geo_types import ResolutionStatus
 from core.location_match import decide, is_filler, resolve_location_entity, Decision
-from core.stt_enhancer import fuzzy_match_location, resolve_human_reference, strip_accents
+from core.stt_enhancer import (
+    fuzzy_match_location,
+    resolve_human_reference,
+    strip_accents,
+    strip_conversational_prefix,
+)
 from services.telephony.backend_client import TelephonyBackendClient
 from services.telephony.phone_utils import es_numero_troncal_o_empresa
 from services.telephony.session_store import (
@@ -261,6 +266,19 @@ class VoiceCallEngine:
     ) -> VoiceTurnResult:
         origen = None
         trusted = False
+
+        # Limpieza de intención de dirección ANTES de clasificar: quita saludos y
+        # nombres propios sueltos al inicio ("buenas tardes osvaldo valle del
+        # ortigal" → "valle del ortigal"). El crudo se conserva como raw_text para
+        # diagnóstico; el texto limpio alimenta los clasificadores y el pipeline.
+        raw_text = text
+        text = strip_conversational_prefix(text)
+        if text != raw_text:
+            logger.info(
+                "[engine] stripped conversational prefix raw_text=%r clean=%r",
+                raw_text,
+                text,
+            )
 
         # Respuesta a una desambiguación pendiente (ej. "¿La Paz o La Paz Sur?"):
         # resolver acotado a las sedes ofrecidas. Sin esto el motor solo PREGUNTA

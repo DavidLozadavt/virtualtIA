@@ -12,9 +12,50 @@ import pytest
 from core.stt_enhancer import (
     repair_location_transcription as repair,
     correct_stt_errors,
+    strip_conversational_prefix,
     _collapse_adjacent_duplicate_phrases,
 )
 from core.streaming_pipeline import _get_contextual_hints, _build_hint_vocab
+
+
+# ── Limpieza de intención de dirección (strip_conversational_prefix) ───────────
+
+def test_strip_greeting_and_proper_noun():
+    # Saludo + nombre propio suelto al inicio → solo la dirección reconocible.
+    assert strip_conversational_prefix(
+        "buenas tardes osvaldo valle del ortigal"
+    ) == "valle del ortigal"
+
+
+def test_strip_greeting_keeps_full_address():
+    # Saludo fuera; el resto (incl. nombre de quien recibe) es la dirección → intacto.
+    assert strip_conversational_prefix(
+        "hola, calle cuarta número 26 camilo torres"
+    ) == "calle cuarta número 26 camilo torres"
+
+
+def test_strip_no_greeting_intact():
+    # Ya parece lugar, sin saludo → devuelve intacto.
+    assert strip_conversational_prefix("valle del ortigal") == "valle del ortigal"
+
+
+def test_strip_greeting_only_returns_original():
+    # Saludo sin dirección después → nunca degradar, devuelve original.
+    assert strip_conversational_prefix("buenos días") == "buenos días"
+
+
+def test_strip_alo_prefix_street():
+    assert strip_conversational_prefix("aló cra 5 número 12") == "cra 5 número 12"
+
+
+def test_strip_empty_and_whitespace_safe():
+    assert strip_conversational_prefix("") == ""
+    assert strip_conversational_prefix("   ") == "   "
+
+
+def test_strip_does_not_degrade_to_nonsense():
+    # Saludo + palabra suelta sin sentido → no hay dirección → original intacto.
+    assert strip_conversational_prefix("hola gracias") == "hola gracias"
 
 
 # ── Corrección fonética: reemplazo limpio sin duplicar/corromper vecinos ────────

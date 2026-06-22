@@ -42,6 +42,7 @@ from core.stt_enhancer import (
     repair_mangled_street_address,
     resolve_human_reference,
     strip_accents,
+    strip_conversational_prefix,
     POPAYAN_STT_CORRECTIONS,
 )
 from core.location_match import resolve_location_entity, decide, Decision, is_filler
@@ -1633,6 +1634,18 @@ async def process_speech(request: Request):
 
     # ── ESTADO: waiting_origin ────────────────────────────────────
     if sess.state == STATE_WAITING_ORIGIN:
+
+        # Limpieza de intención de dirección ANTES de clasificar: quita saludos y
+        # nombres propios sueltos al inicio ("buenas tardes osvaldo valle del
+        # ortigal" → "valle del ortigal"). El crudo se conserva (texto_original /
+        # raw_text) para diagnóstico; el texto limpio alimenta los clasificadores.
+        _raw_origin_text = texto_usuario
+        texto_usuario = strip_conversational_prefix(texto_usuario)
+        if texto_usuario != _raw_origin_text:
+            logger.info(
+                f"[ORIGIN] stripped conversational prefix "
+                f"raw_text={_raw_origin_text!r} clean={texto_usuario!r}"
+            )
 
         # Fuente de la extracción: human_ref/local match = confiable (catálogo);
         # LLM/raw = NO confiable → se valida con looks_like_place antes de aceptar.
