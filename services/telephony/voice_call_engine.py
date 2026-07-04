@@ -423,7 +423,7 @@ class VoiceCallEngine:
                     if barrio:
                         session.origen_barrio = barrio
                         session.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"¿Tu punto de recogida es {origen}, barrio {barrio}? Di sí para confirmar."
+                        msg = f"¿{origen}, barrio {barrio}, es correcto?"
                         session.last_message = msg
                         return VoiceTurnResult(
                             speak_text=msg,
@@ -458,7 +458,7 @@ class VoiceCallEngine:
                         session.origen_barrio = barrio
                     session.state = STATE_CONFIRMING_ORIGIN
                     barrio_str = f", barrio {barrio}" if barrio else ""
-                    msg = f"¿Tu punto de recogida es {origen}{barrio_str}? Di sí para confirmar."
+                    msg = f"¿{origen}{barrio_str}, es correcto?"
                     session.last_message = msg
                     return VoiceTurnResult(
                         speak_text=msg,
@@ -486,7 +486,7 @@ class VoiceCallEngine:
                 logger.warning("[engine] landmark geocode pipeline error: %s", exc)
 
         session.state = STATE_CONFIRMING_ORIGIN
-        msg = f"¿Tu punto de recogida es {origen}? Di sí para confirmar."
+        msg = f"¿{origen} es correcto?"
         session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,
@@ -549,7 +549,7 @@ class VoiceCallEngine:
             session.origen_text = orig_q
             session.state = STATE_CONFIRMING_ORIGIN
             barrio_str = f", barrio {barrio}" if barrio else ""
-            msg = f"¿Tu punto de recogida es {orig_q}{barrio_str}? Di sí para confirmar."
+            msg = f"¿{orig_q}{barrio_str}, es correcto?"
             session.last_message = msg
             return VoiceTurnResult(
                 speak_text=msg,
@@ -590,7 +590,7 @@ class VoiceCallEngine:
 
         # NEEDS_DISAMBIGUATION u otro estado no terminal → confirmar texto.
         session.state = STATE_CONFIRMING_ORIGIN
-        msg = f"¿Tu punto de recogida es {orig_q}? Di sí para confirmar."
+        msg = f"¿{orig_q} es correcto?"
         session.last_message = msg
         return VoiceTurnResult(
             speak_text=msg,
