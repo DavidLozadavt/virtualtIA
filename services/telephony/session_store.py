@@ -20,6 +20,10 @@ logger = logging.getLogger("lyra.telephony.sessions")
 
 STATE_WAITING_ORIGIN = "waiting_origin"
 STATE_WAITING_GEO_CONTEXT = "waiting_geo_context"
+# Confirmación de un match DUDOSO (Decision.CONFIRM) antes de fijar el origen:
+# "¿Te refieres a X?" → sí/no. Distinto de CONFIRMING_ORIGIN, que confirma un
+# origen ya fijado ("¿Te recogemos ahí?").
+STATE_CONFIRMING_MATCH = "confirming_match"
 STATE_CONFIRMING_ORIGIN = "confirming_origin"
 STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
 STATE_CONFIRMING_DEST = "confirming_dest"
@@ -54,6 +58,9 @@ class CallSession:
     updated_at: float = field(default_factory=time.time)
     sip_metadata: Dict[str, Any] = field(default_factory=dict)
     pending_disambiguation: Optional[dict] = None
+    # Candidato de un match dudoso pendiente de confirmar ("¿Te refieres a X?").
+    # {"canonical": str}. Se consume en STATE_CONFIRMING_MATCH.
+    pending_match_confirmation: Optional[dict] = None
     geo_original_query: Optional[str] = None
     geo_attempt: int = 0
 
