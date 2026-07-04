@@ -140,8 +140,8 @@
     "semantic_hash": ""
   },
   "core/stt_enhancer.py": {
-    "mtime": 1782441014.1313944,
-    "ast_hash": "9c8943eab53a9404056eaee78259dcaa",
+    "mtime": 1782085376.623203,
+    "ast_hash": "a2e0d5ff4aec09b8373dd4abad5e4cbc",
     "semantic_hash": ""
   },
   "core/voice_engine.py": {
@@ -475,8 +475,8 @@
     "semantic_hash": ""
   },
   "services/telephony/call_handler.py": {
-    "mtime": 1782441041.3828201,
-    "ast_hash": "4f235ebc12b2614fe4edb3b7fad7faad",
+    "mtime": 1781980523.95154,
+    "ast_hash": "281170703883d5915bcca1ee5ed25cfa",
     "semantic_hash": ""
   },
   "services/telephony/esl_client.py": {
@@ -500,13 +500,13 @@
     "semantic_hash": ""
   },
   "services/telephony/session_store.py": {
-    "mtime": 1782441226.3921142,
-    "ast_hash": "6aa7b328e7fc046eb0c3e6f1d813e5fc",
+    "mtime": 1781980523.9548826,
+    "ast_hash": "7af2eeeb93c4ad4a92d365b8c0a4ede4",
     "semantic_hash": ""
   },
   "services/telephony/stt_service.py": {
-    "mtime": 1782441107.3324547,
-    "ast_hash": "194bd460248f85fb0b225af31a39e8db",
+    "mtime": 1782084620.4780886,
+    "ast_hash": "c68306e124cb5ea46ceb3ab30c64296b",
     "semantic_hash": ""
   },
   "services/telephony/tts_file_store.py": {
@@ -520,8 +520,8 @@
     "semantic_hash": ""
   },
   "services/telephony/voice_call_engine.py": {
-    "mtime": 1782441313.8367462,
-    "ast_hash": "2997a91738c9a5dcae7f79e25d465c64",
+    "mtime": 1782085376.623722,
+    "ast_hash": "7f39dc6610e7fdbe610f7359dc1cd92a",
     "semantic_hash": ""
   },
   "services/telephony/ws_audio_buffer.py": {
@@ -582,16 +582,6 @@
   "tests/test_audio_preprocess.py": {
     "mtime": 1782084476.6807756,
     "ast_hash": "4f4ae6e8567a6aca9551d561378e0dc6",
-    "semantic_hash": ""
-  },
-  "tests/test_voice_engine_confirm_match.py": {
-    "mtime": 1782441417.5502975,
-    "ast_hash": "1e7cf684ce0b5a6e9f5fbb1f26bf1616",
-    "semantic_hash": ""
-  },
-  "docs/voice/02-wrong-barrio-diagnosis.md": {
-    "mtime": 1782439705.1186101,
-    "ast_hash": "b2732fbad5f9d0e287421e4562a0c442",
     "semantic_hash": ""
   }
 }

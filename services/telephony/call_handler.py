@@ -27,7 +27,7 @@ async def run_conversation_turn(
     session: CallSession,
     *,
     user_text: str = "",
-    confidence: float = 0.0,
+    confidence: Optional[float] = 0.0,
     digits: str = "",
     http_client: Optional[httpx.AsyncClient] = None,
 ) -> VoiceTurnResult:
@@ -106,7 +106,7 @@ async def process_text_turn(
     call_uuid: str,
     *,
     user_text: str,
-    confidence: float = 1.0,
+    confidence: Optional[float] = 1.0,
     digits: str = "",
     http_client: Optional[httpx.AsyncClient] = None,
     create_session_if_missing: bool = False,
@@ -123,10 +123,10 @@ async def process_text_turn(
         return {"success": False, "error": f"Session not found: {call_uuid}"}
 
     logger.info(
-        "[handler] process_text call_uuid=%s text=%r conf=%.2f",
+        "[handler] process_text call_uuid=%s text=%r conf=%s",
         call_uuid,
         user_text[:100],
-        confidence,
+        f"{confidence:.2f}" if confidence is not None else "n/a",
     )
 
     turn = await run_conversation_turn(
@@ -176,7 +176,7 @@ async def process_stt_turn(
     call_uuid: str,
     *,
     recognized_text: str,
-    confidence: float,
+    confidence: Optional[float],
     http_client: Optional[httpx.AsyncClient] = None,
 ) -> Dict[str, Any]:
     """Turno proveniente de STT (WebSocket audio)."""
@@ -187,11 +187,11 @@ async def process_stt_turn(
         session = store.get_or_create(call_uuid)
 
     logger.info(
-        "[handler] stt_turn call_uuid=%s caller=%s text=%r conf=%.2f",
+        "[handler] stt_turn call_uuid=%s caller=%s text=%r conf=%s",
         call_uuid,
         session.caller_phone,
         recognized_text[:100],
-        confidence,
+        f"{confidence:.2f}" if confidence is not None else "n/a",
     )
 
     turn = await run_conversation_turn(

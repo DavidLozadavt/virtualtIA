@@ -1014,9 +1014,14 @@ class AudioQualityProfile:
         self.retry_count:        int          = 0
         self.total_turns:        int          = 0
 
-    def update(self, confidence: float, text: str) -> None:
+    def update(self, confidence: float | None, text: str) -> None:
         self.total_turns += 1
-        self.confidence_history.append(confidence)
+        # confidence None = "desconocida" (p. ej. gpt-4o-mini-transcribe no da
+        # score por palabra). Una muestra ausente NO se promedia: no cuenta como
+        # alta ni como baja. avg_confidence simplemente ignora los turnos sin
+        # señal (si TODOS son None, history queda vacío → avg=1.0 neutral).
+        if confidence is not None:
+            self.confidence_history.append(confidence)
         self.word_count_history.append(len(text.split()) if text else 0)
         # Mantener solo las últimas 5 muestras
         if len(self.confidence_history) > 5:

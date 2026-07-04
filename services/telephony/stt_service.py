@@ -19,45 +19,34 @@ logger = logging.getLogger("lyra.telephony.stt")
 _OPENAI_TRANSCRIBE_DEFAULT = "gpt-4o-mini-transcribe"
 _GROQ_WHISPER_DEFAULT = "whisper-large-v3"
 
-# Términos prioritarios fijos (la ciudad, vías y palabras de guía). El resto de
-# barrios se añade dinámicamente desde el catálogo de core/location_match.
-_STT_PROMPT_PRIORITY = [
-    "Popayán", "Cauca", "Campanario", "Pubenza", "Yanaconas",
-    "Valle del Ortigal", "calle", "carrera", "barrio",
-]
-
-_STT_PROMPT_CACHE: str | None = None
+# Prompt de transcripción. NO se inyecta la lista de barrios del catálogo: hacerlo
+# sesga a gpt-4o-mini-transcribe a SUSTITUIR audio ambiguo por nombres del
+# catálogo (alucinación dirigida → confirma un barrio que el usuario no dijo).
+# En su lugar, instrucciones de fidelidad: transcribir lo que suena, no
+# normalizar topónimos. El reconocimiento de barrios ocurre AGUAS ABAJO
+# (core/location_match), no en el STT.
+_STT_PROMPT = (
+    "Transcripción de llamada de emergencia en español colombiano, región Cauca.\n"
+    "Audio telefónico, posible ruido de fondo, voz bajo estrés.\n"
+    "\n"
+    "Reglas de transcripción:\n"
+    "- Transcribe exactamente lo que se dice. No corrijas ni inferras palabras que no escuchas con claridad.\n"
+    "- Si una palabra es ininteligible, escribe [inaudible].\n"
+    "- Conserva muletillas, titubeos y autocorrecciones del hablante (p. ej. \"en el— en el barrio Las Américas\").\n"
+    "- No normalices nombres de lugares: transcribe lo que suena, aunque no reconozcas el topónimo.\n"
+    "- El hablante puede mencionar: barrios, comunas, veredas, carreras, calles, transversales, diagonales, autopistas, nombres de edificios o puntos de referencia locales.\n"
+    "- Vocabulario frecuente: \"carrera\", \"calle\", \"transversal\", \"diagonal\", \"avenida\", \"barrio\", \"vereda\", \"comuna\", \"urbanización\", \"conjunto\", \"manzana\", \"lote\", \"cuadra\", \"antes de\", \"después de\", \"frente a\", \"al lado de\", \"esquina\"."
+)
 
 
 def _build_stt_prompt() -> str:
-    """Vocabulario local para sesgar el STT hacia nombres propios de Popayán.
+    """Prompt de fidelidad para el STT (sin sesgo de catálogo).
 
-    Combina términos prioritarios fijos con los barrios/landmarks del catálogo
-    (si está disponible). Se construye una sola vez y se cachea.
+    Devuelve un prompt fijo que instruye al modelo a transcribir literalmente
+    sin normalizar topónimos. Antes inyectaba hasta 40 barrios del catálogo, lo
+    que inducía sustituciones alucinadas; eso se eliminó a propósito.
     """
-    global _STT_PROMPT_CACHE
-    if _STT_PROMPT_CACHE is not None:
-        return _STT_PROMPT_CACHE
-
-    terms: list[str] = []
-    try:
-        from core.location_match import catalog_terms
-
-        terms = catalog_terms(40)
-    except Exception as e:  # catálogo opcional: nunca romper el STT
-        logger.debug("[stt] catalog prompt skipped: %s", e)
-
-    seen: set[str] = set()
-    merged: list[str] = []
-    for term in _STT_PROMPT_PRIORITY + terms:
-        t = (term or "").strip()
-        key = t.lower()
-        if t and key not in seen:
-            seen.add(key)
-            merged.append(t)
-
-    _STT_PROMPT_CACHE = ", ".join(merged)
-    return _STT_PROMPT_CACHE
+    return _STT_PROMPT
 
 
 def _openai_stt_api_key() -> str:
@@ -310,7 +299,13 @@ class TelephonySTTService:
                     "error": "no speech detected",
                 }
 
-            confidence = 1.0
+            # Confianza REAL: solo Whisper verbose devuelve probabilidad por
+            # segmento. gpt-4o-mini-transcribe (y cualquier modelo sin score por
+            # palabra) → None = "confianza desconocida", NUNCA un 1.0 falso. Un
+            # 1.0 inventado fluye por todo el pipeline e impide que las capas
+            # downstream desconfíen de un transcript malo. None se trata aguas
+            # abajo como ausente (ni alta ni baja).
+            confidence: float | None = None
             if verbose:
                 segments = getattr(response, "segments", []) or []
                 if segments:
@@ -322,12 +317,13 @@ class TelephonySTTService:
                     if probs:
                         confidence = round(1.0 - sum(probs) / len(probs), 3)
 
+            conf_str = f"{confidence:.2f}" if confidence is not None else "n/a"
             logger.info(
-                '%s transcript_text="%s" call_uuid=%s conf=%.2f',
+                '%s transcript_text="%s" call_uuid=%s conf=%s',
                 log_prefix,
                 text[:200],
                 call_uuid,
-                confidence,
+                conf_str,
             )
             return {
                 "success": True,
