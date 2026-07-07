@@ -119,6 +119,37 @@ async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: st
         )
 
 
+async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
+    """Envía una plantilla de WhatsApp a través del Telecom Manager de Laravel."""
+    from core.config import settings
+    url = f"{settings.INTELLITAXI_API_BASE}/admin/telecom/send"
+    payload = {
+        "company_id": 1,
+        "to": celular,
+        "message": message,
+        "type": "template",
+        "template_name": "servicio_creado_freeswitch",
+        "template_language": "es"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            logger.info(
+                "[engine] WhatsApp template sent call_uuid=%s phone=%s status=%s resp=%s",
+                call_uuid,
+                celular,
+                resp.status_code,
+                resp.text[:200]
+            )
+    except Exception as e:
+        logger.error(
+            "[engine] Error sending WhatsApp template call_uuid=%s phone=%s err=%s",
+            call_uuid,
+            celular,
+            e
+        )
+
+
 class VoiceCallEngine:
     """Procesa turnos de conversación telefónica."""
 
@@ -287,9 +318,8 @@ class VoiceCallEngine:
                 "Hola 👋\n\n"
                 "Soy tu asistente de Taxi Belalcázar.\n\n"
                 "Hemos recibido correctamente tu solicitud de servicio.\n\n"
-                "En este momento estamos buscando un móvil disponible para atender tu solicitud.\n\n"
-                "Te avisaremos cuando un conductor acepte el servicio.\n\n"
-                "¡Gracias por esperar! 🚖"
+                "Hola soy tu asistente de taxi, de taxbelalcazar, "
+                "nos tomaremos un momento para buscar un movil para atender su servicio, gracias por esperar"
             )
             asyncio.create_task(
                 _send_whatsapp_message_async(celular, msg_whatsapp, session.call_uuid)
