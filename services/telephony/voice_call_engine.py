@@ -53,7 +53,7 @@ ASK_DESTINATION = False
 MAX_SILENCE = 3
 
 GREETING = (
-    "Soy Lyra, tu asistente de TaxBelalcazar. "
+    "Soy Lyra, tu asistente de Tax Belalcázar. "
     "Cuéntame, ¿en dónde te recogemos hoy?"
 )
 
@@ -90,34 +90,6 @@ class VoiceTurnResult:
     backend_ok: Optional[bool] = None
 
 
-async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
-    """Envía un mensaje de WhatsApp a través del Telecom Manager de Laravel."""
-    from core.config import settings
-    url = f"{settings.INTELLITAXI_API_BASE}/admin/telecom/send"
-    payload = {
-        "company_id": 1,
-        "to": celular,
-        "message": message,
-        "type": "text"
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
-            logger.info(
-                "[engine] WhatsApp sent call_uuid=%s phone=%s status=%s resp=%s",
-                call_uuid,
-                celular,
-                resp.status_code,
-                resp.text[:200]
-            )
-    except Exception as e:
-        logger.error(
-            "[engine] Error sending WhatsApp call_uuid=%s phone=%s err=%s",
-            call_uuid,
-            celular,
-            e
-        )
-
 
 async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
     """Envía una plantilla de WhatsApp a través del Telecom Manager de Laravel."""
@@ -128,7 +100,7 @@ async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: st
         "to": celular,
         "message": message,
         "type": "template",
-        "template_name": "servicio_creado_freeswitch",
+        "template_name": "servicio_creado",
         "template_language": "es"
     }
     try:
@@ -316,9 +288,9 @@ class VoiceCallEngine:
         if celular:
             msg_whatsapp = (
                 "Hola 👋\n\n"
-                "Soy tu asistente de Taxi Belalcázar.\n\n"
+                "Soy tu asistente de Tax Belalcázar.\n\n"
                 "Hemos recibido correctamente tu solicitud de servicio.\n\n"
-                "Hola soy tu asistente de taxi, de taxbelalcazar, "
+                "Hola soy tu asistente de taxi, de Tax Belalcázar, "
                 "nos tomaremos un momento para buscar un movil para atender su servicio, gracias por esperar"
             )
             asyncio.create_task(
