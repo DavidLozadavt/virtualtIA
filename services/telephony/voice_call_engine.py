@@ -40,7 +40,6 @@ from services.telephony.backend_client import TelephonyBackendClient
 from services.telephony.phone_utils import es_numero_troncal_o_empresa
 from services.telephony.session_store import (
     CallSession,
-    STATE_CONFIRMING_MATCH,
     STATE_CONFIRMING_ORIGIN,
     STATE_CREATING_SERVICE,
     STATE_FINISHED,
@@ -136,23 +135,20 @@ class VoiceCallEngine:
         session: CallSession,
         *,
         user_text: str = "",
-        confidence: Optional[float] = 0.0,
+        confidence: float = 0.0,
         digits: str = "",
         http_client: Optional[httpx.AsyncClient] = None,
     ) -> VoiceTurnResult:
         call_uuid = session.call_uuid
         text = (user_text or "").strip()
 
-        # confidence puede ser None ("desconocida": modelos STT sin score por
-        # palabra). El motor NO compuerta lógica sobre la confianza — solo la
-        # registra. None se formatea como "n/a", nunca colapsa a 0.0.
         logger.info(
-            "[engine] call_uuid=%s state=%s text=%r digits=%r conf=%s",
+            "[engine] call_uuid=%s state=%s text=%r digits=%r conf=%.2f",
             call_uuid,
             session.state,
             text[:100],
             digits,
-            f"{confidence:.2f}" if confidence is not None else "n/a",
+            confidence,
         )
 
         # ── Terminales (servicio ya creado o llamada finalizada) ──
@@ -236,10 +232,6 @@ class VoiceCallEngine:
         if session.state == STATE_WAITING_GEO_CONTEXT:
             return await self._handle_geo_context(session, text)
 
-        # ── confirming_match (match dudoso: "¿Te refieres a X?") ──
-        if session.state == STATE_CONFIRMING_MATCH:
-            return await self._handle_confirming_match(session, text, confidence)
-
         # ── confirming_origin ──
         if session.state == STATE_CONFIRMING_ORIGIN:
             return await self._handle_confirming_origin(session, text, confidence)
@@ -314,13 +306,8 @@ class VoiceCallEngine:
         self,
         session: CallSession,
         text: str,
-        confidence: Optional[float],
-        *,
-        skip_confirm_for: Optional[str] = None,
+        confidence: float,
     ) -> VoiceTurnResult:
-        # skip_confirm_for: canónico que YA se preguntó y el usuario NO confirmó.
-        # Si el clasificador vuelve a proponer ese mismo candidato como CONFIRM,
-        # no se re-pregunta (máx. 1 confirmación por candidato) → cae a REJECT.
         origen = None
         trusted = False
 
@@ -366,36 +353,9 @@ class VoiceCallEngine:
                 session.last_message = msg
                 return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
-            if d == Decision.ACCEPT and m.canonical:
-                # Match fuerte → fijar origen en silencio.
+            if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
                 origen = m.canonical
                 trusted = True
-            elif d == Decision.CONFIRM and m.canonical:
-                # Match DUDOSO → no fijar todavía: preguntar "¿Te refieres a X?".
-                # Si ya se preguntó por este mismo candidato y no se confirmó
-                # (skip_confirm_for), NO se re-pregunta: cae al flujo REJECT (LLM).
-                if skip_confirm_for and _norm_canonical(m.canonical) == _norm_canonical(
-                    skip_confirm_for
-                ):
-                    origen = await self._extract_origin_llm(text)
-                    if not origen:
-                        origen = text
-                else:
-                    session.pending_match_confirmation = {"canonical": m.canonical}
-                    session.state = STATE_CONFIRMING_MATCH
-                    msg = _match_confirmation_question(m.canonical)
-                    session.last_message = msg
-                    logger.info(
-                        "[engine] confirm doubtful match call_uuid=%s cand=%r",
-                        session.call_uuid,
-                        m.canonical,
-                    )
-                    return VoiceTurnResult(
-                        speak_text=msg,
-                        action=VoiceAction.LISTEN,
-                        short_answer=True,
-                        session=session,
-                    )
             elif is_filler(text):
                 session.retry_count += 1
                 # Reintentos consecutivos (>=2): simplificar y pedir por partes
@@ -410,18 +370,6 @@ class VoiceCallEngine:
                 if not origen:
                     origen = text
 
-        return await self._finalize_origin(session, origen, text, trusted)
-
-    async def _finalize_origin(
-        self,
-        session: CallSession,
-        origen: Optional[str],
-        text: str,
-        trusted: bool,
-    ) -> VoiceTurnResult:
-        """Fija el origen ya decidido (override → normalización → geocode) y
-        transiciona a confirming_origin. Reutilizado por la captura inicial y por
-        la confirmación de un match dudoso (STATE_CONFIRMING_MATCH)."""
         # Barrios con dirección fija (nombre geocodifica mal o es ambiguo).
         if origen:
             forced = _ORIGIN_ADDRESS_OVERRIDES.get(strip_accents(origen.lower().strip()))
@@ -467,7 +415,7 @@ class VoiceCallEngine:
                     if barrio:
                         session.origen_barrio = barrio
                         session.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"¿{origen}, barrio {barrio}, es correcto?"
+                        msg = f"El punto de recogida es {origen}, barrio {barrio}."
                         session.last_message = msg
                         return VoiceTurnResult(
                             speak_text=msg,
@@ -539,47 +487,6 @@ class VoiceCallEngine:
             session=session,
         )
 
-    async def _handle_confirming_match(
-        self,
-        session: CallSession,
-        text: str,
-        confidence: Optional[float],
-    ) -> VoiceTurnResult:
-        """Respuesta sí/no a "¿Te refieres a X?" sobre un match dudoso.
-
-        - Sí → fijar X como origen confiable y continuar el flujo normal.
-        - No / sin respuesta clara → NO fijar; caer al flujo de LLM/repreguntar.
-          Se marca skip_confirm_for para no volver a preguntar por el mismo
-          candidato (máx. 1 confirmación → luego REJECT).
-        """
-        pending = session.pending_match_confirmation or {}
-        canonical = pending.get("canonical")
-        # Consumir el pendiente y volver a waiting_origin pase lo que pase: solo
-        # se pregunta UNA vez por candidato.
-        session.pending_match_confirmation = None
-        session.state = STATE_WAITING_ORIGIN
-
-        is_yes = _parse_si_no(text)
-        if is_yes is True and canonical:
-            logger.info(
-                "[engine] doubtful match confirmed YES call_uuid=%s -> %r",
-                session.call_uuid,
-                canonical,
-            )
-            session.retry_count = 0
-            return await self._finalize_origin(session, canonical, canonical, trusted=True)
-
-        # No o sin respuesta clara → tratar como No.
-        logger.info(
-            "[engine] doubtful match NOT confirmed call_uuid=%s cand=%r is_yes=%r",
-            session.call_uuid,
-            canonical,
-            is_yes,
-        )
-        return await self._handle_waiting_origin(
-            session, text, confidence, skip_confirm_for=canonical
-        )
-
     async def _handle_geo_context(self, session: CallSession, text: str) -> VoiceTurnResult:
         orig_q = session.geo_original_query or session.origen_text or ""
         # Sin pending persistido: reintentar pipeline con contexto del usuario
@@ -647,7 +554,7 @@ class VoiceCallEngine:
         self,
         session: CallSession,
         text: str,
-        confidence: Optional[float],
+        confidence: float,
     ) -> VoiceTurnResult:
         is_yes = _parse_si_no(text)
 
@@ -764,19 +671,6 @@ class VoiceCallEngine:
         }
         t_words = set(text.lower().strip().rstrip(".,!?").split())
         return bool(t_words & words) and len(t_words) <= 3
-
-
-def _norm_canonical(s: str) -> str:
-    """Normaliza un canónico para comparar identidad de candidato (sin tildes,
-    minúsculas, recortado)."""
-    return strip_accents((s or "").lower().strip())
-
-
-def _match_confirmation_question(canonical: str) -> str:
-    """Pregunta de confirmación de un match dudoso. Devuelve solo el texto: el
-    pipeline de TTS existente (synthesize_for_telephony sobre speak_text) lo
-    convierte a audio — no se sintetiza ni se hardcodea audio crudo aquí."""
-    return f"¿Te refieres a {canonical}? Di sí o no."
 
 
 def _disambiguation_question(candidates: list) -> str:
