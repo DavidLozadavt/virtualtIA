@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
+import asyncio
 import httpx
 
 from core.address_utils import (
@@ -88,6 +89,35 @@ class VoiceTurnResult:
     short_answer: bool = False
     session: Optional[CallSession] = None
     backend_ok: Optional[bool] = None
+
+
+async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
+    """Envía un mensaje de WhatsApp a través del Telecom Manager de Laravel."""
+    from core.config import settings
+    url = f"{settings.INTELLITAXI_API_BASE}/admin/telecom/send"
+    payload = {
+        "company_id": 1,
+        "to": celular,
+        "message": message,
+        "type": "text"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            logger.info(
+                "[engine] WhatsApp sent call_uuid=%s phone=%s status=%s resp=%s",
+                call_uuid,
+                celular,
+                resp.status_code,
+                resp.text[:200]
+            )
+    except Exception as e:
+        logger.error(
+            "[engine] Error sending WhatsApp call_uuid=%s phone=%s err=%s",
+            call_uuid,
+            celular,
+            e
+        )
 
 
 class VoiceCallEngine:
@@ -259,6 +289,20 @@ class VoiceCallEngine:
         session.service_created = True
         session.state = STATE_FINISHED
         session.last_message = msg
+
+        if celular:
+            msg_whatsapp = (
+                "Hola 👋\n\n"
+                "Soy tu asistente de Taxi Belalcázar.\n\n"
+                "Hemos recibido correctamente tu solicitud de servicio.\n\n"
+                "En este momento estamos buscando un móvil disponible para atender tu solicitud.\n\n"
+                "Te avisaremos cuando un conductor acepte el servicio.\n\n"
+                "¡Gracias por esperar! 🚖"
+            )
+            asyncio.create_task(
+                _send_whatsapp_message_async(celular, msg_whatsapp, session.call_uuid)
+            )
+
         return VoiceTurnResult(
             speak_text=msg,
             action=VoiceAction.HANGUP,
