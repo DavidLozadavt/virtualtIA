@@ -442,16 +442,39 @@ def _wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int]:
 
 
 async def _read_audio_upload(request: Request) -> bytes:
-    """Lee el WAV subido: cuerpo crudo (busybox wget --post-file) o multipart."""
+    """Lee el WAV subido y devuelve bytes WAV crudos.
+
+    FreeSWITCH sube el audio en base64 (busybox wget --post-file trunca binario
+    en el primer byte nulo; base64 no tiene nulos). Aceptamos también WAV crudo
+    o multipart por compatibilidad. Detección: si empieza con 'RIFF' es WAV
+    directo; si no, se intenta decodificar base64.
+    """
+    import base64 as _b64
+
     ct = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in ct:
         form = await request.form()
+        raw = b""
         for key in ("file", "audio", "recording", "utterance"):
             up = form.get(key)
             if up is not None and hasattr(up, "read"):
-                return await up.read()
+                raw = await up.read()
+                break
+    else:
+        raw = await request.body()
+
+    if not raw:
         return b""
-    return await request.body()
+    if raw[:4] == b"RIFF":
+        return raw
+    # base64 (posible con saltos de línea de busybox base64)
+    try:
+        decoded = _b64.b64decode(raw, validate=False)
+        if decoded[:4] == b"RIFF":
+            return decoded
+        return decoded  # otro formato de audio; el parser decidirá
+    except Exception:
+        return raw
 
 
 @freeswitch_router.post("/audio-turn")

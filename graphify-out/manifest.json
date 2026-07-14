@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "api/routers/freeswitch.py": {
-    "mtime": 1784060891.8769953,
-    "ast_hash": "ca2d1c11d05d4b15a1b5e9a6002e348a",
+    "mtime": 1784061534.4537659,
+    "ast_hash": "60e9d8ead11e7d3275648375a3eb4a97",
     "semantic_hash": ""
   },
   "services/telephony/__init__.py": {
@@ -585,8 +585,8 @@
     "semantic_hash": ""
   },
   "docs/freeswitch/lyra_call.lua": {
-    "mtime": 1784060962.39459,
-    "ast_hash": "4eeacfbcfc79745a6e479515398fdb10",
+    "mtime": 1784061555.348034,
+    "ast_hash": "de2641851afab0577d0a018d437f0179",
     "semantic_hash": ""
   },
   "docs/freeswitch/RECORD_LOOP_DEPLOY.md": {

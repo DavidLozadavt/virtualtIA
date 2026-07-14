@@ -90,8 +90,8 @@
     "semantic_hash": ""
   },
   "core/config.py": {
-    "mtime": 1784059493.941244,
-    "ast_hash": "757d387a90be67f792edbb6d33da3abc",
+    "mtime": 1784060856.7480922,
+    "ast_hash": "09de092aa4aa33b2fe567d2d9efca38a",
     "semantic_hash": ""
   },
   "core/conversation_repair.py": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "api/routers/freeswitch.py": {
-    "mtime": 1784059480.6667905,
-    "ast_hash": "9136931e42496959805240cd8fd41ded",
+    "mtime": 1784060891.8769953,
+    "ast_hash": "ca2d1c11d05d4b15a1b5e9a6002e348a",
     "semantic_hash": ""
   },
   "services/telephony/__init__.py": {
@@ -582,6 +582,16 @@
   "tests/test_audio_preprocess.py": {
     "mtime": 1782084476.6807756,
     "ast_hash": "4f4ae6e8567a6aca9551d561378e0dc6",
+    "semantic_hash": ""
+  },
+  "docs/freeswitch/lyra_call.lua": {
+    "mtime": 1784060962.39459,
+    "ast_hash": "4eeacfbcfc79745a6e479515398fdb10",
+    "semantic_hash": ""
+  },
+  "docs/freeswitch/RECORD_LOOP_DEPLOY.md": {
+    "mtime": 1784060997.8360448,
+    "ast_hash": "7164585d8891681bf54f766b622593e5",
     "semantic_hash": ""
   }
 }
