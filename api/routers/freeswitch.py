@@ -25,6 +25,7 @@ from services.telephony.session_store import STATE_FINISHED, get_session_store
 from services.telephony.stt_service import TelephonySTTService
 from services.telephony.tts_file_store import (
     build_audio_url,
+    build_ws_audio_url,
     get_tts_file_store,
     sanitize_audio_id,
 )
@@ -322,13 +323,15 @@ async def inbound_call(request: Request):
                 audio_id=sanitize_audio_id(req.call_uuid),
             )
             audio_url = build_audio_url(audio_id, request)
+            ws_audio_url = build_ws_audio_url(request)
             # Diagnóstico: qué WS de captura se le entrega a FreeSWITCH y si el
             # STT/ESL están listos. Si el usuario "no se escucha", lo primero es
             # verificar que mod_audio_stream reciba esta ws_audio_url y abra el WS.
             logger.info(
                 "[freeswitch] inbound-call capture-setup call_uuid=%s ws_audio_url=%s "
-                "esl_enabled=%s stt_available=%s stt_provider=%s",
+                "(setting=%s) esl_enabled=%s stt_available=%s stt_provider=%s",
                 req.call_uuid,
+                ws_audio_url,
                 settings.FREESWITCH_WS_AUDIO_URL,
                 settings.FREESWITCH_ESL_ENABLED,
                 _stt.available,
@@ -345,7 +348,7 @@ async def inbound_call(request: Request):
                 "audio_id": audio_id,
                 "audio_url": audio_url,
                 "audio_format": "wav",
-                "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
+                "ws_audio_url": ws_audio_url,
             }
             payload = json.dumps(response, ensure_ascii=False)
             logger.info(
@@ -373,7 +376,7 @@ async def inbound_call(request: Request):
                 "action": "play_then_listen",
                 "audio_url": None,
                 "error": "tts_file_generation_failed",
-                "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
+                "ws_audio_url": build_ws_audio_url(request),
             }
 
     # Modo manual / pruebas: incluye base64 (no usar desde mod_curl en producción)
@@ -393,13 +396,234 @@ async def inbound_call(request: Request):
         "state": session.state,
         "audio_base64": audio_b64,
         "audio_format": tts_result.get("format", "mp3"),
-        "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
+        "ws_audio_url": build_ws_audio_url(request),
     }
     logger.info(
         "[freeswitch] inbound-call manual mode response_bytes=%d",
         len(json.dumps(response).encode("utf-8")),
     )
     return response
+
+
+def _wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int]:
+    """Extrae PCM16 mono + sample_rate de un WAV (grabado por FreeSWITCH record).
+
+    Devuelve (b"", 0) si no es un WAV legible. Convierte a mono si viniera
+    estéreo. El STT reaplica el pipeline DSP (resample 16k + HPF + normalize).
+    """
+    import audioop
+    import io
+
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            rate = wf.getframerate() or 8000
+            channels = wf.getnchannels() or 1
+            width = wf.getsampwidth() or 2
+            pcm = wf.readframes(wf.getnframes())
+    except Exception as e:
+        logger.warning("[freeswitch] audio-turn: WAV parse failed: %s", e)
+        return b"", 0
+    if width != 2:
+        try:
+            pcm = audioop.lin2lin(pcm, width, 2)
+        except Exception:
+            return b"", 0
+    if channels > 1:
+        try:
+            pcm = audioop.tomono(pcm, 2, 0.5, 0.5)
+        except Exception:
+            pass
+    return pcm, rate
+
+
+async def _read_audio_upload(request: Request) -> bytes:
+    """Lee el WAV subido: cuerpo crudo (busybox wget --post-file) o multipart."""
+    ct = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in ct:
+        form = await request.form()
+        for key in ("file", "audio", "recording", "utterance"):
+            up = form.get(key)
+            if up is not None and hasattr(up, "read"):
+                return await up.read()
+        return b""
+    return await request.body()
+
+
+@freeswitch_router.post("/audio-turn")
+async def audio_turn(request: Request):
+    """Un turno de conversación desde un WAV grabado (record-loop, sin WS).
+
+    FreeSWITCH graba la locución del usuario y sube el WAV aquí; se transcribe,
+    se ejecuta el motor y se devuelve audio_url + hangup para que el dialplan lo
+    reproduzca. Alternativa a mod_audio_stream con módulos stock.
+    """
+    call_uuid = (
+        request.query_params.get("call_uuid")
+        or request.query_params.get("uuid")
+        or ""
+    )
+    if not call_uuid:
+        return {"success": False, "error": "call_uuid required"}
+
+    wav_bytes = await _read_audio_upload(request)
+    if not wav_bytes:
+        return {"success": False, "call_uuid": call_uuid, "error": "empty audio"}
+
+    store = get_session_store()
+    session = store.get(call_uuid) or _restore_terminal_session(store, call_uuid)
+    if session and (session.service_created or session.state == STATE_FINISHED):
+        logger.info(
+            "[freeswitch] audio-turn skip — call finished call_uuid=%s state=%s",
+            call_uuid,
+            session.state,
+        )
+        return {"success": True, "call_uuid": call_uuid, "hangup": True, "audio_url": None}
+
+    pcm, rate = _wav_to_pcm16(wav_bytes)
+    if not pcm:
+        return {"success": False, "call_uuid": call_uuid, "error": "unreadable wav"}
+
+    logger.info(
+        "[freeswitch] audio-turn call_uuid=%s wav_bytes=%d pcm_bytes=%d rate=%d",
+        call_uuid,
+        len(wav_bytes),
+        len(pcm),
+        rate,
+    )
+
+    try:
+        stt = await _stt.transcribe_telephony_chunk(pcm, encoding="pcm16", call_uuid=call_uuid)
+    except Exception:
+        logger.error(
+            "[freeswitch] audio-turn stt error call_uuid=%s traceback=%s",
+            call_uuid,
+            traceback.format_exc(),
+        )
+        return {"success": False, "call_uuid": call_uuid, "error": "stt_error"}
+
+    transcript = (stt.get("text") or "").strip()
+    if not stt.get("success") or not transcript:
+        logger.info(
+            "[freeswitch] audio-turn no speech call_uuid=%s err=%s",
+            call_uuid,
+            stt.get("error", "empty transcript"),
+        )
+        # Sin habla: el dialplan reintenta grabando de nuevo (no cuelga).
+        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
+
+    raw_transcript = transcript
+    transcript = _normalize_transcript(transcript, stt.get("confidence", 0.0))
+
+    if session and _looks_like_bot_echo(transcript, session.last_message):
+        logger.info(
+            "[freeswitch] audio-turn dropped bot-echo call_uuid=%s text=%r",
+            call_uuid,
+            transcript[:120],
+        )
+        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
+
+    logger.info(
+        '[freeswitch] audio-turn transcript call_uuid=%s raw="%s" norm="%s"',
+        call_uuid,
+        raw_transcript[:200],
+        transcript[:200],
+    )
+
+    http_client = getattr(request.app.state, "http_client", None)
+    try:
+        response = await process_text_turn(
+            store,
+            call_uuid,
+            user_text=transcript,
+            confidence=stt.get("confidence", 0.0),
+            http_client=http_client,
+            create_session_if_missing=True,
+            file_playback=True,
+            request=request,
+        )
+    except Exception:
+        logger.error(
+            "[freeswitch] audio-turn process error call_uuid=%s traceback=%s",
+            call_uuid,
+            traceback.format_exc(),
+        )
+        return {"success": False, "call_uuid": call_uuid, "error": "process_error"}
+
+    # No exponer file_path/base64 al dialplan; solo lo que Lua necesita.
+    out = {
+        k: v
+        for k, v in response.items()
+        if k not in ("file_path", "audio_base64")
+    }
+    out["transcript"] = transcript
+    logger.info(
+        "[freeswitch] audio-turn result call_uuid=%s state=%s action=%s hangup=%s audio_url=%s",
+        call_uuid,
+        response.get("state"),
+        response.get("action"),
+        response.get("hangup"),
+        response.get("audio_url"),
+    )
+    return out
+
+
+def _recording_path(call_uuid: str):
+    from pathlib import Path
+
+    safe = sanitize_audio_id(call_uuid)
+    rec_dir = Path(settings.FREESWITCH_RECORDINGS_DIR or "data/freeswitch_recordings")
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    return safe, rec_dir / f"{safe}.wav"
+
+
+@freeswitch_router.post("/recording")
+async def upload_recording(request: Request):
+    """Recibe la grabación de llamada completa (record_session) al colgar.
+
+    FreeSWITCH sube el WAV con --post-file; se guarda por call_uuid para servirlo
+    luego en el frontend del servicio. Body crudo (audio/wav) o multipart.
+    """
+    call_uuid = (
+        request.query_params.get("call_uuid")
+        or request.query_params.get("uuid")
+        or ""
+    )
+    if not call_uuid:
+        return {"success": False, "error": "call_uuid required"}
+    wav_bytes = await _read_audio_upload(request)
+    if not wav_bytes:
+        return {"success": False, "call_uuid": call_uuid, "error": "empty recording"}
+    safe, path = _recording_path(call_uuid)
+    try:
+        path.write_bytes(wav_bytes)
+    except OSError as e:
+        logger.error("[freeswitch] recording save failed call_uuid=%s err=%s", call_uuid, e)
+        return {"success": False, "call_uuid": call_uuid, "error": "write_failed"}
+    logger.info(
+        "[freeswitch] recording saved call_uuid=%s path=%s bytes=%d",
+        call_uuid,
+        path,
+        len(wav_bytes),
+    )
+    return {
+        "success": True,
+        "call_uuid": call_uuid,
+        "recording_url": f"/freeswitch/recording/{safe}.wav",
+        "bytes": len(wav_bytes),
+    }
+
+
+@freeswitch_router.get("/recording/{call_uuid}.wav")
+async def serve_recording(call_uuid: str):
+    """Sirve la grabación de llamada completa por call_uuid (para el frontend)."""
+    safe, path = _recording_path(call_uuid)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return FileResponse(
+        path=str(path),
+        media_type="audio/wav",
+        filename=f"{safe}.wav",
+    )
 
 
 @freeswitch_router.post("/process-text")
