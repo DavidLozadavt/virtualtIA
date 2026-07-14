@@ -167,6 +167,97 @@ def _extract_neighborhood_google(components: list[dict]) -> Optional[str]:
     return None
 
 
+# Índice de barrios conocidos (nombre + aliases) para ETIQUETAR el neighborhood.
+# Google devuelve el componente `neighborhood` de forma poco fiable en Popayán:
+# a veces None, a veces una calle ("Carrera 17"). Cuando el usuario nombra un
+# barrio conocido explícitamente, su intención manda sobre lo que diga Google.
+_BARRIO_LABEL_INDEX: Optional[dict[str, str]] = None
+
+
+def _build_barrio_label_index() -> dict[str, str]:
+    global _BARRIO_LABEL_INDEX
+    if _BARRIO_LABEL_INDEX is not None:
+        return _BARRIO_LABEL_INDEX
+    idx: dict[str, str] = {}
+    try:
+        from tools.popayan_geodata import BARRIO_ALIASES
+        from core.stt_enhancer import strip_accents
+    except ImportError:
+        _BARRIO_LABEL_INDEX = {}
+        return _BARRIO_LABEL_INDEX
+    # Solo nombres de BARRIO (no landmarks): etiquetamos el barrio, no un POI.
+    for canonical, aliases in BARRIO_ALIASES.items():
+        for name in (canonical, *aliases):
+            k = strip_accents(name.lower().strip())
+            # >=4 chars evita ruido ("la", "sur"); frases alias ganan por longitud.
+            if len(k) >= 4 and k not in idx:
+                idx[k] = canonical
+    _BARRIO_LABEL_INDEX = idx
+    return idx
+
+
+def _barrio_from_query(query: str) -> Optional[str]:
+    """Detecta un barrio conocido nombrado explícitamente en la consulta.
+
+    Usado para corregir/rellenar el neighborhood cuando Google no lo da o lo da
+    mal. Ignora números de dirección; elige el alias más largo (más específico).
+    Retorna el canónico del barrio o None.
+    """
+    if not query:
+        return None
+    from core.stt_enhancer import strip_accents
+
+    idx = _build_barrio_label_index()
+    if not idx:
+        return None
+    q = strip_accents(query.lower())
+    q = re.sub(r"[#\d]", " ", q)          # quitar números de casa/vía
+    q = re.sub(r"\s+", " ", q).strip()
+    if not q:
+        return None
+    best: Optional[tuple[int, str]] = None
+    for alias, canonical in idx.items():
+        if re.search(r"\b" + re.escape(alias) + r"\b", q):
+            if best is None or len(alias) > best[0]:
+                best = (len(alias), canonical)
+    return best[1] if best else None
+
+
+def _resolved(
+    query: str,
+    attempt: int,
+    selected: Optional["GeoCandidate"],
+    candidates: Optional[list] = None,
+) -> "GeoResolution":
+    """Factory de GeoResolution RESOLVED que corrige la etiqueta de barrio.
+
+    Si el usuario nombró un barrio conocido en la consulta y Google no lo dio
+    (None) o lo dio como una calle / otro barrio, la intención del usuario manda.
+    """
+    if selected is not None:
+        stated = _barrio_from_query(query)
+        if stated:
+            from core.stt_enhancer import strip_accents
+
+            cur = strip_accents((selected.neighborhood or "").lower().strip())
+            if not cur or cur != strip_accents(stated.lower().strip()):
+                if selected.neighborhood != stated:
+                    logger.info(
+                        "[PIPELINE] barrio label override: %r → %r (query=%r)",
+                        selected.neighborhood,
+                        stated,
+                        query,
+                    )
+                    selected.neighborhood = stated
+    return GeoResolution(
+        status=ResolutionStatus.RESOLVED,
+        query=query,
+        attempt=attempt,
+        candidates=candidates if candidates is not None else [],
+        selected=selected,
+    )
+
+
 def _to_google_address_format(query: str) -> str:
     """
     Convierte la dirección normalizada interna al formato que Google Geocoding
@@ -882,12 +973,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
         or _accept_low_precision(cached, normalized)
     ):
         logger.info(f"[PIPELINE] memory cache hit: {normalized!r}")
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            selected=cached,
-        )
+        return _resolved(normalized, attempt, cached)
     if cached:
         logger.warning(
             f"[PIPELINE] stale low-precision mem cache ignored: {normalized!r} "
@@ -906,12 +992,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
     if db_cached:
         logger.info(f"[PIPELINE] db cache hit: {normalized!r}")
         _mem_set(normalized, db_cached)
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            selected=db_cached,
-        )
+        return _resolved(normalized, attempt, db_cached)
 
     # 4. Resolución primaria: Autocomplete + Place Details (igual que el
     #    buscador web de Google Maps — encuentra la dirección exacta indexada).
@@ -1041,13 +1122,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
                 if _cache_worthy(best, normalized):
                     _mem_set(normalized, best)
                     _db_set(normalized, best)
-                return GeoResolution(
-                    status=ResolutionStatus.RESOLVED,
-                    query=normalized,
-                    attempt=attempt,
-                    candidates=in_bbox,
-                    selected=best,
-                )
+                return _resolved(normalized, attempt, best, in_bbox)
 
             # Caso 1 (vía sin número) o nombre propio demasiado grueso
             # (APPROXIMATE / NOMINATIM_LOW / fuera del área urbana): NUNCA
@@ -1132,13 +1207,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
                 f"[PIPELINE] skipped cache (display_name unrelated to query): "
                 f"{best.display_name!r} for {normalized!r}"
             )
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            candidates=in_bbox,
-            selected=best,
-        )
+        return _resolved(normalized, attempt, best, in_bbox)
 
     # Fallback (no debería llegar aquí)
     return GeoResolution(
@@ -1265,12 +1334,7 @@ async def handle_user_context(
         if matched and matched.auto_acceptable():
             _mem_set(original_query, matched)
             _db_set(original_query, matched)
-            return GeoResolution(
-                status=ResolutionStatus.RESOLVED,
-                query=original_query,
-                attempt=attempt,
-                selected=matched,
-            )
+            return _resolved(original_query, attempt, matched)
 
     # Extraer solo el término geográfico útil del texto del usuario
     raw_clarification = _strip_preamble(user_text).strip()

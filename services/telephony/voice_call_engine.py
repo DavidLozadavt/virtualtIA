@@ -517,29 +517,39 @@ class VoiceCallEngine:
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
 
         if geo_result.status == ResolutionStatus.FAILED:
-            # Reintentos agotados y el geocoder sigue sin precisión de número de
-            # casa. Fallback seguro y EXPLÍCITO: no aceptar el resultado de baja
-            # precisión, no confirmar una dirección sin coordenadas reales (la
-            # creación del servicio igualmente la rechazaría). Este canal no tiene
-            # transferencia a humano, así que reiniciamos la captura del origen
-            # pidiendo explícitamente número de casa + referencia.
-            logger.warning(
-                "[engine] geo context exhausted (still low precision) → safe "
-                "fallback, restarting origin capture call_uuid=%s",
-                session.call_uuid,
+            # Reintentos agotados: el geocoder no logra precisión de número de
+            # casa. NO reiniciamos la captura (eso genera bucle: el usuario
+            # repite lo mismo → FAILED otra vez). En su lugar tomamos el barrio /
+            # referencia que el usuario acaba de dar y creamos el servicio con
+            # ese barrio: el conductor llama al usuario para afinar el punto
+            # exacto de recogida.
+            barrio = (
+                session.origen_barrio
+                or _try_local_match(text)
+                or text.strip()
+                or orig_q
             )
-            session.state = STATE_WAITING_ORIGIN
-            session.origen_text = None
-            session.origen_barrio = None
-            session.geo_attempt = 0
-            session.geo_original_query = None
+            logger.warning(
+                "[engine] geo context exhausted → barrio-only handoff "
+                "call_uuid=%s barrio=%r origen=%r",
+                session.call_uuid,
+                barrio,
+                orig_q,
+            )
+            session.origen_text = orig_q or barrio
+            session.origen_barrio = barrio
+            session.state = STATE_CREATING_SERVICE
             msg = (
-                "No logré ubicar la dirección exacta. Intentémoslo de nuevo: "
-                "dime la calle con el número de la casa y un punto de "
-                "referencia cercano."
+                f"Listo, te ubico en el barrio {barrio}. El conductor te "
+                "llamará para afinar el punto exacto. Un momento por favor."
             )
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.CREATE_SERVICE,
+                short_answer=True,
+                session=session,
+            )
 
         # NEEDS_DISAMBIGUATION u otro estado no terminal → confirmar texto.
         session.state = STATE_CONFIRMING_ORIGIN
