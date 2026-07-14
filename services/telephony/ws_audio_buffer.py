@@ -4,12 +4,15 @@ Acumulador de audio WebSocket — segmentación por duración + VAD.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Tuple
 
 from core.config import settings
 from services.telephony.audio_vad import detect_end_of_utterance, detect_end_of_utterance_pcm16
+
+logger = logging.getLogger("lyra.freeswitch.wsbuf")
 
 AudioEncoding = Literal["pcm16", "mulaw"]
 
@@ -52,6 +55,8 @@ class WsAudioBuffer:
     # el eco de su propia voz, el buffer lo vacía como "habla del usuario", el STT
     # produce basura y el motor cae en el bucle "no logré entender / ¿me confirmas?".
     muted_until: float = 0.0
+    # Diagnóstico: chunks descartados por mute en la ventana de gate actual.
+    muted_drop_count: int = 0
 
     def is_muted(self) -> bool:
         return time.monotonic() < self.muted_until
@@ -80,7 +85,24 @@ class WsAudioBuffer:
             return
         if self.is_muted():
             # Eco del TTS en curso: descartar para no auto-dispararse.
+            self.muted_drop_count += 1
+            # Log al primer descarte y luego cada ~2s de audio para no inundar.
+            if self.muted_drop_count == 1 or self.muted_drop_count % 100 == 0:
+                logger.info(
+                    "[ws-buf] DROPPING audio (muted/playback gate) call_uuid=%s "
+                    "remaining=%.2fs drops=%d",
+                    self.call_uuid,
+                    max(0.0, self.muted_until - time.monotonic()),
+                    self.muted_drop_count,
+                )
             return
+        if self.muted_drop_count:
+            logger.info(
+                "[ws-buf] gate released call_uuid=%s (dropped %d chunks) — capturing again",
+                self.call_uuid,
+                self.muted_drop_count,
+            )
+            self.muted_drop_count = 0
         if self.first_chunk_at is None:
             self.first_chunk_at = time.monotonic()
         self.buffer.extend(chunk)
