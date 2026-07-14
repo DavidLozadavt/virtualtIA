@@ -54,9 +54,16 @@ class Settings(BaseSettings):
     FREESWITCH_ESL_HOST: str = "127.0.0.1"
     FREESWITCH_ESL_PORT: int = 8021
     FREESWITCH_ESL_PASSWORD: str = "ClueCon"
-    FREESWITCH_WS_AUDIO_URL: str = "ws://127.0.0.1:8000/freeswitch/audio"
+    # Fallback SOLO cuando no hay request ni FREESWITCH_HTTP_BASE_URL: en runtime
+    # build_ws_audio_url deriva el WS del mismo host:puerto que FreeSWITCH ya
+    # alcanza para el WAV (172.17.0.1:8098 en contenedor). Puerto = PORT del app.
+    FREESWITCH_WS_AUDIO_URL: str = "ws://127.0.0.1:8098/freeswitch/audio"
     FREESWITCH_HTTP_BASE_URL: str = ""  # ej. http://127.0.0.1:8098 (para audio_url en inbound-call)
     FREESWITCH_TTS_CACHE_DIR: str = "data/freeswitch_tts"
+    # Grabaciones de llamada completa (record_session) subidas por FreeSWITCH al
+    # final de la llamada. Se sirven por call_uuid para reproducirlas en el
+    # frontend del servicio. Dir controlado por el app (host), no el contenedor.
+    FREESWITCH_RECORDINGS_DIR: str = "data/freeswitch_recordings"
 
     TELEPHONY_STT_PROVIDER: str = ""  # openai | groq | deepgram (vacío = auto según API keys)
     TELEPHONY_STT_MODEL: str = ""  # openai: gpt-4o-mini-transcribe; groq: whisper-large-v3

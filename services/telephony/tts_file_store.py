@@ -98,6 +98,16 @@ class TTSFileStore:
 
 def build_audio_url(audio_id: str, request: Optional[object] = None) -> str:
     """Construye URL HTTP para FreeSWITCH playback."""
+    base = _freeswitch_http_base(request)
+    return f"{base}/freeswitch/audio-file/{audio_id}.wav"
+
+
+def _freeswitch_http_base(request: Optional[object] = None) -> str:
+    """Host:puerto HTTP que FreeSWITCH usa para alcanzar el app.
+
+    Prioridad: FREESWITCH_HTTP_BASE_URL explícito → base_url del request
+    (el Host real por el que FS ya llegó) → fallback local.
+    """
     base = (settings.FREESWITCH_HTTP_BASE_URL or "").rstrip("/")
     if not base and request is not None:
         try:
@@ -111,7 +121,32 @@ def build_audio_url(audio_id: str, request: Optional[object] = None) -> str:
         base = f"http://{settings.HOST}:{settings.PORT}"
         if settings.HOST == "0.0.0.0":
             base = f"http://127.0.0.1:{settings.PORT}"
-    return f"{base}/freeswitch/audio-file/{audio_id}.wav"
+    return base
+
+
+def build_ws_audio_url(request: Optional[object] = None) -> str:
+    """URL WebSocket para mod_audio_stream (captura de voz del usuario).
+
+    Se deriva del MISMO host:puerto que FreeSWITCH ya alcanza para el playback
+    (build_audio_url). Esto evita el desajuste clásico: el default
+    FREESWITCH_WS_AUDIO_URL apunta a 127.0.0.1:8000, pero cuando FreeSWITCH corre
+    en contenedor debe alcanzar el host (p. ej. 172.17.0.1:8098) — el mismo por
+    el que ya descarga el WAV. Si no hay request ni HTTP base explícito, cae al
+    setting FREESWITCH_WS_AUDIO_URL.
+    """
+    base = (settings.FREESWITCH_HTTP_BASE_URL or "").rstrip("/")
+    if not base and request is not None:
+        try:
+            from starlette.requests import Request
+
+            if isinstance(request, Request):
+                base = str(request.base_url).rstrip("/")
+        except Exception:
+            pass
+    if not base:
+        return settings.FREESWITCH_WS_AUDIO_URL
+    ws_base = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    return f"{ws_base}/freeswitch/audio"
 
 
 def _to_wav_8k_mono(tts_result: dict) -> bytes:

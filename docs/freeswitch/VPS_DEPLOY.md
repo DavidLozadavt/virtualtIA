@@ -34,7 +34,12 @@ TELEPHONY_AUDIO_CODEC=PCMU
 TELEPHONY_SAMPLE_RATE=8000
 LYRA_TTS_VOICE=es-BO-SofiaNeural
 
-FREESWITCH_WS_AUDIO_URL=ws://127.0.0.1:8000/freeswitch/audio
+# WS de captura: DEBE ser el host:puerto por el que FreeSWITCH alcanza el app.
+# Si FreeSWITCH corre en contenedor y el app en el host, usa la IP del bridge
+# docker + el PORT del app (el MISMO que ya funciona para el WAV), NO 127.0.0.1.
+# Ej. contenedor→host: ws://172.17.0.1:8098/freeswitch/audio
+# En runtime build_ws_audio_url ya lo deriva del request; esto es fallback.
+FREESWITCH_WS_AUDIO_URL=ws://172.17.0.1:8098/freeswitch/audio
 # ESL solo localhost — NUNCA exponer 8021 a internet
 FREESWITCH_ESL_HOST=127.0.0.1
 FREESWITCH_ESL_PORT=8021
