@@ -151,3 +151,38 @@ def test_untrusted_landmark_coarse_asks_context(monkeypatch):
 
     assert session.state == STATE_WAITING_GEO_CONTEXT
     assert res.action == vce.VoiceAction.LISTEN
+
+
+# ── Confirmación: no crear servicio sin señal afirmativa real ────────────────
+
+def _confirming_session():
+    s = CallSession(call_uuid="t-confirm", state=STATE_CONFIRMING_ORIGIN)
+    s.origen_text = "Valle del Ortigal"
+    s.origen_barrio = "Valle del Ortigal"
+    return s
+
+
+def test_confirm_garbage_long_does_not_create_service():
+    # Alucinación de STT sobre silencio: frase larga que no es sí/no ni lugar.
+    # NO debe crear el servicio (bug: implicit confirm lo creaba sin "sí").
+    engine, session = _engine(), _confirming_session()
+    res = asyncio.run(
+        engine._handle_confirming_origin(
+            session, "Subtitulos realizados por la comunidad de Amara org", 1.0
+        )
+    )
+    assert res.action == vce.VoiceAction.LISTEN
+    assert session.state == STATE_CONFIRMING_ORIGIN
+
+
+def test_confirm_short_ack_creates_service():
+    # Ack coloquial corto (≤3 palabras) sí es confirmación implícita (anti-bucle).
+    engine, session = _engine(), _confirming_session()
+    res = asyncio.run(engine._handle_confirming_origin(session, "de una", 1.0))
+    assert res.action == vce.VoiceAction.CREATE_SERVICE
+
+
+def test_confirm_explicit_yes_creates_service():
+    engine, session = _engine(), _confirming_session()
+    res = asyncio.run(engine._handle_confirming_origin(session, "sí", 1.0))
+    assert res.action == vce.VoiceAction.CREATE_SERVICE
