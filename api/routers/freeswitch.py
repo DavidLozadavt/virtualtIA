@@ -322,6 +322,18 @@ async def inbound_call(request: Request):
                 audio_id=sanitize_audio_id(req.call_uuid),
             )
             audio_url = build_audio_url(audio_id, request)
+            # Diagnóstico: qué WS de captura se le entrega a FreeSWITCH y si el
+            # STT/ESL están listos. Si el usuario "no se escucha", lo primero es
+            # verificar que mod_audio_stream reciba esta ws_audio_url y abra el WS.
+            logger.info(
+                "[freeswitch] inbound-call capture-setup call_uuid=%s ws_audio_url=%s "
+                "esl_enabled=%s stt_available=%s stt_provider=%s",
+                req.call_uuid,
+                settings.FREESWITCH_WS_AUDIO_URL,
+                settings.FREESWITCH_ESL_ENABLED,
+                _stt.available,
+                _stt.provider,
+            )
             response = {
                 "success": True,
                 "call_uuid": req.call_uuid,
@@ -607,7 +619,27 @@ async def _ws_append_audio(
 
     acc.append(chunk)
     should_flush, reason = acc.should_flush()
+    # Heartbeat de diagnóstico: si el audio LLEGA pero nunca dispara STT (VAD no
+    # detecta fin, o sigue por debajo del mínimo, o mute), este log lo revela.
+    if not should_flush and acc.chunk_count and acc.chunk_count % 50 == 0:
+        logger.info(
+            "[freeswitch/ws] buffer heartbeat call_uuid=%s bytes=%d/min=%d/max=%d "
+            "chunks=%d muted=%s reason=%s",
+            call_uuid,
+            len(acc.buffer),
+            acc.min_bytes,
+            acc.max_bytes,
+            acc.chunk_count,
+            acc.is_muted(),
+            reason,
+        )
     if should_flush:
+        logger.info(
+            "[freeswitch/ws] flush trigger call_uuid=%s bytes=%d reason=%s",
+            call_uuid,
+            len(acc.buffer),
+            reason,
+        )
         audio_data = acc.take_and_reset()
         await _flush_audio_turn(websocket, call_uuid, audio_data, encoding=acc.encoding, reason=reason)
 
@@ -621,7 +653,11 @@ async def audio_stream(websocket: WebSocket):
     Respuesta: JSON con speak_text, action, audio_base64 (µ-law o mp3)
     """
     await websocket.accept()
-    logger.info("[freeswitch/ws] websocket accepted")
+    logger.info(
+        "[freeswitch/ws] websocket accepted query=%s headers_uuid=%s",
+        dict(websocket.query_params),
+        websocket.headers.get("x-call-uuid") or websocket.headers.get("call-uuid"),
+    )
 
     call_uuid = _ws_resolve_call_uuid(
         None, query_params=websocket.query_params, data=None
