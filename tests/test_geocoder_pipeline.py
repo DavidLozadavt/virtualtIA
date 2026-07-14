@@ -213,14 +213,15 @@ def test_handle_user_context_exhaustion_returns_failed_not_accept(patched_pipeli
     assert res.selected is None
 
 
-def test_freeswitch_geo_context_exhaustion_triggers_safe_fallback(monkeypatch):
+def test_freeswitch_geo_context_exhaustion_barrio_handoff(monkeypatch):
     """
     FreeSWITCH: cuando run_pipeline devuelve FAILED (intentos agotados, aún baja
-    precisión), el motor NO confirma una dirección sin coordenadas — dispara el
-    fallback explícito y reinicia la captura de origen.
+    precisión), el motor NO reinicia la captura (eso genera bucle). Toma el
+    barrio / referencia que el usuario acaba de dar y crea el servicio con ese
+    barrio: el conductor llama al usuario para afinar el punto exacto.
     """
     import services.telephony.voice_call_engine as vce
-    from services.telephony.session_store import CallSession, STATE_WAITING_ORIGIN
+    from services.telephony.session_store import CallSession, STATE_CREATING_SERVICE
 
     async def _failed_pipeline(query, attempt=1):
         return GeoResolution(
@@ -236,13 +237,46 @@ def test_freeswitch_geo_context_exhaustion_triggers_safe_fallback(monkeypatch):
 
     res = asyncio.run(engine._handle_geo_context(session, "Camilo Torres"))
 
-    # Fallback seguro: sigue escuchando, reinicia origen, no confirma ni cuelga
-    # con una dirección de baja precisión.
-    assert res.action == vce.VoiceAction.LISTEN
-    assert session.state == STATE_WAITING_ORIGIN
-    assert session.origen_text is None
-    assert session.geo_attempt == 0
-    assert "exacta" in res.speak_text.lower() or "de nuevo" in res.speak_text.lower()
+    # Sin bucle: crea el servicio con el barrio dado y cuelga (conductor llama).
+    assert res.action == vce.VoiceAction.CREATE_SERVICE
+    assert session.state == STATE_CREATING_SERVICE
+    assert session.origen_barrio == "Camilo Torres"
+    assert session.origen_text == "Cl. 4 # 26"
+    assert "barrio" in res.speak_text.lower()
+    assert "conductor" in res.speak_text.lower()
+
+
+# ── Etiqueta de barrio: la intención del usuario manda sobre Google ───────────
+
+def test_barrio_from_query_detects_known_barrio():
+    # Barrio nombrado explícitamente en una dirección con número.
+    assert gs._barrio_from_query("Calle 8c # 17-55, La Esmeralda") == "La Esmeralda"
+    assert gs._barrio_from_query("la esmeralda") == "La Esmeralda"
+    assert gs._barrio_from_query("Cra 9 # 20-30 pandiguando") == "Pandiguando"
+    # Sin barrio nombrado → None (no inventar).
+    assert gs._barrio_from_query("Cl. 8c # 17-55") is None
+
+
+def test_resolved_overrides_missing_neighborhood():
+    # Google no dio barrio (None) pero el usuario nombró La Esmeralda.
+    cand = _candidate(LocationType.ROOFTOP, "Cl. 8c #17-55, Popayán", neighborhood=None)
+    res = gs._resolved("Calle 8c # 17-55, La Esmeralda", 1, cand)
+    assert res.status == ResolutionStatus.RESOLVED
+    assert res.selected.neighborhood == "La Esmeralda"
+
+
+def test_resolved_overrides_wrong_street_neighborhood():
+    # Google devolvió una calle como "barrio"; el usuario dijo La Esmeralda.
+    cand = _candidate(LocationType.GEOMETRIC_CENTER, "La Esmeralda, Popayán", neighborhood="Carrera 17")
+    res = gs._resolved("la esmeralda", 1, cand)
+    assert res.selected.neighborhood == "La Esmeralda"
+
+
+def test_resolved_keeps_neighborhood_when_no_barrio_stated():
+    # Sin barrio en la consulta → no se toca el neighborhood de Google.
+    cand = _candidate(LocationType.ROOFTOP, "Cl. 8c #17-55, Popayán", neighborhood="Pomona")
+    res = gs._resolved("Cl. 8c # 17-55", 1, cand)
+    assert res.selected.neighborhood == "Pomona"
 
 
 # ── Cache no debe ser un bypass del guard _NEVER_AUTOACCEPT ───────────────────
