@@ -227,7 +227,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L1",
       "id": "api_middleware",
-      "community": 90,
+      "community": 83,
       "norm_label": "middleware.py"
     },
     {
@@ -236,7 +236,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L14",
       "id": "api_middleware_ratelimitmiddleware",
-      "community": 90,
+      "community": 83,
       "norm_label": "ratelimitmiddleware"
     },
     {
@@ -245,7 +245,7 @@
       "source_file": "",
       "source_location": "",
       "id": "basehttpmiddleware",
-      "community": 90,
+      "community": 83,
       "norm_label": "basehttpmiddleware"
     },
     {
@@ -254,7 +254,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L21",
       "id": "api_middleware_ratelimitmiddleware_init",
-      "community": 90,
+      "community": 83,
       "norm_label": ".__init__()"
     },
     {
@@ -263,7 +263,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L21",
       "id": "api_middleware_py_int",
-      "community": 90,
+      "community": 83,
       "norm_label": "int"
     },
     {
@@ -272,7 +272,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L28",
       "id": "api_middleware_ratelimitmiddleware_dispatch",
-      "community": 90,
+      "community": 83,
       "norm_label": ".dispatch()"
     },
     {
@@ -281,7 +281,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L28",
       "id": "api_middleware_py_request",
-      "community": 90,
+      "community": 83,
       "norm_label": "request"
     },
     {
@@ -290,7 +290,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L1",
       "id": "api_middleware_rationale_1",
-      "community": 90,
+      "community": 83,
       "norm_label": "gateway/middleware.py \u2014 rate limiting en memoria (dict + timestamp).  simple i"
     },
     {
@@ -299,7 +299,7 @@
       "source_file": "api/middleware.py",
       "source_location": "L15",
       "id": "api_middleware_rationale_15",
-      "community": 90,
+      "community": 83,
       "norm_label": "per-ip rate limiter.     max_requests: maximum requests per window.     window"
     },
     {
@@ -308,7 +308,7 @@
       "source_file": "api/routers/admin/__init__.py",
       "source_location": "L1",
       "id": "admin_init",
-      "community": 106,
+      "community": 39,
       "norm_label": "__init__.py"
     },
     {
@@ -632,7 +632,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L1",
       "id": "admin_sessions",
-      "community": 106,
+      "community": 39,
       "norm_label": "sessions.py"
     },
     {
@@ -641,7 +641,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L12",
       "id": "admin_sessions_sessionupdate",
-      "community": 26,
+      "community": 39,
       "norm_label": "sessionupdate"
     },
     {
@@ -650,7 +650,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L17",
       "id": "admin_sessions_list_sessions",
-      "community": 106,
+      "community": 39,
       "norm_label": "list_sessions()"
     },
     {
@@ -659,7 +659,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L17",
       "id": "api_routers_admin_sessions_py_int",
-      "community": 106,
+      "community": 39,
       "norm_label": "int"
     },
     {
@@ -668,7 +668,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L17",
       "id": "api_routers_admin_sessions_py_str",
-      "community": 106,
+      "community": 39,
       "norm_label": "str"
     },
     {
@@ -677,7 +677,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L76",
       "id": "admin_sessions_session_stats",
-      "community": 106,
+      "community": 39,
       "norm_label": "session_stats()"
     },
     {
@@ -686,7 +686,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L106",
       "id": "admin_sessions_export_sessions",
-      "community": 106,
+      "community": 39,
       "norm_label": "export_sessions()"
     },
     {
@@ -695,7 +695,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L131",
       "id": "admin_sessions_session_detail",
-      "community": 106,
+      "community": 39,
       "norm_label": "session_detail()"
     },
     {
@@ -704,7 +704,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L193",
       "id": "admin_sessions_delete_session",
-      "community": 106,
+      "community": 39,
       "norm_label": "delete_session()"
     },
     {
@@ -713,7 +713,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L23",
       "id": "admin_sessions_rationale_23",
-      "community": 106,
+      "community": 39,
       "norm_label": "list conversations (sessions) with pagination."
     },
     {
@@ -722,7 +722,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L77",
       "id": "admin_sessions_rationale_77",
-      "community": 106,
+      "community": 39,
       "norm_label": "session aggregate stats."
     },
     {
@@ -731,7 +731,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L107",
       "id": "admin_sessions_rationale_107",
-      "community": 106,
+      "community": 39,
       "norm_label": "export sessions (basic json export)."
     },
     {
@@ -740,7 +740,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L132",
       "id": "admin_sessions_rationale_132",
-      "community": 106,
+      "community": 39,
       "norm_label": "get full session with messages."
     },
     {
@@ -749,7 +749,7 @@
       "source_file": "api/routers/admin/sessions.py",
       "source_location": "L194",
       "id": "admin_sessions_rationale_194",
-      "community": 106,
+      "community": 39,
       "norm_label": "delete a session and its messages."
     },
     {
@@ -758,7 +758,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L1",
       "id": "admin_stats",
-      "community": 106,
+      "community": 80,
       "norm_label": "stats.py"
     },
     {
@@ -767,7 +767,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "admin_stats_parse_period",
-      "community": 106,
+      "community": 80,
       "norm_label": "_parse_period()"
     },
     {
@@ -776,7 +776,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "api_routers_admin_stats_py_str",
-      "community": 106,
+      "community": 80,
       "norm_label": "str"
     },
     {
@@ -785,7 +785,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L10",
       "id": "api_routers_admin_stats_py_int",
-      "community": 106,
+      "community": 80,
       "norm_label": "int"
     },
     {
@@ -794,7 +794,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L18",
       "id": "admin_stats_empty_stats",
-      "community": 106,
+      "community": 80,
       "norm_label": "_empty_stats()"
     },
     {
@@ -803,7 +803,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L30",
       "id": "admin_stats_get_stats",
-      "community": 106,
+      "community": 80,
       "norm_label": "get_stats()"
     },
     {
@@ -812,7 +812,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L98",
       "id": "admin_stats_hourly_stats",
-      "community": 106,
+      "community": 80,
       "norm_label": "hourly_stats()"
     },
     {
@@ -821,7 +821,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L119",
       "id": "admin_stats_intent_stats",
-      "community": 106,
+      "community": 80,
       "norm_label": "intent_stats()"
     },
     {
@@ -830,7 +830,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L31",
       "id": "admin_stats_rationale_31",
-      "community": 106,
+      "community": 80,
       "norm_label": "get usage statistics for a given period."
     },
     {
@@ -839,7 +839,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L99",
       "id": "admin_stats_rationale_99",
-      "community": 106,
+      "community": 80,
       "norm_label": "get hourly message distribution."
     },
     {
@@ -848,7 +848,7 @@
       "source_file": "api/routers/admin/stats.py",
       "source_location": "L120",
       "id": "admin_stats_rationale_120",
-      "community": 106,
+      "community": 80,
       "norm_label": "intent breakdown (placeholder \u2014 lyra uses llm, not fixed intents)."
     },
     {
@@ -1046,7 +1046,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L77",
       "id": "routers_freeswitch_normalize_transcript",
-      "community": 111,
+      "community": 23,
       "norm_label": "_normalize_transcript()"
     },
     {
@@ -1055,7 +1055,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L77",
       "id": "api_routers_freeswitch_py_str",
-      "community": 111,
+      "community": 122,
       "norm_label": "str"
     },
     {
@@ -1064,7 +1064,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L77",
       "id": "api_routers_freeswitch_py_float",
-      "community": 111,
+      "community": 23,
       "norm_label": "float"
     },
     {
@@ -1073,7 +1073,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L99",
       "id": "routers_freeswitch_echo_tokens",
-      "community": 111,
+      "community": 122,
       "norm_label": "_echo_tokens()"
     },
     {
@@ -1082,7 +1082,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L105",
       "id": "routers_freeswitch_transcript_is_known_entity",
-      "community": 130,
+      "community": 122,
       "norm_label": "_transcript_is_known_entity()"
     },
     {
@@ -1091,7 +1091,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L105",
       "id": "api_routers_freeswitch_py_bool",
-      "community": 111,
+      "community": 122,
       "norm_label": "bool"
     },
     {
@@ -1100,7 +1100,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L124",
       "id": "routers_freeswitch_looks_like_bot_echo",
-      "community": 111,
+      "community": 122,
       "norm_label": "_looks_like_bot_echo()"
     },
     {
@@ -1109,7 +1109,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L151",
       "id": "routers_freeswitch_parse_inbound_body",
-      "community": 111,
+      "community": 23,
       "norm_label": "_parse_inbound_body()"
     },
     {
@@ -1145,7 +1145,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L231",
       "id": "routers_freeswitch_inbound_use_file_mode",
-      "community": 111,
+      "community": 122,
       "norm_label": "_inbound_use_file_mode()"
     },
     {
@@ -1154,7 +1154,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L238",
       "id": "routers_freeswitch_resolve_audio_file_path",
-      "community": 8,
+      "community": 111,
       "norm_label": "_resolve_audio_file_path()"
     },
     {
@@ -1163,7 +1163,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L248",
       "id": "routers_freeswitch_serve_audio_file",
-      "community": 124,
+      "community": 122,
       "norm_label": "serve_audio_file()"
     },
     {
@@ -1215,7 +1215,7 @@
       "label": "_read_audio_upload()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L439",
+      "source_location": "L444",
       "id": "routers_freeswitch_read_audio_upload",
       "community": 111,
       "norm_label": "_read_audio_upload()"
@@ -1224,7 +1224,7 @@
       "label": "audio_turn()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L453",
+      "source_location": "L481",
       "id": "routers_freeswitch_audio_turn",
       "community": 111,
       "norm_label": "audio_turn()"
@@ -1233,7 +1233,7 @@
       "label": "_recording_path()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L570",
+      "source_location": "L598",
       "id": "routers_freeswitch_recording_path",
       "community": 111,
       "norm_label": "_recording_path()"
@@ -1242,7 +1242,7 @@
       "label": "upload_recording()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L580",
+      "source_location": "L608",
       "id": "routers_freeswitch_upload_recording",
       "community": 111,
       "norm_label": "upload_recording()"
@@ -1251,7 +1251,7 @@
       "label": "serve_recording()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L617",
+      "source_location": "L645",
       "id": "routers_freeswitch_serve_recording",
       "community": 111,
       "norm_label": "serve_recording()"
@@ -1260,7 +1260,7 @@
       "label": "process_text()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L630",
+      "source_location": "L658",
       "id": "routers_freeswitch_process_text",
       "community": 111,
       "norm_label": "process_text()"
@@ -1269,7 +1269,7 @@
       "label": "_ws_resolve_call_uuid()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L646",
+      "source_location": "L674",
       "id": "routers_freeswitch_ws_resolve_call_uuid",
       "community": 75,
       "norm_label": "_ws_resolve_call_uuid()"
@@ -1278,16 +1278,16 @@
       "label": "Any",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L646",
+      "source_location": "L674",
       "id": "api_routers_freeswitch_py_any",
-      "community": 111,
+      "community": 75,
       "norm_label": "any"
     },
     {
       "label": "_ws_resolve_caller_number()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L684",
+      "source_location": "L712",
       "id": "routers_freeswitch_ws_resolve_caller_number",
       "community": 75,
       "norm_label": "_ws_resolve_caller_number()"
@@ -1296,7 +1296,7 @@
       "label": "_ws_ensure_session()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L723",
+      "source_location": "L751",
       "id": "routers_freeswitch_ws_ensure_session",
       "community": 75,
       "norm_label": "_ws_ensure_session()"
@@ -1305,7 +1305,7 @@
       "label": "_ws_handle_text_metadata()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L732",
+      "source_location": "L760",
       "id": "routers_freeswitch_ws_handle_text_metadata",
       "community": 75,
       "norm_label": "_ws_handle_text_metadata()"
@@ -1314,43 +1314,43 @@
       "label": "WebSocket",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L732",
+      "source_location": "L760",
       "id": "api_routers_freeswitch_py_websocket",
-      "community": 111,
+      "community": 31,
       "norm_label": "websocket"
     },
     {
       "label": "_get_ws_buffer()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L815",
+      "source_location": "L843",
       "id": "routers_freeswitch_get_ws_buffer",
-      "community": 111,
+      "community": 73,
       "norm_label": "_get_ws_buffer()"
     },
     {
       "label": "WsAudioBuffer",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L815",
+      "source_location": "L843",
       "id": "wsaudiobuffer",
-      "community": 111,
+      "community": 73,
       "norm_label": "wsaudiobuffer"
     },
     {
       "label": "_ws_append_audio()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L824",
+      "source_location": "L852",
       "id": "routers_freeswitch_ws_append_audio",
-      "community": 75,
+      "community": 31,
       "norm_label": "_ws_append_audio()"
     },
     {
       "label": "audio_stream()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L872",
+      "source_location": "L900",
       "id": "routers_freeswitch_audio_stream",
       "community": 75,
       "norm_label": "audio_stream()"
@@ -1359,7 +1359,7 @@
       "label": "_wav_duration_seconds()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L968",
+      "source_location": "L996",
       "id": "routers_freeswitch_wav_duration_seconds",
       "community": 23,
       "norm_label": "_wav_duration_seconds()"
@@ -1368,18 +1368,18 @@
       "label": "_playback_tts_on_call()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L981",
+      "source_location": "L1009",
       "id": "routers_freeswitch_playback_tts_on_call",
-      "community": 111,
+      "community": 31,
       "norm_label": "_playback_tts_on_call()"
     },
     {
       "label": "_flush_audio_turn()",
       "file_type": "code",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L1004",
+      "source_location": "L1032",
       "id": "routers_freeswitch_flush_audio_turn",
-      "community": 111,
+      "community": 31,
       "norm_label": "_flush_audio_turn()"
     },
     {
@@ -1397,7 +1397,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L78",
       "id": "routers_freeswitch_rationale_78",
-      "community": 111,
+      "community": 23,
       "norm_label": "limpieza stt compartida con el gateway twilio (preprocess_stt): elimina     fra"
     },
     {
@@ -1406,7 +1406,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L106",
       "id": "routers_freeswitch_rationale_106",
-      "community": 130,
+      "community": 122,
       "norm_label": "true si el transcript resuelve a una entidad real del catalogo local     (barri"
     },
     {
@@ -1415,7 +1415,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L125",
       "id": "routers_freeswitch_rationale_125",
-      "community": 111,
+      "community": 122,
       "norm_label": "true si el transcript es un fragmento literal del ultimo mensaje del bot."
     },
     {
@@ -1424,7 +1424,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L152",
       "id": "routers_freeswitch_rationale_152",
-      "community": 111,
+      "community": 23,
       "norm_label": "acepta json o form-urlencoded (curl desde dialplan freeswitch)."
     },
     {
@@ -1433,7 +1433,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L232",
       "id": "routers_freeswitch_rationale_232",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64."
     },
     {
@@ -1442,7 +1442,7 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L249",
       "id": "routers_freeswitch_rationale_249",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr"
     },
     {
@@ -1464,29 +1464,29 @@
       "norm_label": "extrae pcm16 mono + sample_rate de un wav (grabado por freeswitch record)."
     },
     {
-      "label": "Lee el WAV subido: cuerpo crudo (busybox wget --post-file) o multipart.",
+      "label": "Lee el WAV subido y devuelve bytes WAV crudos.      FreeSWITCH sube el audio e",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L440",
-      "id": "routers_freeswitch_rationale_440",
+      "source_location": "L445",
+      "id": "routers_freeswitch_rationale_445",
       "community": 111,
-      "norm_label": "lee el wav subido: cuerpo crudo (busybox wget --post-file) o multipart."
+      "norm_label": "lee el wav subido y devuelve bytes wav crudos.      freeswitch sube el audio e"
     },
     {
       "label": "Un turno de conversaci\u00f3n desde un WAV grabado (record-loop, sin WS).      Free",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L454",
-      "id": "routers_freeswitch_rationale_454",
-      "community": 75,
+      "source_location": "L482",
+      "id": "routers_freeswitch_rationale_482",
+      "community": 111,
       "norm_label": "un turno de conversacion desde un wav grabado (record-loop, sin ws).      free"
     },
     {
       "label": "Recibe la grabaci\u00f3n de llamada completa (record_session) al colgar.      FreeS",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L581",
-      "id": "routers_freeswitch_rationale_581",
+      "source_location": "L609",
+      "id": "routers_freeswitch_rationale_609",
       "community": 111,
       "norm_label": "recibe la grabacion de llamada completa (record_session) al colgar.      frees"
     },
@@ -1494,8 +1494,8 @@
       "label": "Sirve la grabaci\u00f3n de llamada completa por call_uuid (para el frontend).",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L618",
-      "id": "routers_freeswitch_rationale_618",
+      "source_location": "L646",
+      "id": "routers_freeswitch_rationale_646",
       "community": 111,
       "norm_label": "sirve la grabacion de llamada completa por call_uuid (para el frontend)."
     },
@@ -1503,8 +1503,8 @@
       "label": "Resuelve call_uuid desde query string o metadata JSON.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L652",
-      "id": "routers_freeswitch_rationale_652",
+      "source_location": "L680",
+      "id": "routers_freeswitch_rationale_680",
       "community": 75,
       "norm_label": "resuelve call_uuid desde query string o metadata json."
     },
@@ -1512,8 +1512,8 @@
       "label": "Resuelve caller_number desde query string o metadata JSON.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L690",
-      "id": "routers_freeswitch_rationale_690",
+      "source_location": "L718",
+      "id": "routers_freeswitch_rationale_718",
       "community": 75,
       "norm_label": "resuelve caller_number desde query string o metadata json."
     },
@@ -1521,8 +1521,8 @@
       "label": "Vincula sesi\u00f3n si inbound-call ya la cre\u00f3 o la crea aqu\u00ed.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L724",
-      "id": "routers_freeswitch_rationale_724",
+      "source_location": "L752",
+      "id": "routers_freeswitch_rationale_752",
       "community": 75,
       "norm_label": "vincula sesion si inbound-call ya la creo o la crea aqui."
     },
@@ -1530,8 +1530,8 @@
       "label": "Procesa frame text (JSON metadata o control).     Returns: (call_uuid, caller_n",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L739",
-      "id": "routers_freeswitch_rationale_739",
+      "source_location": "L767",
+      "id": "routers_freeswitch_rationale_767",
       "community": 75,
       "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n"
     },
@@ -1539,17 +1539,17 @@
       "label": "Acumula audio y dispara STT al alcanzar duraci\u00f3n m\u00ednima + silencio o m\u00e1ximo.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L830",
-      "id": "routers_freeswitch_rationale_830",
-      "community": 75,
+      "source_location": "L858",
+      "id": "routers_freeswitch_rationale_858",
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo."
     },
     {
       "label": "WebSocket mod_audio_stream (FreeSWITCH) \u2194 Lyra.      Acepta frames text (JSON",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L873",
-      "id": "routers_freeswitch_rationale_873",
+      "source_location": "L901",
+      "id": "routers_freeswitch_rationale_901",
       "community": 75,
       "norm_label": "websocket mod_audio_stream (freeswitch) \u2194 lyra.      acepta frames text (json"
     },
@@ -1557,8 +1557,8 @@
       "label": "Duraci\u00f3n del WAV local para esperar a que termine el playback antes de colgar.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L969",
-      "id": "routers_freeswitch_rationale_969",
+      "source_location": "L997",
+      "id": "routers_freeswitch_rationale_997",
       "community": 23,
       "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar."
     },
@@ -1566,9 +1566,9 @@
       "label": "Reproduce TTS en la llamada v\u00eda ESL uuid_broadcast usando URL HTTP.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
-      "source_location": "L982",
-      "id": "routers_freeswitch_rationale_982",
-      "community": 111,
+      "source_location": "L1010",
+      "id": "routers_freeswitch_rationale_1010",
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http."
     },
     {
@@ -1577,7 +1577,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L1",
       "id": "routers_main",
-      "community": 26,
+      "community": 106,
       "norm_label": "main.py"
     },
     {
@@ -1586,7 +1586,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "routers_main_chat",
-      "community": 26,
+      "community": 106,
       "norm_label": "chat()"
     },
     {
@@ -1595,7 +1595,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_chatrequest",
-      "community": 26,
+      "community": 106,
       "norm_label": "chatrequest"
     },
     {
@@ -1604,7 +1604,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_request",
-      "community": 26,
+      "community": 106,
       "norm_label": "request"
     },
     {
@@ -1613,7 +1613,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L23",
       "id": "api_routers_main_py_chatservice",
-      "community": 26,
+      "community": 106,
       "norm_label": "chatservice"
     },
     {
@@ -1622,7 +1622,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L37",
       "id": "routers_main_health",
-      "community": 26,
+      "community": 106,
       "norm_label": "health()"
     },
     {
@@ -1631,7 +1631,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L53",
       "id": "routers_main_reverse_geocode_api",
-      "community": 26,
+      "community": 106,
       "norm_label": "reverse_geocode_api()"
     },
     {
@@ -1640,7 +1640,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L53",
       "id": "api_routers_main_py_float",
-      "community": 26,
+      "community": 106,
       "norm_label": "float"
     },
     {
@@ -1649,7 +1649,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L60",
       "id": "routers_main_geocode_api",
-      "community": 10,
+      "community": 106,
       "norm_label": "geocode_api()"
     },
     {
@@ -1658,7 +1658,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L60",
       "id": "api_routers_main_py_str",
-      "community": 10,
+      "community": 106,
       "norm_label": "str"
     },
     {
@@ -1667,7 +1667,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L67",
       "id": "routers_main_list_projects",
-      "community": 26,
+      "community": 106,
       "norm_label": "list_projects()"
     },
     {
@@ -1676,7 +1676,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L114",
       "id": "routers_main_public_status",
-      "community": 26,
+      "community": 106,
       "norm_label": "public_status()"
     },
     {
@@ -1685,7 +1685,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L1",
       "id": "routers_main_rationale_1",
-      "community": 26,
+      "community": 106,
       "norm_label": "gateway/router.py \u2014 fastapi endpoints: post /chat, get /health, get /projects."
     },
     {
@@ -1694,7 +1694,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L28",
       "id": "routers_main_rationale_28",
-      "community": 26,
+      "community": 106,
       "norm_label": "main chat endpoint.     delegates processing to chatservice."
     },
     {
@@ -1703,7 +1703,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L38",
       "id": "routers_main_rationale_38",
-      "community": 26,
+      "community": 106,
       "norm_label": "health check \u2014 reports model and db status."
     },
     {
@@ -1712,7 +1712,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L54",
       "id": "routers_main_rationale_54",
-      "community": 26,
+      "community": 106,
       "norm_label": "proxy for reverse geocoding to avoid cors and handle api keys securely."
     },
     {
@@ -1721,7 +1721,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L61",
       "id": "routers_main_rationale_61",
-      "community": 10,
+      "community": 106,
       "norm_label": "proxy for forward geocoding with google maps support & osm fallback."
     },
     {
@@ -1730,7 +1730,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L68",
       "id": "routers_main_rationale_68",
-      "community": 26,
+      "community": 106,
       "norm_label": "list all active projects in the database."
     },
     {
@@ -1739,7 +1739,7 @@
       "source_file": "api/routers/main.py",
       "source_location": "L115",
       "id": "routers_main_rationale_115",
-      "community": 26,
+      "community": 106,
       "norm_label": "public status endpoint \u2014 lightweight check for frontend clients."
     },
     {
@@ -1748,7 +1748,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L1",
       "id": "routers_tts",
-      "community": 106,
+      "community": 83,
       "norm_label": "tts.py"
     },
     {
@@ -1757,7 +1757,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "routers_tts_serve_audio",
-      "community": 106,
+      "community": 83,
       "norm_label": "serve_audio()"
     },
     {
@@ -1766,7 +1766,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "api_routers_tts_py_str",
-      "community": 106,
+      "community": 83,
       "norm_label": "str"
     },
     {
@@ -1775,7 +1775,7 @@
       "source_file": "api/routers/tts.py",
       "source_location": "L8",
       "id": "api_routers_tts_py_request",
-      "community": 106,
+      "community": 83,
       "norm_label": "request"
     },
     {
@@ -1847,7 +1847,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L119",
       "id": "routers_twilio_cache_audio",
-      "community": 31,
+      "community": 95,
       "norm_label": "_cache_audio()"
     },
     {
@@ -1892,7 +1892,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L167",
       "id": "routers_twilio_twilio_speech_model",
-      "community": 37,
+      "community": 0,
       "norm_label": "_twilio_speech_model()"
     },
     {
@@ -1910,7 +1910,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L175",
       "id": "routers_twilio_deepgram_language",
-      "community": 125,
+      "community": 0,
       "norm_label": "_deepgram_language()"
     },
     {
@@ -1937,7 +1937,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L189",
       "id": "routers_twilio_build_speech_attrs",
-      "community": 37,
+      "community": 0,
       "norm_label": "_build_speech_attrs()"
     },
     {
@@ -1946,7 +1946,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L235",
       "id": "routers_twilio_build_dtmf_gather",
-      "community": 37,
+      "community": 95,
       "norm_label": "_build_dtmf_gather()"
     },
     {
@@ -2018,7 +2018,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L376",
       "id": "routers_twilio_callsession_speech_timeout",
-      "community": 108,
+      "community": 94,
       "norm_label": ".speech_timeout()"
     },
     {
@@ -2063,7 +2063,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L409",
       "id": "routers_twilio_xml_escape",
-      "community": 115,
+      "community": 0,
       "norm_label": "_xml_escape()"
     },
     {
@@ -2099,7 +2099,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L452",
       "id": "routers_twilio_generate_play_twiml",
-      "community": 39,
+      "community": 95,
       "norm_label": "_generate_play_twiml()"
     },
     {
@@ -2108,7 +2108,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L458",
       "id": "routers_twilio_twiml_gather_message",
-      "community": 37,
+      "community": 116,
       "norm_label": "_twiml_gather_message()"
     },
     {
@@ -2126,7 +2126,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L544",
       "id": "routers_twilio_twiml_say_hangup",
-      "community": 39,
+      "community": 95,
       "norm_label": "_twiml_say_hangup()"
     },
     {
@@ -2135,7 +2135,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L568",
       "id": "routers_twilio_twiml_redirect",
-      "community": 115,
+      "community": 46,
       "norm_label": "_twiml_redirect()"
     },
     {
@@ -2144,7 +2144,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L597",
       "id": "routers_twilio_twiml_response",
-      "community": 94,
+      "community": 0,
       "norm_label": "_twiml_response()"
     },
     {
@@ -2207,7 +2207,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L801",
       "id": "routers_twilio_aggressive_normalize",
-      "community": 119,
+      "community": 91,
       "norm_label": "_aggressive_normalize()"
     },
     {
@@ -2288,7 +2288,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1022",
       "id": "routers_twilio_extract_address",
-      "community": 0,
+      "community": 36,
       "norm_label": "extract_address()"
     },
     {
@@ -2315,7 +2315,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1130",
       "id": "routers_twilio_create_service",
-      "community": 114,
+      "community": 108,
       "norm_label": "_create_service()"
     },
     {
@@ -2342,7 +2342,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1242",
       "id": "routers_twilio_voice",
-      "community": 94,
+      "community": 0,
       "norm_label": "voice()"
     },
     {
@@ -2360,7 +2360,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2429",
       "id": "routers_twilio_get_base_url_for_twilio",
-      "community": 31,
+      "community": 0,
       "norm_label": "_get_base_url_for_twilio()"
     },
     {
@@ -2378,7 +2378,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2481",
       "id": "routers_twilio_voice_maintenance_process",
-      "community": 31,
+      "community": 95,
       "norm_label": "voice_maintenance_process()"
     },
     {
@@ -2387,7 +2387,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2527",
       "id": "routers_twilio_voice_maintenance_simple",
-      "community": 31,
+      "community": 95,
       "norm_label": "voice_maintenance_simple()"
     },
     {
@@ -2459,7 +2459,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L120",
       "id": "routers_twilio_rationale_120",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico."
     },
     {
@@ -2477,7 +2477,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L176",
       "id": "routers_twilio_rationale_176",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es"
     },
     {
@@ -2486,7 +2486,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L190",
       "id": "routers_twilio_rationale_190",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza"
     },
     {
@@ -2495,7 +2495,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L240",
       "id": "routers_twilio_rationale_240",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a"
     },
     {
@@ -2549,7 +2549,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L453",
       "id": "routers_twilio_rationale_453",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado."
     },
     {
@@ -2558,7 +2558,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L466",
       "id": "routers_twilio_rationale_466",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es"
     },
     {
@@ -2576,7 +2576,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L545",
       "id": "routers_twilio_rationale_545",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra."
     },
     {
@@ -2585,7 +2585,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L569",
       "id": "routers_twilio_rationale_569",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado)."
     },
     {
@@ -2594,7 +2594,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L802",
       "id": "routers_twilio_rationale_802",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli"
     },
     {
@@ -2657,7 +2657,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1023",
       "id": "routers_twilio_rationale_1023",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano"
     },
     {
@@ -2666,7 +2666,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1137",
       "id": "routers_twilio_rationale_1137",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel."
     },
     {
@@ -2684,7 +2684,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L1243",
       "id": "routers_twilio_rationale_1243",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar."
     },
     {
@@ -2711,7 +2711,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2482",
       "id": "routers_twilio_rationale_2482",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento."
     },
     {
@@ -2720,7 +2720,7 @@
       "source_file": "api/routers/twilio.py",
       "source_location": "L2528",
       "id": "routers_twilio_rationale_2528",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel"
     },
     {
@@ -3152,7 +3152,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L196",
       "id": "core_address_utils_geocode_cache_get",
-      "community": 24,
+      "community": 104,
       "norm_label": "_geocode_cache_get()"
     },
     {
@@ -3242,7 +3242,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L382",
       "id": "core_address_utils_strip_preamble",
-      "community": 24,
+      "community": 0,
       "norm_label": "_strip_preamble()"
     },
     {
@@ -3278,7 +3278,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L446",
       "id": "core_address_utils_normalize_address",
-      "community": 7,
+      "community": 18,
       "norm_label": "normalize_address()"
     },
     {
@@ -3323,7 +3323,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L633",
       "id": "core_address_utils_build_local_match_index",
-      "community": 80,
+      "community": 24,
       "norm_label": "_build_local_match_index()"
     },
     {
@@ -3332,7 +3332,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L693",
       "id": "core_address_utils_try_local_match",
-      "community": 80,
+      "community": 24,
       "norm_label": "_try_local_match()"
     },
     {
@@ -3341,7 +3341,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L754",
       "id": "core_address_utils_looks_like_place",
-      "community": 73,
+      "community": 24,
       "norm_label": "looks_like_place()"
     },
     {
@@ -3350,7 +3350,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L786",
       "id": "core_address_utils_extract_pickup_address",
-      "community": 73,
+      "community": 24,
       "norm_label": "extract_pickup_address()"
     },
     {
@@ -3359,7 +3359,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L808",
       "id": "core_address_utils_extract_destination_address",
-      "community": 73,
+      "community": 24,
       "norm_label": "extract_destination_address()"
     },
     {
@@ -3422,7 +3422,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L383",
       "id": "core_address_utils_rationale_383",
-      "community": 24,
+      "community": 0,
       "norm_label": "elimina saludos y relleno del inicio/fin del texto."
     },
     {
@@ -3431,7 +3431,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L447",
       "id": "core_address_utils_rationale_447",
-      "community": 7,
+      "community": 18,
       "norm_label": "estandariza nomenclatura (calle \u2192 cl, etc.)"
     },
     {
@@ -3467,7 +3467,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L694",
       "id": "core_address_utils_rationale_694",
-      "community": 80,
+      "community": 24,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod"
     },
     {
@@ -3476,7 +3476,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L755",
       "id": "core_address_utils_rationale_755",
-      "community": 73,
+      "community": 24,
       "norm_label": "valida que `text` parezca una ubicacion real en popayan, para descartar     ext"
     },
     {
@@ -3485,7 +3485,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L787",
       "id": "core_address_utils_rationale_787",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de recogida del texto libre.     retorna (direccion, none) o ("
     },
     {
@@ -3494,7 +3494,7 @@
       "source_file": "core/address_utils.py",
       "source_location": "L809",
       "id": "core_address_utils_rationale_809",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de destino del texto libre."
     },
     {
@@ -3602,7 +3602,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L1",
       "id": "core_conversation_repair",
-      "community": 108,
+      "community": 76,
       "norm_label": "conversation_repair.py"
     },
     {
@@ -3683,7 +3683,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L120",
       "id": "core_conversation_repair_infer_intent",
-      "community": 108,
+      "community": 76,
       "norm_label": "infer_intent()"
     },
     {
@@ -3692,7 +3692,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L182",
       "id": "core_conversation_repair_extract_partial_location",
-      "community": 108,
+      "community": 76,
       "norm_label": "_extract_partial_location()"
     },
     {
@@ -3737,7 +3737,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L377",
       "id": "core_conversation_repair_conversationrepair_generate_zone_hint",
-      "community": 80,
+      "community": 12,
       "norm_label": ".generate_zone_hint()"
     },
     {
@@ -3755,7 +3755,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L423",
       "id": "core_conversation_repair_bargeinhandler_is_interruption",
-      "community": 80,
+      "community": 76,
       "norm_label": ".is_interruption()"
     },
     {
@@ -3764,7 +3764,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L423",
       "id": "core_conversation_repair_py_bool",
-      "community": 80,
+      "community": 76,
       "norm_label": "bool"
     },
     {
@@ -3809,7 +3809,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L1",
       "id": "core_conversation_repair_rationale_1",
-      "community": 108,
+      "community": 76,
       "norm_label": "core/conversation_repair.py \u2014 motor de reparacion conversacional inteligente par"
     },
     {
@@ -3854,7 +3854,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L125",
       "id": "core_conversation_repair_rationale_125",
-      "community": 108,
+      "community": 76,
       "norm_label": "infiere la intencion del usuario con scores de probabilidad.          retorna:"
     },
     {
@@ -3863,7 +3863,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L183",
       "id": "core_conversation_repair_rationale_183",
-      "community": 108,
+      "community": 76,
       "norm_label": "extrae cualquier fragmento que parezca un lugar (aun si el texto es incompleto)."
     },
     {
@@ -3899,7 +3899,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L378",
       "id": "core_conversation_repair_rationale_378",
-      "community": 80,
+      "community": 12,
       "norm_label": "si se detecta una referencia a zona pero no a barrio especifico,         genera"
     },
     {
@@ -3917,7 +3917,7 @@
       "source_file": "core/conversation_repair.py",
       "source_location": "L424",
       "id": "core_conversation_repair_rationale_424",
-      "community": 80,
+      "community": 76,
       "norm_label": "detecta si el texto parcial indica intencion de interrumpir.         se usa con"
     },
     {
@@ -3962,7 +3962,7 @@
       "source_file": "core/database.py",
       "source_location": "L28",
       "id": "core_database_get_connection",
-      "community": 28,
+      "community": 5,
       "norm_label": "get_connection()"
     },
     {
@@ -3971,7 +3971,7 @@
       "source_file": "core/database.py",
       "source_location": "L28",
       "id": "core_database_py_str",
-      "community": 28,
+      "community": 5,
       "norm_label": "str"
     },
     {
@@ -3980,7 +3980,7 @@
       "source_file": "core/database.py",
       "source_location": "L49",
       "id": "core_database_run_migration",
-      "community": 28,
+      "community": 5,
       "norm_label": "run_migration()"
     },
     {
@@ -3989,7 +3989,7 @@
       "source_file": "core/database.py",
       "source_location": "L63",
       "id": "core_database_check_connection",
-      "community": 11,
+      "community": 106,
       "norm_label": "check_connection()"
     },
     {
@@ -3998,7 +3998,7 @@
       "source_file": "core/database.py",
       "source_location": "L63",
       "id": "core_database_py_bool",
-      "community": 11,
+      "community": 106,
       "norm_label": "bool"
     },
     {
@@ -4016,7 +4016,7 @@
       "source_file": "core/database.py",
       "source_location": "L29",
       "id": "core_database_rationale_29",
-      "community": 28,
+      "community": 5,
       "norm_label": "yields a pymysql connection. closes it on exit.     allows specifying a differe"
     },
     {
@@ -4025,7 +4025,7 @@
       "source_file": "core/database.py",
       "source_location": "L50",
       "id": "core_database_rationale_50",
-      "community": 28,
+      "community": 5,
       "norm_label": "execute a .sql file against the database."
     },
     {
@@ -4034,7 +4034,7 @@
       "source_file": "core/database.py",
       "source_location": "L64",
       "id": "core_database_rationale_64",
-      "community": 11,
+      "community": 106,
       "norm_label": "quick ping to verify mysql is reachable."
     },
     {
@@ -4106,7 +4106,7 @@
       "source_file": "",
       "source_location": "",
       "id": "enum",
-      "community": 8,
+      "community": 53,
       "norm_label": "enum"
     },
     {
@@ -4115,7 +4115,7 @@
       "source_file": "core/geo_types.py",
       "source_location": "L54",
       "id": "core_geo_types_resolutionstatus",
-      "community": 108,
+      "community": 53,
       "norm_label": "resolutionstatus"
     },
     {
@@ -4277,7 +4277,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L83",
       "id": "core_geocoder_service_db_get",
-      "community": 53,
+      "community": 1,
       "norm_label": "_db_get()"
     },
     {
@@ -4295,7 +4295,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L151",
       "id": "core_geocoder_service_google_location_type",
-      "community": 53,
+      "community": 1,
       "norm_label": "_google_location_type()"
     },
     {
@@ -4340,7 +4340,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L226",
       "id": "core_geocoder_service_resolved",
-      "community": 53,
+      "community": 1,
       "norm_label": "_resolved()"
     },
     {
@@ -4457,7 +4457,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L771",
       "id": "core_geocoder_service_cache_worthy",
-      "community": 42,
+      "community": 97,
       "norm_label": "_cache_worthy()"
     },
     {
@@ -4466,7 +4466,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L771",
       "id": "core_geocoder_service_py_bool",
-      "community": 42,
+      "community": 53,
       "norm_label": "bool"
     },
     {
@@ -4475,7 +4475,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L800",
       "id": "core_geocoder_service_result_matches_query",
-      "community": 42,
+      "community": 97,
       "norm_label": "_result_matches_query()"
     },
     {
@@ -4493,7 +4493,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L829",
       "id": "core_geocoder_service_build_context_question",
-      "community": 42,
+      "community": 1,
       "norm_label": "_build_context_question()"
     },
     {
@@ -4502,7 +4502,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L835",
       "id": "core_geocoder_service_build_house_number_question",
-      "community": 42,
+      "community": 1,
       "norm_label": "_build_house_number_question()"
     },
     {
@@ -4529,7 +4529,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L899",
       "id": "core_geocoder_service_build_disambiguation_question",
-      "community": 42,
+      "community": 1,
       "norm_label": "_build_disambiguation_question()"
     },
     {
@@ -4538,7 +4538,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L928",
       "id": "core_geocoder_service_short_display",
-      "community": 42,
+      "community": 102,
       "norm_label": "_short_display()"
     },
     {
@@ -4547,7 +4547,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L939",
       "id": "core_geocoder_service_run_pipeline",
-      "community": 42,
+      "community": 1,
       "norm_label": "run_pipeline()"
     },
     {
@@ -4619,7 +4619,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L232",
       "id": "core_geocoder_service_rationale_232",
-      "community": 53,
+      "community": 1,
       "norm_label": "factory de georesolution resolved que corrige la etiqueta de barrio.      si e"
     },
     {
@@ -4709,7 +4709,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L772",
       "id": "core_geocoder_service_rationale_772",
-      "community": 42,
+      "community": 97,
       "norm_label": "solo cachear resultados que tengan relacion semantica con la query.     previen"
     },
     {
@@ -4718,7 +4718,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L801",
       "id": "core_geocoder_service_rationale_801",
-      "community": 42,
+      "community": 97,
       "norm_label": "verifica que el resultado de google corresponde a la direccion del usuario,"
     },
     {
@@ -4736,7 +4736,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L836",
       "id": "core_geocoder_service_rationale_836",
-      "community": 42,
+      "community": 1,
       "norm_label": "pregunta especifica para precision de direccion: el geocoder devolvio el     ce"
     },
     {
@@ -4763,7 +4763,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L900",
       "id": "core_geocoder_service_rationale_900",
-      "community": 42,
+      "community": 1,
       "norm_label": "construye pregunta solo con datos reales de los candidatos.     solo se llama c"
     },
     {
@@ -4772,7 +4772,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L929",
       "id": "core_geocoder_service_rationale_929",
-      "community": 42,
+      "community": 102,
       "norm_label": "extrae la parte mas util del display_name completo."
     },
     {
@@ -4781,7 +4781,7 @@
       "source_file": "core/geocoder_service.py",
       "source_location": "L940",
       "id": "core_geocoder_service_rationale_940",
-      "community": 42,
+      "community": 1,
       "norm_label": "pipeline completo: cache \u2192 google \u2192 nominatim \u2192 decision.      retorna georeso"
     },
     {
@@ -5159,7 +5159,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L60",
       "id": "core_location_match_locationmatch",
-      "community": 98,
+      "community": 90,
       "norm_label": "locationmatch"
     },
     {
@@ -5195,7 +5195,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L96",
       "id": "core_location_match_py_float",
-      "community": 84,
+      "community": 49,
       "norm_label": "float"
     },
     {
@@ -5204,7 +5204,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L100",
       "id": "core_location_match_base_decision",
-      "community": 98,
+      "community": 90,
       "norm_label": "_base_decision()"
     },
     {
@@ -5222,7 +5222,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L140",
       "id": "core_location_match_entity",
-      "community": 98,
+      "community": 90,
       "norm_label": "_entity"
     },
     {
@@ -5240,7 +5240,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L156",
       "id": "core_location_match_py_str",
-      "community": 49,
+      "community": 98,
       "norm_label": "str"
     },
     {
@@ -5258,7 +5258,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L261",
       "id": "core_location_match_is_all_filler",
-      "community": 49,
+      "community": 98,
       "norm_label": "_is_all_filler()"
     },
     {
@@ -5267,7 +5267,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L261",
       "id": "core_location_match_py_bool",
-      "community": 49,
+      "community": 98,
       "norm_label": "bool"
     },
     {
@@ -5276,7 +5276,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L270",
       "id": "core_location_match_is_filler",
-      "community": 49,
+      "community": 0,
       "norm_label": "is_filler()"
     },
     {
@@ -5285,7 +5285,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L279",
       "id": "core_location_match_content_tokens",
-      "community": 49,
+      "community": 98,
       "norm_label": "_content_tokens()"
     },
     {
@@ -5303,7 +5303,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L309",
       "id": "core_location_match_has_content",
-      "community": 49,
+      "community": 98,
       "norm_label": "_has_content()"
     },
     {
@@ -5312,7 +5312,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L313",
       "id": "core_location_match_catalog_terms",
-      "community": 84,
+      "community": 98,
       "norm_label": "catalog_terms()"
     },
     {
@@ -5330,7 +5330,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L411",
       "id": "core_location_match_best_for_entity",
-      "community": 98,
+      "community": 90,
       "norm_label": "_best_for_entity()"
     },
     {
@@ -5375,7 +5375,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L101",
       "id": "core_location_match_rationale_101",
-      "community": 98,
+      "community": 90,
       "norm_label": "decision por tipo+confianza, sin considerar desambiguacion. una     coincidenci"
     },
     {
@@ -5393,7 +5393,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L262",
       "id": "core_location_match_rationale_262",
-      "community": 49,
+      "community": 98,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'b"
     },
     {
@@ -5402,7 +5402,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L271",
       "id": "core_location_match_rationale_271",
-      "community": 49,
+      "community": 0,
       "norm_label": "api publica: true si `text` es solo cortesia/relleno/afirmacion y no     contie"
     },
     {
@@ -5420,7 +5420,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L314",
       "id": "core_location_match_rationale_314",
-      "community": 84,
+      "community": 98,
       "norm_label": "nombres canonicos del catalogo local (barrios + landmarks de popayan).      pe"
     },
     {
@@ -5438,7 +5438,7 @@
       "source_file": "core/location_match.py",
       "source_location": "L412",
       "id": "core_location_match_rationale_412",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     en"
     },
     {
@@ -5456,7 +5456,7 @@
       "source_file": "core/logger.py",
       "source_location": "L1",
       "id": "core_logger",
-      "community": 34,
+      "community": 19,
       "norm_label": "logger.py"
     },
     {
@@ -5465,7 +5465,7 @@
       "source_file": "core/logger.py",
       "source_location": "L6",
       "id": "core_logger_setup_logger",
-      "community": 34,
+      "community": 19,
       "norm_label": "setup_logger()"
     },
     {
@@ -5474,7 +5474,7 @@
       "source_file": "core/logger.py",
       "source_location": "L6",
       "id": "core_logger_py_str",
-      "community": 34,
+      "community": 19,
       "norm_label": "str"
     },
     {
@@ -5483,7 +5483,7 @@
       "source_file": "core/logger.py",
       "source_location": "L7",
       "id": "core_logger_rationale_7",
-      "community": 34,
+      "community": 19,
       "norm_label": "configura un logger estandar con salida a consola y archivo rotativo."
     },
     {
@@ -5555,7 +5555,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L69",
       "id": "core_streaming_pipeline_streamingsttbuffer_init",
-      "community": 108,
+      "community": 117,
       "norm_label": ".__init__()"
     },
     {
@@ -5564,7 +5564,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L69",
       "id": "core_streaming_pipeline_py_int",
-      "community": 108,
+      "community": 117,
       "norm_label": "int"
     },
     {
@@ -5573,7 +5573,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L75",
       "id": "core_streaming_pipeline_streamingsttbuffer_add_partial",
-      "community": 108,
+      "community": 117,
       "norm_label": ".add_partial()"
     },
     {
@@ -5582,7 +5582,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L75",
       "id": "core_streaming_pipeline_py_str",
-      "community": 108,
+      "community": 117,
       "norm_label": "str"
     },
     {
@@ -5591,7 +5591,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L75",
       "id": "core_streaming_pipeline_py_float",
-      "community": 108,
+      "community": 117,
       "norm_label": "float"
     },
     {
@@ -5600,7 +5600,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L98",
       "id": "core_streaming_pipeline_streamingsttbuffer_finalize",
-      "community": 108,
+      "community": 117,
       "norm_label": ".finalize()"
     },
     {
@@ -5609,7 +5609,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L122",
       "id": "core_streaming_pipeline_streamingsttbuffer_best_hypothesis",
-      "community": 108,
+      "community": 117,
       "norm_label": ".best_hypothesis()"
     },
     {
@@ -5618,7 +5618,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L131",
       "id": "core_streaming_pipeline_streamingsttbuffer_elapsed_seconds",
-      "community": 108,
+      "community": 117,
       "norm_label": ".elapsed_seconds()"
     },
     {
@@ -5627,7 +5627,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L135",
       "id": "core_streaming_pipeline_streamingsttbuffer_silence_duration",
-      "community": 108,
+      "community": 117,
       "norm_label": ".silence_duration()"
     },
     {
@@ -5636,7 +5636,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L139",
       "id": "core_streaming_pipeline_streamingsttbuffer_speech_rate_estimate",
-      "community": 108,
+      "community": 117,
       "norm_label": ".speech_rate_estimate()"
     },
     {
@@ -5663,7 +5663,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L176",
       "id": "core_streaming_pipeline_partialintentdetector_process_partial",
-      "community": 108,
+      "community": 76,
       "norm_label": ".process_partial()"
     },
     {
@@ -5681,7 +5681,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L236",
       "id": "core_streaming_pipeline_partialintentdetector_reset",
-      "community": 108,
+      "community": 117,
       "norm_label": ".reset()"
     },
     {
@@ -5690,7 +5690,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L242",
       "id": "core_streaming_pipeline_partialintentdetector_accumulated_locations",
-      "community": 108,
+      "community": 117,
       "norm_label": ".accumulated_locations()"
     },
     {
@@ -5726,7 +5726,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L268",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_update_speech_rate",
-      "community": 108,
+      "community": 117,
       "norm_label": ".update_speech_rate()"
     },
     {
@@ -5735,7 +5735,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L274",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_avg_speech_rate",
-      "community": 108,
+      "community": 117,
       "norm_label": ".avg_speech_rate()"
     },
     {
@@ -5744,7 +5744,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L279",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_on_empty_response",
-      "community": 108,
+      "community": 117,
       "norm_label": ".on_empty_response()"
     },
     {
@@ -5753,7 +5753,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L282",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_on_successful_response",
-      "community": 108,
+      "community": 117,
       "norm_label": ".on_successful_response()"
     },
     {
@@ -5762,7 +5762,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L286",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_on_retry",
-      "community": 108,
+      "community": 117,
       "norm_label": ".on_retry()"
     },
     {
@@ -5771,7 +5771,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L289",
       "id": "core_streaming_pipeline_adaptiveendpointcontroller_get_parameters",
-      "community": 108,
+      "community": 117,
       "norm_label": ".get_parameters()"
     },
     {
@@ -5789,7 +5789,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L390",
       "id": "core_streaming_pipeline_prioritized_canonical_names",
-      "community": 108,
+      "community": 117,
       "norm_label": "_prioritized_canonical_names()"
     },
     {
@@ -5807,7 +5807,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L463",
       "id": "core_streaming_pipeline_get_contextual_hints",
-      "community": 9,
+      "community": 117,
       "norm_label": "_get_contextual_hints()"
     },
     {
@@ -5834,7 +5834,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L510",
       "id": "core_streaming_pipeline_turnprocessor_process_final_speech",
-      "community": 108,
+      "community": 117,
       "norm_label": ".process_final_speech()"
     },
     {
@@ -5843,7 +5843,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L591",
       "id": "core_streaming_pipeline_turnprocessor_classify_quality",
-      "community": 108,
+      "community": 117,
       "norm_label": "._classify_quality()"
     },
     {
@@ -5852,7 +5852,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L624",
       "id": "core_streaming_pipeline_turnprocessor_process_partial_speech",
-      "community": 108,
+      "community": 117,
       "norm_label": ".process_partial_speech()"
     },
     {
@@ -5861,7 +5861,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L652",
       "id": "core_streaming_pipeline_stream_llm_response",
-      "community": 13,
+      "community": 117,
       "norm_label": "stream_llm_response()"
     },
     {
@@ -5870,7 +5870,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L690",
       "id": "core_streaming_pipeline_generate_contextual_response",
-      "community": 108,
+      "community": 117,
       "norm_label": "generate_contextual_response()"
     },
     {
@@ -5897,7 +5897,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L76",
       "id": "core_streaming_pipeline_rationale_76",
-      "community": 108,
+      "community": 117,
       "norm_label": "agrega un fragmento parcial y retorna el texto acumulado mejorado.         apli"
     },
     {
@@ -5906,7 +5906,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L99",
       "id": "core_streaming_pipeline_rationale_99",
-      "community": 108,
+      "community": 117,
       "norm_label": "marca la transcripcion como final y aplica todas las correcciones.         reto"
     },
     {
@@ -5915,7 +5915,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L123",
       "id": "core_streaming_pipeline_rationale_123",
-      "community": 108,
+      "community": 117,
       "norm_label": "mejor texto disponible (final si existe, si no el ultimo parcial)."
     },
     {
@@ -5924,7 +5924,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L136",
       "id": "core_streaming_pipeline_rationale_136",
-      "community": 108,
+      "community": 117,
       "norm_label": "segundos desde la ultima actividad de voz."
     },
     {
@@ -5933,7 +5933,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L140",
       "id": "core_streaming_pipeline_rationale_140",
-      "community": 108,
+      "community": 117,
       "norm_label": "estima palabras por segundo basado en el texto acumulado y el tiempo.         u"
     },
     {
@@ -5951,7 +5951,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L182",
       "id": "core_streaming_pipeline_rationale_182",
-      "community": 108,
+      "community": 76,
       "norm_label": "procesa texto parcial y retorna estado de intencion actualizado."
     },
     {
@@ -5969,7 +5969,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L290",
       "id": "core_streaming_pipeline_rationale_290",
-      "community": 108,
+      "community": 117,
       "norm_label": "retorna los parametros optimos para el proximo <gather>.                  stat"
     },
     {
@@ -5978,7 +5978,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L391",
       "id": "core_streaming_pipeline_rationale_391",
-      "community": 108,
+      "community": 117,
       "norm_label": "nombres canonicos del catalogo, con los mas relevantes al frente."
     },
     {
@@ -5996,7 +5996,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L468",
       "id": "core_streaming_pipeline_rationale_468",
-      "community": 9,
+      "community": 117,
       "norm_label": "genera hints de vocabulario segun el estado y el modelo stt.      - captura (w"
     },
     {
@@ -6014,7 +6014,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L515",
       "id": "core_streaming_pipeline_rationale_515",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa el texto final de stt de un turno.                  retorna:"
     },
     {
@@ -6023,7 +6023,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L631",
       "id": "core_streaming_pipeline_rationale_631",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa un fragmento de speech parcial (de partialresultcallback).         reto"
     },
     {
@@ -6032,7 +6032,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L658",
       "id": "core_streaming_pipeline_rationale_658",
-      "community": 13,
+      "community": 117,
       "norm_label": "hace streaming del llm y retorna el texto completo.     llama on_chunk(texto_pa"
     },
     {
@@ -6041,7 +6041,7 @@
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L698",
       "id": "core_streaming_pipeline_rationale_698",
-      "community": 108,
+      "community": 117,
       "norm_label": "genera una respuesta contextual del llm para casos ambiguos.     usa el histori"
     },
     {
@@ -6059,7 +6059,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L24",
       "id": "core_stt_enhancer_strip_accents",
-      "community": 80,
+      "community": 76,
       "norm_label": "strip_accents()"
     },
     {
@@ -6149,7 +6149,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L564",
       "id": "core_stt_enhancer_alias_covers_input",
-      "community": 76,
+      "community": 109,
       "norm_label": "_alias_covers_input()"
     },
     {
@@ -6176,7 +6176,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L674",
       "id": "core_stt_enhancer_is_street",
-      "community": 38,
+      "community": 109,
       "norm_label": "_is_street()"
     },
     {
@@ -6194,7 +6194,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L763",
       "id": "core_stt_enhancer_build_phonetic_repair_index",
-      "community": 109,
+      "community": 9,
       "norm_label": "_build_phonetic_repair_index()"
     },
     {
@@ -6230,7 +6230,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L945",
       "id": "core_stt_enhancer_repair_mangled_street_address",
-      "community": 91,
+      "community": 87,
       "norm_label": "repair_mangled_street_address()"
     },
     {
@@ -6284,7 +6284,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L1040",
       "id": "core_stt_enhancer_audioqualityprofile_is_noisy_call",
-      "community": 97,
+      "community": 38,
       "norm_label": ".is_noisy_call()"
     },
     {
@@ -6356,7 +6356,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L25",
       "id": "core_stt_enhancer_rationale_25",
-      "community": 80,
+      "community": 76,
       "norm_label": "quita tildes para comparaciones foneticas."
     },
     {
@@ -6428,7 +6428,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L565",
       "id": "core_stt_enhancer_rationale_565",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas."
     },
     {
@@ -6446,7 +6446,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L675",
       "id": "core_stt_enhancer_rationale_675",
-      "community": 38,
+      "community": 109,
       "norm_label": "true si `text` tiene nomenclatura de via con numero (calle/cra/av + digito)."
     },
     {
@@ -6491,7 +6491,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L946",
       "id": "core_stt_enhancer_rationale_946",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car"
     },
     {
@@ -6509,7 +6509,7 @@
       "source_file": "core/stt_enhancer.py",
       "source_location": "L1041",
       "id": "core_stt_enhancer_rationale_1041",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja."
     },
     {
@@ -6813,7 +6813,7 @@
       "label": "post_file()",
       "file_type": "code",
       "source_file": "docs/freeswitch/lyra_call.lua",
-      "source_location": "L36",
+      "source_location": "L39",
       "id": "freeswitch_lyra_call_post_file",
       "community": 127,
       "norm_label": "post_file()"
@@ -6822,7 +6822,7 @@
       "label": "download()",
       "file_type": "code",
       "source_file": "docs/freeswitch/lyra_call.lua",
-      "source_location": "L45",
+      "source_location": "L50",
       "id": "freeswitch_lyra_call_download",
       "community": 127,
       "norm_label": "download()"
@@ -6831,7 +6831,7 @@
       "label": "jfield()",
       "file_type": "code",
       "source_file": "docs/freeswitch/lyra_call.lua",
-      "source_location": "L50",
+      "source_location": "L55",
       "id": "freeswitch_lyra_call_jfield",
       "community": 127,
       "norm_label": "jfield()"
@@ -6840,7 +6840,7 @@
       "label": "play_url()",
       "file_type": "code",
       "source_file": "docs/freeswitch/lyra_call.lua",
-      "source_location": "L56",
+      "source_location": "L61",
       "id": "freeswitch_lyra_call_play_url",
       "community": 127,
       "norm_label": "play_url()"
@@ -6851,7 +6851,7 @@
       "source_file": "main.py",
       "source_location": "L1",
       "id": "main",
-      "community": 34,
+      "community": 83,
       "norm_label": "main.py"
     },
     {
@@ -6860,7 +6860,7 @@
       "source_file": "main.py",
       "source_location": "L39",
       "id": "main_lifespan",
-      "community": 34,
+      "community": 83,
       "norm_label": "lifespan()"
     },
     {
@@ -6869,7 +6869,7 @@
       "source_file": "main.py",
       "source_location": "L39",
       "id": "fastapi",
-      "community": 106,
+      "community": 83,
       "norm_label": "fastapi"
     },
     {
@@ -6905,7 +6905,7 @@
       "source_file": "main.py",
       "source_location": "L1",
       "id": "main_rationale_1",
-      "community": 34,
+      "community": 83,
       "norm_label": "main.py \u2014 lyra microservice entry point  ... [truncated for brevity - analisis"
     },
     {
@@ -6914,7 +6914,7 @@
       "source_file": "main.py",
       "source_location": "L40",
       "id": "main_rationale_40",
-      "community": 34,
+      "community": 83,
       "norm_label": "fastapi lifespan event.     loads the gguf model into memory at startup."
     },
     {
@@ -6968,7 +6968,7 @@
       "source_file": "orchestrator/context_builder.py",
       "source_location": "L83",
       "id": "orchestrator_context_builder_load_project_config",
-      "community": 34,
+      "community": 47,
       "norm_label": "load_project_config()"
     },
     {
@@ -8165,7 +8165,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L1",
       "id": "orchestrator_response_engine",
-      "community": 89,
+      "community": 37,
       "norm_label": "response_engine.py"
     },
     {
@@ -8174,7 +8174,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L28",
       "id": "orchestrator_response_engine_load_templates",
-      "community": 89,
+      "community": 37,
       "norm_label": "_load_templates()"
     },
     {
@@ -8183,7 +8183,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L49",
       "id": "orchestrator_response_engine_get_variations",
-      "community": 89,
+      "community": 37,
       "norm_label": "_get_variations()"
     },
     {
@@ -8192,7 +8192,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L49",
       "id": "orchestrator_response_engine_py_str",
-      "community": 89,
+      "community": 37,
       "norm_label": "str"
     },
     {
@@ -8201,7 +8201,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L67",
       "id": "orchestrator_response_engine_select_template",
-      "community": 89,
+      "community": 37,
       "norm_label": "_select_template()"
     },
     {
@@ -8210,7 +8210,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L98",
       "id": "orchestrator_response_engine_format_distance",
-      "community": 89,
+      "community": 37,
       "norm_label": "_format_distance()"
     },
     {
@@ -8219,7 +8219,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L98",
       "id": "orchestrator_response_engine_py_float",
-      "community": 89,
+      "community": 37,
       "norm_label": "float"
     },
     {
@@ -8228,7 +8228,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L111",
       "id": "orchestrator_response_engine_build_business_list",
-      "community": 89,
+      "community": 37,
       "norm_label": "_build_business_list()"
     },
     {
@@ -8237,7 +8237,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L111",
       "id": "orchestrator_response_engine_py_int",
-      "community": 89,
+      "community": 37,
       "norm_label": "int"
     },
     {
@@ -8255,7 +8255,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L169",
       "id": "orchestrator_response_engine_clear_session_history",
-      "community": 89,
+      "community": 37,
       "norm_label": "clear_session_history()"
     },
     {
@@ -8264,7 +8264,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L1",
       "id": "orchestrator_response_engine_rationale_1",
-      "community": 89,
+      "community": 37,
       "norm_label": "orchestrator/response_engine.py \u2014 motor de respuestas determinista sin llm.  s"
     },
     {
@@ -8273,7 +8273,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L29",
       "id": "orchestrator_response_engine_rationale_29",
-      "community": 89,
+      "community": 37,
       "norm_label": "carga (o recarga si cambio) el archivo de plantillas yaml."
     },
     {
@@ -8282,7 +8282,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L50",
       "id": "orchestrator_response_engine_rationale_50",
-      "community": 89,
+      "community": 37,
       "norm_label": "obtiene la lista de variaciones para una personalidad/intent/escenario."
     },
     {
@@ -8291,7 +8291,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L73",
       "id": "orchestrator_response_engine_rationale_73",
-      "community": 89,
+      "community": 37,
       "norm_label": "selecciona una plantilla evitando repetir las ultimas 5 usadas en la sesion."
     },
     {
@@ -8300,7 +8300,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L99",
       "id": "orchestrator_response_engine_rationale_99",
-      "community": 89,
+      "community": 37,
       "norm_label": "formatea distancia: metros si <1km, km si >=1km."
     },
     {
@@ -8309,7 +8309,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L112",
       "id": "orchestrator_response_engine_rationale_112",
-      "community": 89,
+      "community": 37,
       "norm_label": "genera la lista con vinetas de negocios con tags biz para el frontend."
     },
     {
@@ -8327,7 +8327,7 @@
       "source_file": "orchestrator/response_engine.py",
       "source_location": "L170",
       "id": "orchestrator_response_engine_rationale_170",
-      "community": 89,
+      "community": 37,
       "norm_label": "limpia el historial anti-repeticion de una conversacion."
     },
     {
@@ -8993,7 +8993,7 @@
       "source_file": "scripts/diagnose_lowprec_cache.py",
       "source_location": "L1",
       "id": "scripts_diagnose_lowprec_cache",
-      "community": 28,
+      "community": 5,
       "norm_label": "diagnose_lowprec_cache.py"
     },
     {
@@ -9002,7 +9002,7 @@
       "source_file": "scripts/diagnose_lowprec_cache.py",
       "source_location": "L22",
       "id": "scripts_diagnose_lowprec_cache_main",
-      "community": 28,
+      "community": 5,
       "norm_label": "main()"
     },
     {
@@ -9011,7 +9011,7 @@
       "source_file": "scripts/diagnose_lowprec_cache.py",
       "source_location": "L1",
       "id": "scripts_diagnose_lowprec_cache_rationale_1",
-      "community": 28,
+      "community": 5,
       "norm_label": "scripts/diagnose_lowprec_cache.py \u2014 diagnostico (solo lectura).  cuenta cuantas"
     },
     {
@@ -9029,7 +9029,7 @@
       "source_file": "services/chat_service.py",
       "source_location": "L1",
       "id": "services_chat_service",
-      "community": 106,
+      "community": 5,
       "norm_label": "chat_service.py"
     },
     {
@@ -9695,7 +9695,7 @@
       "source_file": "services/telephony/backend_client.py",
       "source_location": "L19",
       "id": "telephony_backend_client_telephonybackendclient",
-      "community": 111,
+      "community": 92,
       "norm_label": "telephonybackendclient"
     },
     {
@@ -9803,7 +9803,7 @@
       "source_file": "services/telephony/backend_client.py",
       "source_location": "L20",
       "id": "telephony_backend_client_rationale_20",
-      "community": 111,
+      "community": 92,
       "norm_label": "envia solicitudes telefonicas al backend intellitaxi."
     },
     {
@@ -10109,7 +10109,7 @@
       "source_file": "services/telephony/esl_client.py",
       "source_location": "L117",
       "id": "telephony_esl_client_get_esl_client",
-      "community": 111,
+      "community": 31,
       "norm_label": "get_esl_client()"
     },
     {
@@ -10406,7 +10406,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L60",
       "id": "telephony_session_store_callsession_touch",
-      "community": 8,
+      "community": 13,
       "norm_label": ".touch()"
     },
     {
@@ -10415,7 +10415,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L63",
       "id": "telephony_session_store_callsession_to_dict",
-      "community": 8,
+      "community": 13,
       "norm_label": ".to_dict()"
     },
     {
@@ -10424,7 +10424,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L67",
       "id": "telephony_session_store_callsession_from_dict",
-      "community": 8,
+      "community": 13,
       "norm_label": ".from_dict()"
     },
     {
@@ -10433,7 +10433,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L73",
       "id": "telephony_session_store_memorybackend",
-      "community": 8,
+      "community": 13,
       "norm_label": "_memorybackend"
     },
     {
@@ -10442,7 +10442,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L74",
       "id": "telephony_session_store_memorybackend_init",
-      "community": 8,
+      "community": 13,
       "norm_label": ".__init__()"
     },
     {
@@ -10451,7 +10451,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L74",
       "id": "services_telephony_session_store_py_int",
-      "community": 8,
+      "community": 13,
       "norm_label": "int"
     },
     {
@@ -10460,7 +10460,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L78",
       "id": "telephony_session_store_memorybackend_get",
-      "community": 8,
+      "community": 13,
       "norm_label": ".get()"
     },
     {
@@ -10469,7 +10469,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L78",
       "id": "services_telephony_session_store_py_str",
-      "community": 8,
+      "community": 13,
       "norm_label": "str"
     },
     {
@@ -10478,7 +10478,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L82",
       "id": "telephony_session_store_memorybackend_set",
-      "community": 8,
+      "community": 13,
       "norm_label": ".set()"
     },
     {
@@ -10487,7 +10487,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L87",
       "id": "telephony_session_store_memorybackend_delete",
-      "community": 8,
+      "community": 13,
       "norm_label": ".delete()"
     },
     {
@@ -10496,7 +10496,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L90",
       "id": "telephony_session_store_memorybackend_count",
-      "community": 8,
+      "community": 13,
       "norm_label": ".count()"
     },
     {
@@ -10505,7 +10505,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L94",
       "id": "telephony_session_store_memorybackend_prune",
-      "community": 8,
+      "community": 13,
       "norm_label": "._prune()"
     },
     {
@@ -10514,7 +10514,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L103",
       "id": "telephony_session_store_redisbackend",
-      "community": 8,
+      "community": 13,
       "norm_label": "_redisbackend"
     },
     {
@@ -10523,7 +10523,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L104",
       "id": "telephony_session_store_redisbackend_init",
-      "community": 8,
+      "community": 13,
       "norm_label": ".__init__()"
     },
     {
@@ -10532,7 +10532,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L111",
       "id": "telephony_session_store_redisbackend_key",
-      "community": 8,
+      "community": 13,
       "norm_label": "._key()"
     },
     {
@@ -10541,7 +10541,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L114",
       "id": "telephony_session_store_redisbackend_get",
-      "community": 8,
+      "community": 13,
       "norm_label": ".get()"
     },
     {
@@ -10550,7 +10550,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L124",
       "id": "telephony_session_store_redisbackend_set",
-      "community": 8,
+      "community": 13,
       "norm_label": ".set()"
     },
     {
@@ -10559,7 +10559,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L132",
       "id": "telephony_session_store_redisbackend_delete",
-      "community": 8,
+      "community": 13,
       "norm_label": ".delete()"
     },
     {
@@ -10568,7 +10568,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L135",
       "id": "telephony_session_store_redisbackend_count",
-      "community": 8,
+      "community": 13,
       "norm_label": ".count()"
     },
     {
@@ -10586,7 +10586,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L142",
       "id": "telephony_session_store_sessionstore_init",
-      "community": 8,
+      "community": 13,
       "norm_label": ".__init__()"
     },
     {
@@ -10595,7 +10595,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L162",
       "id": "telephony_session_store_sessionstore_get_or_create",
-      "community": 8,
+      "community": 13,
       "norm_label": ".get_or_create()"
     },
     {
@@ -10604,7 +10604,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L190",
       "id": "telephony_session_store_sessionstore_get",
-      "community": 8,
+      "community": 13,
       "norm_label": ".get()"
     },
     {
@@ -10622,7 +10622,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L196",
       "id": "telephony_session_store_sessionstore_delete",
-      "community": 8,
+      "community": 13,
       "norm_label": ".delete()"
     },
     {
@@ -10631,7 +10631,7 @@
       "source_file": "services/telephony/session_store.py",
       "source_location": "L200",
       "id": "telephony_session_store_sessionstore_active_count",
-      "community": 8,
+      "community": 13,
       "norm_label": ".active_count()"
     },
     {
@@ -11000,7 +11000,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L30",
       "id": "telephony_tts_file_store_sanitize_audio_id",
-      "community": 8,
+      "community": 111,
       "norm_label": "sanitize_audio_id()"
     },
     {
@@ -11153,7 +11153,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L202",
       "id": "telephony_tts_file_store_get_tts_file_store",
-      "community": 8,
+      "community": 111,
       "norm_label": "get_tts_file_store()"
     },
     {
@@ -11171,7 +11171,7 @@
       "source_file": "services/telephony/tts_file_store.py",
       "source_location": "L31",
       "id": "telephony_tts_file_store_rationale_31",
-      "community": 8,
+      "community": 111,
       "norm_label": "id seguro para nombre de archivo (p. ej. call_uuid)."
     },
     {
@@ -11225,7 +11225,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L16",
       "id": "telephony_tts_service_telephonyttsservice",
-      "community": 111,
+      "community": 8,
       "norm_label": "telephonyttsservice"
     },
     {
@@ -11297,7 +11297,7 @@
       "source_file": "services/telephony/tts_service.py",
       "source_location": "L17",
       "id": "telephony_tts_service_rationale_17",
-      "community": 111,
+      "community": 8,
       "norm_label": "genera audio de respuesta para llamadas telefonicas."
     },
     {
@@ -11324,7 +11324,7 @@
       "source_file": "services/telephony/voice_call_engine.py",
       "source_location": "L1",
       "id": "telephony_voice_call_engine",
-      "community": 8,
+      "community": 24,
       "norm_label": "voice_call_engine.py"
     },
     {
@@ -11504,7 +11504,7 @@
       "source_file": "services/telephony/voice_call_engine.py",
       "source_location": "L1",
       "id": "telephony_voice_call_engine_rationale_1",
-      "community": 8,
+      "community": 24,
       "norm_label": "motor conversacional agnostico del canal telefonico.  no importa twilio ni fre"
     },
     {
@@ -11558,7 +11558,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L38",
       "id": "telephony_ws_audio_buffer_resolve_ws_encoding",
-      "community": 111,
+      "community": 73,
       "norm_label": "resolve_ws_encoding()"
     },
     {
@@ -11567,7 +11567,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L38",
       "id": "services_telephony_ws_audio_buffer_py_str",
-      "community": 52,
+      "community": 73,
       "norm_label": "str"
     },
     {
@@ -11576,7 +11576,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L38",
       "id": "audioencoding",
-      "community": 111,
+      "community": 73,
       "norm_label": "audioencoding"
     },
     {
@@ -11585,7 +11585,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L46",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer",
-      "community": 111,
+      "community": 73,
       "norm_label": "wsaudiobuffer"
     },
     {
@@ -11594,7 +11594,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L61",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_is_muted",
-      "community": 52,
+      "community": 73,
       "norm_label": ".is_muted()"
     },
     {
@@ -11603,7 +11603,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L61",
       "id": "services_telephony_ws_audio_buffer_py_bool",
-      "community": 52,
+      "community": 73,
       "norm_label": "bool"
     },
     {
@@ -11621,7 +11621,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L72",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_bytes_per_second",
-      "community": 111,
+      "community": 73,
       "norm_label": ".bytes_per_second()"
     },
     {
@@ -11630,7 +11630,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L72",
       "id": "services_telephony_ws_audio_buffer_py_int",
-      "community": 111,
+      "community": 73,
       "norm_label": "int"
     },
     {
@@ -11639,7 +11639,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L76",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_min_bytes",
-      "community": 111,
+      "community": 73,
       "norm_label": ".min_bytes()"
     },
     {
@@ -11648,7 +11648,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L80",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_max_bytes",
-      "community": 111,
+      "community": 73,
       "norm_label": ".max_bytes()"
     },
     {
@@ -11657,7 +11657,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L83",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_append",
-      "community": 52,
+      "community": 73,
       "norm_label": ".append()"
     },
     {
@@ -11666,7 +11666,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L83",
       "id": "services_telephony_ws_audio_buffer_py_bytes",
-      "community": 52,
+      "community": 73,
       "norm_label": "bytes"
     },
     {
@@ -11684,7 +11684,7 @@
       "source_file": "services/telephony/ws_audio_buffer.py",
       "source_location": "L133",
       "id": "telephony_ws_audio_buffer_wsaudiobuffer_take_and_reset",
-      "community": 52,
+      "community": 73,
       "norm_label": ".take_and_reset()"
     },
     {
@@ -14303,7 +14303,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L183",
       "id": "tests_test_stt_repair_test_confirm_state_hints_are_focused",
-      "community": 9,
+      "community": 117,
       "norm_label": "test_confirm_state_hints_are_focused()"
     },
     {
@@ -14312,7 +14312,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L188",
       "id": "tests_test_stt_repair_test_dest_state_appends_no",
-      "community": 9,
+      "community": 117,
       "norm_label": "test_dest_state_appends_no()"
     },
     {
@@ -14321,7 +14321,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L195",
       "id": "tests_test_stt_repair_stub_openai",
-      "community": 129,
+      "community": 9,
       "norm_label": "_stub_openai()"
     },
     {
@@ -14330,7 +14330,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L212",
       "id": "tests_test_stt_repair_test_llm_never_returns_default_city",
-      "community": 129,
+      "community": 9,
       "norm_label": "test_llm_never_returns_default_city()"
     },
     {
@@ -14339,7 +14339,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L223",
       "id": "tests_test_stt_repair_test_filler_is_detected_for_greetings",
-      "community": 49,
+      "community": 9,
       "norm_label": "test_filler_is_detected_for_greetings()"
     },
     {
@@ -14366,7 +14366,7 @@
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L213",
       "id": "tests_test_stt_repair_rationale_213",
-      "community": 129,
+      "community": 9,
       "norm_label": "hola' (u otro saludo) jamas debe convertirse en 'popayan' aunque el llm     alu"
     },
     {
@@ -14861,7 +14861,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L171",
       "id": "tools_nexiservice_get_general_info",
-      "community": 28,
+      "community": 128,
       "norm_label": "get_general_info()"
     },
     {
@@ -14870,7 +14870,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L171",
       "id": "tools_nexiservice_py_float",
-      "community": 28,
+      "community": 128,
       "norm_label": "float"
     },
     {
@@ -14879,7 +14879,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L245",
       "id": "tools_nexiservice_search_businesses",
-      "community": 28,
+      "community": 128,
       "norm_label": "search_businesses()"
     },
     {
@@ -14888,7 +14888,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L245",
       "id": "tools_nexiservice_py_bool",
-      "community": 28,
+      "community": 128,
       "norm_label": "bool"
     },
     {
@@ -14915,7 +14915,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L778",
       "id": "tools_nexiservice_reverse_geocode",
-      "community": 28,
+      "community": 128,
       "norm_label": "reverse_geocode()"
     },
     {
@@ -15014,7 +15014,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L1429",
       "id": "tools_nexiservice_open_business_web",
-      "community": 28,
+      "community": 128,
       "norm_label": "open_business_web()"
     },
     {
@@ -15104,7 +15104,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L177",
       "id": "tools_nexiservice_rationale_177",
-      "community": 28,
+      "community": 128,
       "norm_label": "proporciona informacion de ayuda filtrada por el rol del usuario."
     },
     {
@@ -15122,7 +15122,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L254",
       "id": "tools_nexiservice_rationale_254",
-      "community": 28,
+      "community": 128,
       "norm_label": "busca negocios en la base de datos real por titulo (razonsocial) y categoria asi"
     },
     {
@@ -15149,7 +15149,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L779",
       "id": "tools_nexiservice_rationale_779",
-      "community": 28,
+      "community": 128,
       "norm_label": "thin wrapper \u2014 delegates to services.geo.reverse_geocode."
     },
     {
@@ -15239,7 +15239,7 @@
       "source_file": "tools/nexiservice.py",
       "source_location": "L1430",
       "id": "tools_nexiservice_rationale_1430",
-      "community": 28,
+      "community": 128,
       "norm_label": "obtiene la url de la pagina web o red social de un negocio para abrirla."
     },
     {
@@ -15374,7 +15374,7 @@
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L1956",
       "id": "tools_popayan_geodata_validate_location_exists",
-      "community": 104,
+      "community": 86,
       "norm_label": "validate_location_exists()"
     },
     {
@@ -15527,7 +15527,7 @@
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L1957",
       "id": "tools_popayan_geodata_rationale_1957",
-      "community": 104,
+      "community": 86,
       "norm_label": "valida si una ubicacion existe en popayan.      retorna dict con: exists, conf"
     },
     {
@@ -16193,7 +16193,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L329",
       "id": "shared_utils_find_anchored_id_in_messages",
-      "community": 102,
+      "community": 6,
       "norm_label": "find_anchored_id_in_messages()"
     },
     {
@@ -16202,7 +16202,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L329",
       "id": "tools_shared_utils_py_int",
-      "community": 102,
+      "community": 6,
       "norm_label": "int"
     },
     {
@@ -16220,7 +16220,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L391",
       "id": "shared_utils_recover_appointment_details_from_history",
-      "community": 102,
+      "community": 6,
       "norm_label": "recover_appointment_details_from_history()"
     },
     {
@@ -16427,7 +16427,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L330",
       "id": "shared_utils_rationale_330",
-      "community": 102,
+      "community": 6,
       "norm_label": "busca el ultimo id anclado [id: x] o [biz: x] en el historial visible."
     },
     {
@@ -16445,7 +16445,7 @@
       "source_file": "tools/shared/utils.py",
       "source_location": "L392",
       "id": "shared_utils_rationale_392",
-      "community": 102,
+      "community": 6,
       "norm_label": "recupera los detalles de una reserva pendiente de confirmacion."
     },
     {
@@ -18312,6 +18312,114 @@
       "norm_label": "7. mejora estructural futura (no implementada)"
     },
     {
+      "label": "Lee el WAV subido: cuerpo crudo (busybox wget --post-file) o multipart.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L440",
+      "community": 111,
+      "norm_label": "lee el wav subido: cuerpo crudo (busybox wget --post-file) o multipart.",
+      "id": "routers_freeswitch_rationale_440"
+    },
+    {
+      "label": "Un turno de conversaci\u00f3n desde un WAV grabado (record-loop, sin WS).      Free",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L454",
+      "community": 111,
+      "norm_label": "un turno de conversacion desde un wav grabado (record-loop, sin ws).      free",
+      "id": "routers_freeswitch_rationale_454"
+    },
+    {
+      "label": "Recibe la grabaci\u00f3n de llamada completa (record_session) al colgar.      FreeS",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L581",
+      "community": 111,
+      "norm_label": "recibe la grabacion de llamada completa (record_session) al colgar.      frees",
+      "id": "routers_freeswitch_rationale_581"
+    },
+    {
+      "label": "Sirve la grabaci\u00f3n de llamada completa por call_uuid (para el frontend).",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L618",
+      "community": 111,
+      "norm_label": "sirve la grabacion de llamada completa por call_uuid (para el frontend).",
+      "id": "routers_freeswitch_rationale_618"
+    },
+    {
+      "label": "Resuelve call_uuid desde query string o metadata JSON.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L652",
+      "community": 75,
+      "norm_label": "resuelve call_uuid desde query string o metadata json.",
+      "id": "routers_freeswitch_rationale_652"
+    },
+    {
+      "label": "Resuelve caller_number desde query string o metadata JSON.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L690",
+      "community": 75,
+      "norm_label": "resuelve caller_number desde query string o metadata json.",
+      "id": "routers_freeswitch_rationale_690"
+    },
+    {
+      "label": "Vincula sesi\u00f3n si inbound-call ya la cre\u00f3 o la crea aqu\u00ed.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L724",
+      "community": 75,
+      "norm_label": "vincula sesion si inbound-call ya la creo o la crea aqui.",
+      "id": "routers_freeswitch_rationale_724"
+    },
+    {
+      "label": "Procesa frame text (JSON metadata o control).     Returns: (call_uuid, caller_n",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L739",
+      "community": 75,
+      "norm_label": "procesa frame text (json metadata o control).     returns: (call_uuid, caller_n",
+      "id": "routers_freeswitch_rationale_739"
+    },
+    {
+      "label": "Acumula audio y dispara STT al alcanzar duraci\u00f3n m\u00ednima + silencio o m\u00e1ximo.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L830",
+      "community": 31,
+      "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
+      "id": "routers_freeswitch_rationale_830"
+    },
+    {
+      "label": "WebSocket mod_audio_stream (FreeSWITCH) \u2194 Lyra.      Acepta frames text (JSON",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L873",
+      "community": 75,
+      "norm_label": "websocket mod_audio_stream (freeswitch) \u2194 lyra.      acepta frames text (json",
+      "id": "routers_freeswitch_rationale_873"
+    },
+    {
+      "label": "Duraci\u00f3n del WAV local para esperar a que termine el playback antes de colgar.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L969",
+      "community": 23,
+      "norm_label": "duracion del wav local para esperar a que termine el playback antes de colgar.",
+      "id": "routers_freeswitch_rationale_969"
+    },
+    {
+      "label": "Reproduce TTS en la llamada v\u00eda ESL uuid_broadcast usando URL HTTP.",
+      "file_type": "rationale",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L982",
+      "community": 31,
+      "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
+      "id": "routers_freeswitch_rationale_982"
+    },
+    {
       "label": "Resuelve call_uuid desde query string o metadata JSON.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
@@ -18348,15 +18456,6 @@
       "id": "routers_freeswitch_rationale_518"
     },
     {
-      "label": "Acumula audio y dispara STT al alcanzar duraci\u00f3n m\u00ednima + silencio o m\u00e1ximo.",
-      "file_type": "rationale",
-      "source_file": "api/routers/freeswitch.py",
-      "source_location": "L609",
-      "community": 75,
-      "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
-      "id": "routers_freeswitch_rationale_609"
-    },
-    {
       "label": "Duraci\u00f3n del WAV local para esperar a que termine el playback antes de colgar.",
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
@@ -18370,7 +18469,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L761",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_761"
     },
@@ -18406,7 +18505,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L77",
-      "community": 111,
+      "community": 23,
       "norm_label": "limpieza stt compartida con el gateway twilio (preprocess_stt): elimina     fra",
       "id": "routers_freeswitch_rationale_77"
     },
@@ -18415,7 +18514,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L105",
-      "community": 130,
+      "community": 122,
       "norm_label": "true si el transcript resuelve a una entidad real del catalogo local     (barri",
       "id": "routers_freeswitch_rationale_105"
     },
@@ -18424,7 +18523,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L124",
-      "community": 111,
+      "community": 122,
       "norm_label": "true si el transcript es un fragmento literal del ultimo mensaje del bot.",
       "id": "routers_freeswitch_rationale_124"
     },
@@ -18433,7 +18532,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L151",
-      "community": 111,
+      "community": 23,
       "norm_label": "acepta json o form-urlencoded (curl desde dialplan freeswitch).",
       "id": "routers_freeswitch_rationale_151"
     },
@@ -18442,7 +18541,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L231",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_231"
     },
@@ -18451,7 +18550,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L248",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_248"
     },
@@ -18505,7 +18604,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L606",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_606"
     },
@@ -18532,7 +18631,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L758",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_758"
     },
@@ -18586,7 +18685,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L594",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_594"
     },
@@ -18613,7 +18712,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L722",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_722"
     },
@@ -18721,7 +18820,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L681",
-      "community": 42,
+      "community": 97,
       "norm_label": "solo cachear resultados que tengan relacion semantica con la query.     previen",
       "id": "core_geocoder_service_rationale_681"
     },
@@ -18730,7 +18829,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L710",
-      "community": 42,
+      "community": 97,
       "norm_label": "verifica que el resultado de google corresponde a la direccion del usuario,",
       "id": "core_geocoder_service_rationale_710"
     },
@@ -18748,7 +18847,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L745",
-      "community": 42,
+      "community": 1,
       "norm_label": "pregunta especifica para precision de direccion: el geocoder devolvio el     ce",
       "id": "core_geocoder_service_rationale_745"
     },
@@ -18775,7 +18874,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L809",
-      "community": 42,
+      "community": 1,
       "norm_label": "construye pregunta solo con datos reales de los candidatos.     solo se llama c",
       "id": "core_geocoder_service_rationale_809"
     },
@@ -18784,7 +18883,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L838",
-      "community": 42,
+      "community": 102,
       "norm_label": "extrae la parte mas util del display_name completo.",
       "id": "core_geocoder_service_rationale_838"
     },
@@ -18793,7 +18892,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L849",
-      "community": 42,
+      "community": 1,
       "norm_label": "pipeline completo: cache \u2192 google \u2192 nominatim \u2192 decision.      retorna georeso",
       "id": "core_geocoder_service_rationale_849"
     },
@@ -18874,7 +18973,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L119",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico.",
       "id": "routers_twilio_rationale_119"
     },
@@ -18892,7 +18991,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L175",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es",
       "id": "routers_twilio_rationale_175"
     },
@@ -18901,7 +19000,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L189",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza",
       "id": "routers_twilio_rationale_189"
     },
@@ -18910,7 +19009,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L239",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_239"
     },
@@ -18964,7 +19063,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L452",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_452"
     },
@@ -18973,7 +19072,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L465",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_465"
     },
@@ -18991,7 +19090,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L544",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_544"
     },
@@ -19000,7 +19099,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L568",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_568"
     },
@@ -19009,7 +19108,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L801",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_801"
     },
@@ -19072,7 +19171,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1022",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1022"
     },
@@ -19081,7 +19180,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1136",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1136"
     },
@@ -19099,7 +19198,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1242",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1242"
     },
@@ -19126,7 +19225,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2469",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2469"
     },
@@ -19135,7 +19234,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2515",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel",
       "id": "routers_twilio_rationale_2515"
     },
@@ -19180,7 +19279,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L832",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_832"
     },
@@ -19198,7 +19297,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L927",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_927"
     },
@@ -19252,7 +19351,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L172",
-      "community": 129,
+      "community": 9,
       "norm_label": "hola' (u otro saludo) jamas debe convertirse en 'popayan' aunque el llm     alu",
       "id": "tests_test_stt_repair_rationale_172"
     },
@@ -19315,7 +19414,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L526",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_526"
     },
@@ -19360,7 +19459,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L793",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_793"
     },
@@ -19378,7 +19477,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L888",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_888"
     },
@@ -19423,7 +19522,7 @@
       "file_type": "rationale",
       "source_file": "tests/test_stt_repair.py",
       "source_location": "L112",
-      "community": 129,
+      "community": 9,
       "norm_label": "hola' (u otro saludo) jamas debe convertirse en 'popayan' aunque el llm     alu",
       "id": "tests_test_stt_repair_rationale_112"
     },
@@ -19441,7 +19540,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2427",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2427"
     },
@@ -19450,7 +19549,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2473",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel",
       "id": "routers_twilio_rationale_2473"
     },
@@ -19477,7 +19576,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L769",
-      "community": 42,
+      "community": 1,
       "norm_label": "construye pregunta solo con datos reales de los candidatos.     solo se llama c",
       "id": "core_geocoder_service_rationale_769"
     },
@@ -19486,7 +19585,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L798",
-      "community": 42,
+      "community": 102,
       "norm_label": "extrae la parte mas util del display_name completo.",
       "id": "core_geocoder_service_rationale_798"
     },
@@ -19621,7 +19720,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L118",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico.",
       "id": "routers_twilio_rationale_118"
     },
@@ -19639,7 +19738,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L174",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es",
       "id": "routers_twilio_rationale_174"
     },
@@ -19648,7 +19747,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L188",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza",
       "id": "routers_twilio_rationale_188"
     },
@@ -19657,7 +19756,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L238",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_238"
     },
@@ -19711,7 +19810,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L451",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_451"
     },
@@ -19720,7 +19819,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L464",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_464"
     },
@@ -19738,7 +19837,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L543",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_543"
     },
@@ -19747,7 +19846,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L567",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_567"
     },
@@ -19756,7 +19855,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L800",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_800"
     },
@@ -19819,7 +19918,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1021",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1021"
     },
@@ -19828,7 +19927,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1135",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1135"
     },
@@ -19846,7 +19945,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1241",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1241"
     },
@@ -19873,7 +19972,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2426",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2426"
     },
@@ -19882,7 +19981,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2472",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel",
       "id": "routers_twilio_rationale_2472"
     },
@@ -19909,7 +20008,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L645",
-      "community": 80,
+      "community": 24,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod",
       "id": "core_address_utils_rationale_645"
     },
@@ -19918,7 +20017,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L706",
-      "community": 73,
+      "community": 24,
       "norm_label": "valida que `text` parezca una ubicacion real en popayan, para descartar     ext",
       "id": "core_address_utils_rationale_706"
     },
@@ -19927,7 +20026,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L738",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de recogida del texto libre.     retorna (direccion, none) o (",
       "id": "core_address_utils_rationale_738"
     },
@@ -19936,7 +20035,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L760",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de destino del texto libre.",
       "id": "core_address_utils_rationale_760"
     },
@@ -19963,7 +20062,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L774",
-      "community": 42,
+      "community": 102,
       "norm_label": "extrae la parte mas util del display_name completo.",
       "id": "core_geocoder_service_rationale_774"
     },
@@ -19972,7 +20071,7 @@
       "file_type": "rationale",
       "source_file": "core/geocoder_service.py",
       "source_location": "L785",
-      "community": 42,
+      "community": 1,
       "norm_label": "pipeline completo: cache \u2192 google \u2192 nominatim \u2192 decision.      retorna georeso",
       "id": "core_geocoder_service_rationale_785"
     },
@@ -20089,7 +20188,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L126",
-      "community": 111,
+      "community": 23,
       "norm_label": "acepta json o form-urlencoded (curl desde dialplan freeswitch).",
       "id": "routers_freeswitch_rationale_126"
     },
@@ -20098,7 +20197,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L206",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_206"
     },
@@ -20107,7 +20206,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L223",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_223"
     },
@@ -20161,7 +20260,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L569",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_569"
     },
@@ -20188,7 +20287,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L697",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_697"
     },
@@ -20251,7 +20350,7 @@
       "file_type": "rationale",
       "source_file": "core/conversation_repair.py",
       "source_location": "L370",
-      "community": 80,
+      "community": 12,
       "norm_label": "si se detecta una referencia a zona pero no a barrio especifico,         genera",
       "id": "core_conversation_repair_rationale_370"
     },
@@ -20269,7 +20368,7 @@
       "file_type": "rationale",
       "source_file": "core/conversation_repair.py",
       "source_location": "L416",
-      "community": 80,
+      "community": 76,
       "norm_label": "detecta si el texto parcial indica intencion de interrumpir.         se usa con",
       "id": "core_conversation_repair_rationale_416"
     },
@@ -20305,7 +20404,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L387",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     en",
       "id": "core_location_match_rationale_387"
     },
@@ -20458,7 +20557,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L252",
-      "community": 49,
+      "community": 98,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'b",
       "id": "core_location_match_rationale_252"
     },
@@ -20467,7 +20566,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L261",
-      "community": 49,
+      "community": 0,
       "norm_label": "api publica: true si `text` es solo cortesia/relleno/afirmacion y no     contie",
       "id": "core_location_match_rationale_261"
     },
@@ -20494,7 +20593,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L378",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     en",
       "id": "core_location_match_rationale_378"
     },
@@ -20512,7 +20611,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L525",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_525"
     },
@@ -20557,7 +20656,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L792",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_792"
     },
@@ -20575,7 +20674,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L887",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_887"
     },
@@ -20638,7 +20737,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L375",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     en",
       "id": "core_location_match_rationale_375"
     },
@@ -20656,7 +20755,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L510",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_510"
     },
@@ -20719,7 +20818,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L872",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_872"
     },
@@ -20773,7 +20872,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L74",
-      "community": 111,
+      "community": 23,
       "norm_label": "limpieza stt compartida con el gateway twilio (preprocess_stt): elimina     fra",
       "id": "routers_freeswitch_rationale_74"
     },
@@ -20782,7 +20881,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L102",
-      "community": 111,
+      "community": 122,
       "norm_label": "true si el transcript es un fragmento literal del ultimo mensaje del bot.",
       "id": "routers_freeswitch_rationale_102"
     },
@@ -20791,7 +20890,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L123",
-      "community": 111,
+      "community": 23,
       "norm_label": "acepta json o form-urlencoded (curl desde dialplan freeswitch).",
       "id": "routers_freeswitch_rationale_123"
     },
@@ -20800,7 +20899,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L203",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_203"
     },
@@ -20809,7 +20908,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L220",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_220"
     },
@@ -20863,7 +20962,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L566",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_566"
     },
@@ -20890,7 +20989,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L694",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_694"
     },
@@ -20926,7 +21025,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L154",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_154"
     },
@@ -20935,7 +21034,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L171",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_171"
     },
@@ -20980,7 +21079,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L517",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_517"
     },
@@ -21007,7 +21106,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L645",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_645"
     },
@@ -21016,7 +21115,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L70",
-      "community": 111,
+      "community": 23,
       "norm_label": "acepta json o form-urlencoded (curl desde dialplan freeswitch).",
       "id": "routers_freeswitch_rationale_70"
     },
@@ -21025,7 +21124,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L150",
-      "community": 111,
+      "community": 122,
       "norm_label": "freeswitch/entel: respuesta liviana con audio_url, sin base64.",
       "id": "routers_freeswitch_rationale_150"
     },
@@ -21034,7 +21133,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L167",
-      "community": 124,
+      "community": 122,
       "norm_label": "sirve wav 8 khz mono generado para playback en freeswitch.     url ejemplo: /fr",
       "id": "routers_freeswitch_rationale_167"
     },
@@ -21088,7 +21187,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L513",
-      "community": 75,
+      "community": 31,
       "norm_label": "acumula audio y dispara stt al alcanzar duracion minima + silencio o maximo.",
       "id": "routers_freeswitch_rationale_513"
     },
@@ -21115,7 +21214,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L641",
-      "community": 111,
+      "community": 31,
       "norm_label": "reproduce tts en la llamada via esl uuid_broadcast usando url http.",
       "id": "routers_freeswitch_rationale_641"
     },
@@ -21160,7 +21259,7 @@
       "file_type": "rationale",
       "source_file": "main.py",
       "source_location": "L39",
-      "community": 34,
+      "community": 83,
       "norm_label": "fastapi lifespan event.     loads the gguf model into memory at startup.",
       "id": "main_rationale_39"
     },
@@ -21178,7 +21277,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L114",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico.",
       "id": "routers_twilio_rationale_114"
     },
@@ -21196,7 +21295,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L170",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es",
       "id": "routers_twilio_rationale_170"
     },
@@ -21205,7 +21304,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L184",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza",
       "id": "routers_twilio_rationale_184"
     },
@@ -21214,7 +21313,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L234",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_234"
     },
@@ -21259,7 +21358,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L447",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_447"
     },
@@ -21268,7 +21367,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L460",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_460"
     },
@@ -21286,7 +21385,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L539",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_539"
     },
@@ -21295,7 +21394,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L563",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_563"
     },
@@ -21304,7 +21403,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L796",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_796"
     },
@@ -21358,7 +21457,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1017",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1017"
     },
@@ -21367,7 +21466,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1125",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1125"
     },
@@ -21385,7 +21484,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1231",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1231"
     },
@@ -21412,7 +21511,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2371",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2371"
     },
@@ -21448,7 +21547,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L251",
-      "community": 49,
+      "community": 98,
       "norm_label": "true si el texto solo contiene cortesia/relleno (ningun token de lugar).     'bu",
       "id": "core_location_match_rationale_251"
     },
@@ -21475,7 +21574,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L365",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     ent",
       "id": "core_location_match_rationale_365"
     },
@@ -21511,7 +21610,7 @@
       "file_type": "rationale",
       "source_file": "core/location_match.py",
       "source_location": "L319",
-      "community": 98,
+      "community": 90,
       "norm_label": "mejor coincidencia (tipo, confianza) de un input contra los alias de una     ent",
       "id": "core_location_match_rationale_319"
     },
@@ -21538,7 +21637,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L113",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico.",
       "id": "routers_twilio_rationale_113"
     },
@@ -21556,7 +21655,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L169",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es",
       "id": "routers_twilio_rationale_169"
     },
@@ -21565,7 +21664,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L183",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza",
       "id": "routers_twilio_rationale_183"
     },
@@ -21574,7 +21673,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L233",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_233"
     },
@@ -21619,7 +21718,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L446",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_446"
     },
@@ -21628,7 +21727,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L459",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_459"
     },
@@ -21646,7 +21745,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L538",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_538"
     },
@@ -21655,7 +21754,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L562",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_562"
     },
@@ -21664,7 +21763,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L795",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_795"
     },
@@ -21727,7 +21826,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1011",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_1011"
     },
@@ -21736,7 +21835,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1119",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1119"
     },
@@ -21754,7 +21853,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1225",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1225"
     },
@@ -21781,7 +21880,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2365",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2365"
     },
@@ -21790,7 +21889,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2411",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel",
       "id": "routers_twilio_rationale_2411"
     },
@@ -21817,7 +21916,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L362",
-      "community": 9,
+      "community": 117,
       "norm_label": "genera hints de vocabulario focalizados segun el estado (max ~15 terminos).",
       "id": "core_streaming_pipeline_rationale_362"
     },
@@ -21835,7 +21934,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L413",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa el texto final de stt de un turno.                  retorna:",
       "id": "core_streaming_pipeline_rationale_413"
     },
@@ -21844,7 +21943,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L529",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa un fragmento de speech parcial (de partialresultcallback).         reto",
       "id": "core_streaming_pipeline_rationale_529"
     },
@@ -21853,7 +21952,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L556",
-      "community": 13,
+      "community": 117,
       "norm_label": "hace streaming del llm y retorna el texto completo.     llama on_chunk(texto_pa",
       "id": "core_streaming_pipeline_rationale_556"
     },
@@ -21862,7 +21961,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L596",
-      "community": 108,
+      "community": 117,
       "norm_label": "genera una respuesta contextual del llm para casos ambiguos.     usa el histori",
       "id": "core_streaming_pipeline_rationale_596"
     },
@@ -21871,7 +21970,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L24",
-      "community": 80,
+      "community": 76,
       "norm_label": "quita tildes para comparaciones foneticas.",
       "id": "core_stt_enhancer_rationale_24"
     },
@@ -21934,7 +22033,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L509",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_509"
     },
@@ -21961,7 +22060,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L623",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_623"
     },
@@ -21979,7 +22078,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L718",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_718"
     },
@@ -22114,7 +22213,7 @@
       "file_type": "rationale",
       "source_file": "tools/popayan_geodata.py",
       "source_location": "L1956",
-      "community": 104,
+      "community": 86,
       "norm_label": "valida si una ubicacion existe en popayan.      retorna dict con: exists, conf",
       "id": "tools_popayan_geodata_rationale_1956"
     },
@@ -22213,7 +22312,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L112",
-      "community": 31,
+      "community": 95,
       "norm_label": "almacena audio en cache y retorna un id unico.",
       "id": "routers_twilio_rationale_112"
     },
@@ -22231,7 +22330,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L168",
-      "community": 125,
+      "community": 0,
       "norm_label": "idioma para los modelos deepgram. nova-2/nova-3 no soportan es-co; solo     \"es",
       "id": "routers_twilio_rationale_168"
     },
@@ -22240,7 +22339,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L182",
-      "community": 37,
+      "community": 0,
       "norm_label": "construye los atributos de reconocimiento de voz del <gather>.      centraliza",
       "id": "routers_twilio_rationale_182"
     },
@@ -22249,7 +22348,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L232",
-      "community": 37,
+      "community": 95,
       "norm_label": "construye un <gather input=\"dtmf speech\"> con menu numerico de barrios.      a",
       "id": "routers_twilio_rationale_232"
     },
@@ -22303,7 +22402,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L443",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_443"
     },
@@ -22312,7 +22411,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L456",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_456"
     },
@@ -22330,7 +22429,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L535",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_535"
     },
@@ -22339,7 +22438,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L559",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_559"
     },
@@ -22348,7 +22447,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L792",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_792"
     },
@@ -22384,7 +22483,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L992",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_992"
     },
@@ -22393,7 +22492,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1100",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1100"
     },
@@ -22411,7 +22510,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1206",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1206"
     },
@@ -22438,7 +22537,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2325",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2325"
     },
@@ -22465,7 +22564,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L728",
-      "community": 73,
+      "community": 24,
       "norm_label": "valida que `text` parezca una ubicacion real en popayan, para descartar     ext",
       "id": "core_address_utils_rationale_728"
     },
@@ -22474,7 +22573,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L782",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de destino del texto libre.",
       "id": "core_address_utils_rationale_782"
     },
@@ -22483,7 +22582,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L501",
-      "community": 76,
+      "community": 109,
       "norm_label": "true si el alias cubre el input sin dejar palabras de contenido sueltas.",
       "id": "core_stt_enhancer_rationale_501"
     },
@@ -22510,7 +22609,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L655",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_655"
     },
@@ -22528,7 +22627,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L750",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_750"
     },
@@ -22600,7 +22699,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L442",
-      "community": 39,
+      "community": 95,
       "norm_label": "genera <play> apuntando al audio cacheado.",
       "id": "routers_twilio_rationale_442"
     },
@@ -22609,7 +22708,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L455",
-      "community": 37,
+      "community": 116,
       "norm_label": "construye twiml <gather> con:     - audio de lyra generado via edge_tts (voz es",
       "id": "routers_twilio_rationale_455"
     },
@@ -22627,7 +22726,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L534",
-      "community": 39,
+      "community": 95,
       "norm_label": "twiml que reproduce mensaje y cuelga, usando voz de lyra.",
       "id": "routers_twilio_rationale_534"
     },
@@ -22636,7 +22735,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L558",
-      "community": 115,
+      "community": 46,
       "norm_label": "redirect con audio opcional (para transiciones de estado).",
       "id": "routers_twilio_rationale_558"
     },
@@ -22645,7 +22744,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L791",
-      "community": 119,
+      "community": 91,
       "norm_label": "normalizacion agresiva previa, para audio telefonico muy degradado.      - eli",
       "id": "routers_twilio_rationale_791"
     },
@@ -22681,7 +22780,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L991",
-      "community": 0,
+      "community": 36,
       "norm_label": "pipeline unificado de extraccion. role = \"origen\" | \"destino\"     retorna (cano",
       "id": "routers_twilio_rationale_991"
     },
@@ -22690,7 +22789,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1099",
-      "community": 114,
+      "community": 108,
       "norm_label": "geocodifica y crea el servicio de taxi en el backend laravel.",
       "id": "routers_twilio_rationale_1099"
     },
@@ -22708,7 +22807,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L1205",
-      "community": 94,
+      "community": 0,
       "norm_label": "webhook inicial de twilio. saluda y comienza a escuchar.",
       "id": "routers_twilio_rationale_1205"
     },
@@ -22735,7 +22834,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2272",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook para procesar la respuesta en modo mantenimiento.",
       "id": "routers_twilio_rationale_2272"
     },
@@ -22744,7 +22843,7 @@
       "file_type": "rationale",
       "source_file": "api/routers/twilio.py",
       "source_location": "L2318",
-      "community": 31,
+      "community": 95,
       "norm_label": "webhook inicial de twilio para modo mantenimiento simple (dice el mensaje y cuel",
       "id": "routers_twilio_rationale_2318"
     },
@@ -22771,7 +22870,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L437",
-      "community": 7,
+      "community": 18,
       "norm_label": "estandariza nomenclatura (calle \u2192 cl, etc.)",
       "id": "core_address_utils_rationale_437"
     },
@@ -22798,7 +22897,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L635",
-      "community": 80,
+      "community": 24,
       "norm_label": "busqueda local en el catalogo de barrios/landmarks de popayan     (popayan_geod",
       "id": "core_address_utils_rationale_635"
     },
@@ -22807,7 +22906,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L714",
-      "community": 73,
+      "community": 24,
       "norm_label": "valida que `text` parezca una ubicacion real en popayan, para descartar     ext",
       "id": "core_address_utils_rationale_714"
     },
@@ -22816,7 +22915,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L746",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de recogida del texto libre.     retorna (direccion, none) o (",
       "id": "core_address_utils_rationale_746"
     },
@@ -22825,7 +22924,7 @@
       "file_type": "rationale",
       "source_file": "core/address_utils.py",
       "source_location": "L768",
-      "community": 73,
+      "community": 24,
       "norm_label": "extrae direccion de destino del texto libre.",
       "id": "core_address_utils_rationale_768"
     },
@@ -22834,7 +22933,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L361",
-      "community": 9,
+      "community": 117,
       "norm_label": "genera hints de vocabulario focalizados segun el estado (max ~15 terminos).",
       "id": "core_streaming_pipeline_rationale_361"
     },
@@ -22852,7 +22951,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L412",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa el texto final de stt de un turno.                  retorna:",
       "id": "core_streaming_pipeline_rationale_412"
     },
@@ -22861,7 +22960,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L528",
-      "community": 108,
+      "community": 117,
       "norm_label": "procesa un fragmento de speech parcial (de partialresultcallback).         reto",
       "id": "core_streaming_pipeline_rationale_528"
     },
@@ -22870,7 +22969,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L555",
-      "community": 13,
+      "community": 117,
       "norm_label": "hace streaming del llm y retorna el texto completo.     llama on_chunk(texto_pa",
       "id": "core_streaming_pipeline_rationale_555"
     },
@@ -22879,7 +22978,7 @@
       "file_type": "rationale",
       "source_file": "core/streaming_pipeline.py",
       "source_location": "L595",
-      "community": 108,
+      "community": 117,
       "norm_label": "genera una respuesta contextual del llm para casos ambiguos.     usa el histori",
       "id": "core_streaming_pipeline_rationale_595"
     },
@@ -22906,7 +23005,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L600",
-      "community": 91,
+      "community": 87,
       "norm_label": "repara direcciones callejeras mangled por stt.     'carrera 4 a eb 1728' \u2192 'car",
       "id": "core_stt_enhancer_rationale_600"
     },
@@ -22924,7 +23023,7 @@
       "file_type": "rationale",
       "source_file": "core/stt_enhancer.py",
       "source_location": "L695",
-      "community": 97,
+      "community": 38,
       "norm_label": "true si la llamada tiene calidad consistentemente baja.",
       "id": "core_stt_enhancer_rationale_695"
     },
@@ -26265,9 +26364,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L453",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_audio_turn",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_audio_turn"
     },
     {
       "relation": "contains",
@@ -26415,9 +26514,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L439",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_read_audio_upload",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_read_audio_upload"
     },
     {
       "relation": "contains",
@@ -26425,9 +26524,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L570",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_recording_path",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_recording_path"
     },
     {
       "relation": "contains",
@@ -26455,9 +26554,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L617",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_serve_recording",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_serve_recording"
     },
     {
       "relation": "contains",
@@ -26495,9 +26594,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L580",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_upload_recording",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_upload_recording"
     },
     {
       "relation": "contains",
@@ -26515,9 +26614,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L408",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch",
-      "target": "routers_freeswitch_wav_to_pcm16",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_wav_to_pcm16"
     },
     {
       "relation": "contains",
@@ -26986,9 +27085,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L515",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_audio_turn",
-      "target": "routers_freeswitch_normalize_transcript",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_normalize_transcript"
     },
     {
       "relation": "calls",
@@ -27219,9 +27318,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L570",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_recording_path",
-      "target": "api_routers_freeswitch_py_str",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_str"
     },
     {
       "relation": "references",
@@ -27252,9 +27351,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L617",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_serve_recording",
-      "target": "api_routers_freeswitch_py_str",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_str"
     },
     {
       "relation": "references",
@@ -27590,9 +27689,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L517",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_audio_turn",
-      "target": "routers_freeswitch_looks_like_bot_echo",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_looks_like_bot_echo"
     },
     {
       "relation": "calls",
@@ -27794,9 +27893,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L453",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_audio_turn",
-      "target": "api_routers_freeswitch_py_request",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_request"
     },
     {
       "relation": "references",
@@ -27827,9 +27926,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L439",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_read_audio_upload",
-      "target": "api_routers_freeswitch_py_request",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_request"
     },
     {
       "relation": "references",
@@ -27849,9 +27948,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L580",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_upload_recording",
-      "target": "api_routers_freeswitch_py_request",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_request"
     },
     {
       "relation": "calls",
@@ -28172,9 +28271,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L482",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_audio_turn",
-      "target": "routers_freeswitch_wav_to_pcm16",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_wav_to_pcm16"
     },
     {
       "relation": "rationale_for",
@@ -28182,9 +28281,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L409",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_409",
-      "target": "routers_freeswitch_wav_to_pcm16",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_wav_to_pcm16"
     },
     {
       "relation": "references",
@@ -28193,9 +28292,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L408",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_wav_to_pcm16",
-      "target": "api_routers_freeswitch_py_bytes",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_bytes"
     },
     {
       "relation": "references",
@@ -28204,9 +28303,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L408",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_wav_to_pcm16",
-      "target": "api_routers_freeswitch_py_int",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_int"
     },
     {
       "relation": "uses",
@@ -28286,9 +28385,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L439",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_read_audio_upload",
-      "target": "api_routers_freeswitch_py_bytes",
-      "confidence_score": 1.0
+      "target": "api_routers_freeswitch_py_bytes"
     },
     {
       "relation": "references",
@@ -28307,9 +28406,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L111",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "core_location_match_decision",
-      "confidence_score": 0.5
+      "target": "core_location_match_decision"
     },
     {
       "relation": "uses",
@@ -28317,9 +28416,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L20",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "telephony_backend_client_telephonybackendclient",
-      "confidence_score": 0.5
+      "target": "telephony_backend_client_telephonybackendclient"
     },
     {
       "relation": "uses",
@@ -28327,9 +28426,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L25",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "telephony_stt_service_telephonysttservice",
-      "confidence_score": 0.5
+      "target": "telephony_stt_service_telephonysttservice"
     },
     {
       "relation": "uses",
@@ -28337,9 +28436,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L32",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "telephony_tts_service_telephonyttsservice",
-      "confidence_score": 0.5
+      "target": "telephony_tts_service_telephonyttsservice"
     },
     {
       "relation": "uses",
@@ -28347,9 +28446,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L33",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "telephony_voice_call_engine_voicecallengine",
-      "confidence_score": 0.5
+      "target": "telephony_voice_call_engine_voicecallengine"
     },
     {
       "relation": "uses",
@@ -28357,9 +28456,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L34",
       "weight": 0.8,
+      "confidence_score": 0.5,
       "source": "api_routers_freeswitch_py_int",
-      "target": "telephony_ws_audio_buffer_wsaudiobuffer",
-      "confidence_score": 0.5
+      "target": "telephony_ws_audio_buffer_wsaudiobuffer"
     },
     {
       "relation": "calls",
@@ -28368,9 +28467,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L468",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_audio_turn",
-      "target": "routers_freeswitch_read_audio_upload",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_read_audio_upload"
     },
     {
       "relation": "rationale_for",
@@ -28378,7 +28477,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L440",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_440",
+      "target": "routers_freeswitch_read_audio_upload"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L445",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_445",
       "target": "routers_freeswitch_read_audio_upload",
       "confidence_score": 1.0
     },
@@ -28389,9 +28498,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L593",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_upload_recording",
-      "target": "routers_freeswitch_read_audio_upload",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_read_audio_upload"
     },
     {
       "relation": "calls",
@@ -28432,7 +28541,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L454",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_454",
+      "target": "routers_freeswitch_audio_turn"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L482",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_482",
       "target": "routers_freeswitch_audio_turn",
       "confidence_score": 1.0
     },
@@ -28454,9 +28573,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L573",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_recording_path",
-      "target": "telephony_tts_file_store_sanitize_audio_id",
-      "confidence_score": 1.0
+      "target": "telephony_tts_file_store_sanitize_audio_id"
     },
     {
       "relation": "calls",
@@ -28465,9 +28584,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L619",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_serve_recording",
-      "target": "routers_freeswitch_recording_path",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_recording_path"
     },
     {
       "relation": "calls",
@@ -28476,9 +28595,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L596",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_upload_recording",
-      "target": "routers_freeswitch_recording_path",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_recording_path"
     },
     {
       "relation": "rationale_for",
@@ -28486,7 +28605,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L581",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_581",
+      "target": "routers_freeswitch_upload_recording"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L609",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_609",
       "target": "routers_freeswitch_upload_recording",
       "confidence_score": 1.0
     },
@@ -28496,7 +28625,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L618",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_618",
+      "target": "routers_freeswitch_serve_recording"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L646",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_646",
       "target": "routers_freeswitch_serve_recording",
       "confidence_score": 1.0
     },
@@ -28609,7 +28748,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L652",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_652",
+      "target": "routers_freeswitch_ws_resolve_call_uuid"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L680",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_680",
       "target": "routers_freeswitch_ws_resolve_call_uuid",
       "confidence_score": 1.0
     },
@@ -28793,7 +28942,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L690",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_690",
+      "target": "routers_freeswitch_ws_resolve_caller_number"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L718",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_718",
       "target": "routers_freeswitch_ws_resolve_caller_number",
       "confidence_score": 1.0
     },
@@ -28906,7 +29065,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L724",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_724",
+      "target": "routers_freeswitch_ws_ensure_session"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L752",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_752",
       "target": "routers_freeswitch_ws_ensure_session",
       "confidence_score": 1.0
     },
@@ -29019,7 +29188,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L739",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_739",
+      "target": "routers_freeswitch_ws_handle_text_metadata"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L767",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_767",
       "target": "routers_freeswitch_ws_handle_text_metadata",
       "confidence_score": 1.0
     },
@@ -29373,7 +29552,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L830",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_830",
+      "target": "routers_freeswitch_ws_append_audio"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L858",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_858",
       "target": "routers_freeswitch_ws_append_audio",
       "confidence_score": 1.0
     },
@@ -29475,7 +29664,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L873",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_873",
+      "target": "routers_freeswitch_audio_stream"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L901",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_901",
       "target": "routers_freeswitch_audio_stream",
       "confidence_score": 1.0
     },
@@ -29566,7 +29765,17 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L969",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_969",
+      "target": "routers_freeswitch_wav_duration_seconds"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L997",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_997",
       "target": "routers_freeswitch_wav_duration_seconds",
       "confidence_score": 1.0
     },
@@ -29591,6 +29800,16 @@
       "confidence_score": 1.0,
       "source": "routers_freeswitch_playback_tts_on_call",
       "target": "telephony_esl_client_get_esl_client"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "api/routers/freeswitch.py",
+      "source_location": "L1010",
+      "weight": 1.0,
+      "source": "routers_freeswitch_rationale_1010",
+      "target": "routers_freeswitch_playback_tts_on_call",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -29668,9 +29887,9 @@
       "source_file": "api/routers/freeswitch.py",
       "source_location": "L982",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "routers_freeswitch_rationale_982",
-      "target": "routers_freeswitch_playback_tts_on_call",
-      "confidence_score": 1.0
+      "target": "routers_freeswitch_playback_tts_on_call"
     },
     {
       "relation": "calls",
@@ -41038,9 +41257,9 @@
       "source_file": "core/config.py",
       "source_location": "L106",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_config_rationale_106",
-      "target": "core_config_settings_llm_api_key",
-      "confidence_score": 1.0
+      "target": "core_config_settings_llm_api_key"
     },
     {
       "relation": "rationale_for",
@@ -41111,9 +41330,9 @@
       "source_file": "core/config.py",
       "source_location": "L117",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_config_rationale_117",
-      "target": "core_config_settings_llm_base_url",
-      "confidence_score": 1.0
+      "target": "core_config_settings_llm_base_url"
     },
     {
       "relation": "rationale_for",
@@ -41141,9 +41360,9 @@
       "source_file": "core/config.py",
       "source_location": "L123",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "core_config_rationale_123",
-      "target": "core_config_settings_get_absolute_model_path",
-      "confidence_score": 1.0
+      "target": "core_config_settings_get_absolute_model_path"
     },
     {
       "relation": "rationale_for",
@@ -54874,9 +55093,9 @@
       "source_file": "docs/freeswitch/lyra_call.lua",
       "source_location": "L45",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_lyra_call",
-      "target": "freeswitch_lyra_call_download",
-      "confidence_score": 1.0
+      "target": "freeswitch_lyra_call_download"
     },
     {
       "relation": "contains",
@@ -54884,9 +55103,9 @@
       "source_file": "docs/freeswitch/lyra_call.lua",
       "source_location": "L50",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_lyra_call",
-      "target": "freeswitch_lyra_call_jfield",
-      "confidence_score": 1.0
+      "target": "freeswitch_lyra_call_jfield"
     },
     {
       "relation": "contains",
@@ -54894,9 +55113,9 @@
       "source_file": "docs/freeswitch/lyra_call.lua",
       "source_location": "L56",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_lyra_call",
-      "target": "freeswitch_lyra_call_play_url",
-      "confidence_score": 1.0
+      "target": "freeswitch_lyra_call_play_url"
     },
     {
       "relation": "contains",
@@ -54904,9 +55123,9 @@
       "source_file": "docs/freeswitch/lyra_call.lua",
       "source_location": "L36",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_lyra_call",
-      "target": "freeswitch_lyra_call_post_file",
-      "confidence_score": 1.0
+      "target": "freeswitch_lyra_call_post_file"
     },
     {
       "relation": "calls",
@@ -54915,9 +55134,9 @@
       "source_file": "docs/freeswitch/lyra_call.lua",
       "source_location": "L59",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_lyra_call_play_url",
-      "target": "freeswitch_lyra_call_download",
-      "confidence_score": 1.0
+      "target": "freeswitch_lyra_call_download"
     },
     {
       "relation": "imports_from",
@@ -79254,9 +79473,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L1",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy",
-      "target": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream"
     },
     {
       "relation": "contains",
@@ -79264,9 +79483,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L69",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_ajustar_app_en_el_lua",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_ajustar_app_en_el_lua"
     },
     {
       "relation": "contains",
@@ -79274,9 +79493,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L8",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_arquitectura",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_arquitectura"
     },
     {
       "relation": "contains",
@@ -79284,9 +79503,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L87",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_frontend_audio_de_la_llamada",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_frontend_audio_de_la_llamada"
     },
     {
       "relation": "contains",
@@ -79294,9 +79513,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L45",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_instalar",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_instalar"
     },
     {
       "relation": "contains",
@@ -79304,9 +79523,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L26",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_requisitos_en_el_contenedor",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_requisitos_en_el_contenedor"
     },
     {
       "relation": "contains",
@@ -79314,9 +79533,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L93",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_tuning_de_calidad_de_transcripci\u00f3n",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_tuning_de_calidad_de_transcripci\u00f3n"
     },
     {
       "relation": "contains",
@@ -79324,9 +79543,9 @@
       "source_file": "docs/freeswitch/RECORD_LOOP_DEPLOY.md",
       "source_location": "L75",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "freeswitch_record_loop_deploy_record_loop_deploy_sin_mod_audio_stream",
-      "target": "freeswitch_record_loop_deploy_verificar_llamada_de_prueba",
-      "confidence_score": 1.0
+      "target": "freeswitch_record_loop_deploy_verificar_llamada_de_prueba"
     },
     {
       "relation": "contains",
@@ -81285,5 +81504,5 @@
       "source_file": "ARCHITECTURE.md"
     }
   ],
-  "built_at_commit": "abc1a60bd471ef75fe764cbcc21952d24a7f700b"
+  "built_at_commit": "677fffa8afae8e12871d8d50a2c19ffc8e914447"
 }

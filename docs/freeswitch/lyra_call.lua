@@ -32,12 +32,17 @@ session:sleep(400)
 local rec_path = "/tmp/rec_" .. uuid .. ".wav"
 session:execute("record_session", rec_path)
 
--- ── Helpers HTTP (busybox wget; cuerpo crudo) ──
+-- ── Helpers HTTP (busybox wget) ──
+-- IMPORTANTE: busybox wget --post-file trunca binario en el primer byte nulo.
+-- Un WAV tiene nulos → se subiría de 6-7 bytes. Solución: base64 (sin nulos);
+-- el endpoint del app lo decodifica.
 local function post_file(url, file)
+  local b64 = file .. ".b64"
+  os.execute("busybox base64 " .. file .. " > " .. b64)
   local out = "/tmp/resp_" .. uuid .. ".txt"
   os.execute(string.format(
-    "busybox wget -q -O %s --header=Content-Type:audio/wav --post-file=%s '%s'",
-    out, file, url))
+    "busybox wget -q -O %s --header=Content-Type:application/base64 --post-file=%s '%s'",
+    out, b64, url))
   local fh = io.open(out, "r"); if not fh then return "" end
   local body = fh:read("*a"); fh:close(); return body or ""
 end
@@ -91,11 +96,13 @@ for i = 1, MAX_TURNS do
   if hangup == "true" then break end
 end
 
--- ── Fin: detener y subir la grabación completa ──
+-- ── Fin: detener y subir la grabación completa (base64) ──
 session:execute("stop_record_session", rec_path)
+local rec_b64 = rec_path .. ".b64"
+os.execute("busybox base64 " .. rec_path .. " > " .. rec_b64)
 os.execute(string.format(
-  "busybox wget -q -O /dev/null --header=Content-Type:audio/wav --post-file=%s "
+  "busybox wget -q -O /dev/null --header=Content-Type:application/base64 --post-file=%s "
   .. "'%s/freeswitch/recording?call_uuid=%s'",
-  rec_path, APP, uuid))
+  rec_b64, APP, uuid))
 
 session:hangup()
