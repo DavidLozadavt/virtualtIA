@@ -617,9 +617,21 @@ class VoiceCallEngine:
             )
 
         # Respuesta ambigua con origen+barrio ya resueltos → confirmación implícita
-        # (misma lógica que twilio.py; evita bucle de "¿Me confirmas el barrio?")
+        # (evita bucle de "¿Me confirmas el barrio?"). PERO solo para respuestas
+        # CORTAS (≤3 palabras): un ack coloquial ("de una", "listo pues") sí es
+        # confirmación implícita; una frase larga NO. Sin este tope, una
+        # alucinación de STT sobre silencio ("Subtítulos realizados por la
+        # comunidad de Amara.org") o una dirección nueva creaba el servicio SIN
+        # que el usuario dijera "sí". Confirmar un servicio real exige señal
+        # afirmativa, no texto arbitrario.
         ambiguous_is_place = looks_like_place(text)
-        if session.origen_text and session.origen_barrio and not ambiguous_is_place:
+        token_count = len((text or "").split())
+        if (
+            session.origen_text
+            and session.origen_barrio
+            and not ambiguous_is_place
+            and 1 <= token_count <= 3
+        ):
             logger.info(
                 "[engine] implicit confirm call_uuid=%s text=%r",
                 session.call_uuid,

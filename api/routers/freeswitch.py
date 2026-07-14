@@ -405,6 +405,46 @@ async def inbound_call(request: Request):
     return response
 
 
+# Por debajo de este pico el audio es silencio/ruido de fondo. El record-loop
+# graba también cuando el usuario NO habla (silencio hasta el timeout), y Whisper
+# ALUCINA sobre silencio (lo amplifica y "oye" frases fantasma). Habla real ronda
+# -3..-30 dBFS; el silencio observado fue -60 dBFS. Gate conservador en -45.
+_SILENCE_DBFS_GATE = -45.0
+
+# Alucinaciones típicas de Whisper sobre silencio/ruido (normalizado, sin tildes).
+_STT_HALLUCINATIONS = (
+    "amara.org",
+    "subtitulos realizados por la comunidad",
+    "subtitulado por la comunidad",
+    "gracias por ver el video",
+    "gracias por ver el vídeo",
+    "suscribete al canal",
+    "www.mooji.org",
+)
+
+
+def _pcm_peak_dbfs(pcm: bytes) -> float:
+    import audioop
+    import math
+
+    if not pcm:
+        return -99.0
+    try:
+        peak = audioop.max(pcm, 2)
+    except Exception:
+        return -99.0
+    if peak <= 0:
+        return -99.0
+    return 20.0 * math.log10(peak / 32768.0)
+
+
+def _is_stt_hallucination(text: str) -> bool:
+    from core.stt_enhancer import strip_accents
+
+    t = strip_accents((text or "").lower())
+    return any(h in t for h in _STT_HALLUCINATIONS)
+
+
 def _wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int]:
     """Extrae PCM16 mono + sample_rate de un WAV (grabado por FreeSWITCH record).
 
@@ -511,13 +551,25 @@ async def audio_turn(request: Request):
     if not pcm:
         return {"success": False, "call_uuid": call_uuid, "error": "unreadable wav"}
 
+    peak_dbfs = _pcm_peak_dbfs(pcm)
     logger.info(
-        "[freeswitch] audio-turn call_uuid=%s wav_bytes=%d pcm_bytes=%d rate=%d",
+        "[freeswitch] audio-turn call_uuid=%s wav_bytes=%d pcm_bytes=%d rate=%d peak=%.1fdBFS",
         call_uuid,
         len(wav_bytes),
         len(pcm),
         rate,
+        peak_dbfs,
     )
+
+    # Gate de silencio ANTES de STT: no mandar silencio a Whisper (alucina).
+    if peak_dbfs < _SILENCE_DBFS_GATE:
+        logger.info(
+            "[freeswitch] audio-turn silence gate call_uuid=%s peak=%.1fdBFS < %.1f → no_speech",
+            call_uuid,
+            peak_dbfs,
+            _SILENCE_DBFS_GATE,
+        )
+        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
 
     try:
         stt = await _stt.transcribe_telephony_chunk(pcm, encoding="pcm16", call_uuid=call_uuid)
@@ -537,6 +589,15 @@ async def audio_turn(request: Request):
             stt.get("error", "empty transcript"),
         )
         # Sin habla: el dialplan reintenta grabando de nuevo (no cuelga).
+        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
+
+    # Filtro de alucinación de STT (frases fantasma sobre silencio/ruido).
+    if _is_stt_hallucination(transcript):
+        logger.info(
+            "[freeswitch] audio-turn dropped STT hallucination call_uuid=%s text=%r",
+            call_uuid,
+            transcript[:120],
+        )
         return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
 
     raw_transcript = transcript
