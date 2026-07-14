@@ -421,7 +421,12 @@ def _wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int]:
             width = wf.getsampwidth() or 2
             pcm = wf.readframes(wf.getnframes())
     except Exception as e:
-        logger.warning("[freeswitch] audio-turn: WAV parse failed: %s", e)
+        logger.warning(
+            "[freeswitch] audio-turn: WAV parse failed err=%r len=%d head=%r",
+            e,
+            len(wav_bytes),
+            wav_bytes[:16],
+        )
         return b"", 0
     if width != 2:
         try:
