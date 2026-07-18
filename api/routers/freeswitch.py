@@ -76,18 +76,18 @@ class ProcessTextRequest(BaseModel):
 
 def _normalize_transcript(text: str, confidence: float) -> str:
     """
-    Limpieza STT compartida con el gateway Twilio (preprocess_stt): elimina
-    fragmentos de eco de Lyra, expande contracciones payanesas ("hágale"/"de una"
-    -> "sí"), repara direcciones y corrige fonética de Popayán.
+    Limpieza STT (core.stt_enhancer.preprocess_stt): elimina fragmentos de eco
+    de Lyra, expande contracciones payanesas ("hágale"/"de una" -> "sí"),
+    repara direcciones y corrige fonética de Popayán.
 
     Sin esto, el motor recibe el transcript crudo: una confirmación coloquial o
     contaminada con eco no matchea _parse_si_no -> is_yes None -> repair -> el
-    usuario tiene que confirmar dos veces. Twilio ya aplica esto (twilio.py:1359).
+    usuario tiene que confirmar dos veces.
     """
     if not text:
         return text
     try:
-        from api.routers.twilio import preprocess_stt
+        from core.stt_enhancer import preprocess_stt
 
         cleaned = preprocess_stt(text, confidence)
         return cleaned or text
