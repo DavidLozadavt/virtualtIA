@@ -1076,3 +1076,153 @@ class AudioQualityProfile:
         if self.avg_confidence >= 0.35:
             return "medium"
         return "low"
+
+
+# ── Pipeline de preprocesamiento (movido de api/routers/twilio.py) ────────────
+# Único gateway de voz activo es FreeSWITCH (api/routers/freeswitch.py); este
+# pipeline se comparte vía core en vez de importar desde el router Twilio muerto.
+
+# Contracciones payanesas
+_PAYANES_CONTRACTIONS = {
+    "tá": "está",
+    "toy": "estoy",
+    "tamos": "estamos",
+    "taba": "estaba",
+    "pa": "para",
+    "pal": "para el",
+    "pa'l": "para el",
+    "p'alla": "para allá",
+    "pa'lla": "para allá",
+    "palla": "para allá",
+    "pa'ca": "para acá",
+    "paca": "para acá",
+    "onde": "donde",
+    "ónde": "donde",
+    "d'onde": "de donde",
+    "nonces": "entonces",
+    "tonces": "entonces",
+    "'tonces": "entonces",
+    "tons": "entonces",
+    "l centro": "el centro",
+    "'l centro": "el centro",
+    "vea": "mire",
+    "hágale": "sí",
+    "de una": "sí",
+    "cójame": "recoja",
+    "recojame": "recoja",
+    "mandame": "envíe",
+}
+
+# Fragmentos de barge-in de Lyra que el STT puede capturar
+_BARGEIN_FRAGMENTS = [
+    r"^hola\s+soy\s+lyra[,.]?\s*",
+    r"^soy\s+lyra[,.]?\s*",
+    r"^tu\s+asistente\s+de\s+taxbelalcazar[,.]?\s*",
+    r"^cu[eé]ntame[,.]?\s*",
+    r"^listo[,.]?\s+te\s+recojo\s+en\s*",
+    r"^procesando\s+tu\s+solicitud[,.]?\s*",
+]
+
+_FUSED_STREET_RE = re.compile(
+    r"\b(calle|carrera|barrio)(\d+|[a-záéíóúñ]{3,})",
+    re.IGNORECASE,
+)
+
+# Tokens de 1 carácter que SÍ son palabras/marcadores válidos en español o en
+# nomenclatura de direcciones — no se eliminan. El resto de tokens de 1 char
+# (ruido suelto que el STT escupe sobre línea PSTN sucia) se descarta.
+_VALID_1CHAR_TOKENS = frozenset({"a", "y", "o", "u", "e", "#"})
+
+# Frases-basura observadas: "quiero un móvil" mal transcrito como "quisiera/quiero
+# morir". Se eliminan enteras para no contaminar la extracción del destino.
+_STT_JUNK_PHRASES = [
+    r"\bquisiera\s+morir\b",
+    r"\bquiero\s+morir\b",
+]
+
+_REPEAT_CHAR_RE = re.compile(r"(.)\1{2,}")          # 3+ repeticiones → 1
+_WEIRD_CHARS_RE = re.compile(r"[^\w\s#\-]", re.UNICODE)
+
+
+def _aggressive_normalize(text: str) -> str:
+    """
+    Normalización agresiva previa, para audio telefónico muy degradado.
+
+    - Elimina caracteres extraños que el STT a veces inyecta en transcripciones
+      de audio ruidoso (deja letras —incl. acentuadas—, dígitos, espacio, # y -).
+    - Colapsa caracteres repetidos: "fuuuerza" → "fuerza".
+    - Elimina frases-basura conocidas ("quisiera morir" = "quiero un móvil").
+    - Descarta tokens sueltos de 1 carácter que no sean número ni palabra válida.
+    """
+    t = _WEIRD_CHARS_RE.sub(" ", text)
+    t = _REPEAT_CHAR_RE.sub(r"\1", t)
+
+    for pat in _STT_JUNK_PHRASES:
+        t = re.sub(pat, " ", t, flags=re.IGNORECASE)
+
+    tokens = []
+    for tok in t.split():
+        if len(tok) == 1 and not tok.isdigit() and tok.lower() not in _VALID_1CHAR_TOKENS:
+            continue
+        tokens.append(tok)
+
+    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
+
+
+def preprocess_stt(text: str, confidence: float = 1.0) -> str:
+    """
+    Pipeline completo de pre-procesamiento STT.
+
+    Pasos (en orden):
+    0. Normalización agresiva (audio muy degradado): chars extraños, repeticiones,
+       frases-basura, tokens sueltos de 1 char
+    1. Eliminar fragmentos de barge-in de Lyra
+    2. Expandir contracciones payanesas
+    3. Separar palabras fusionadas (habla rápida)
+    4. Convertir números-palabra en contexto de calles
+    5. Corregir errores fonéticos específicos de Popayán
+    6. Normalizar espacios
+    """
+    if not text or len(text) < 2:
+        return text
+
+    t = text.strip()
+
+    # 0. Normalización agresiva previa
+    t = _aggressive_normalize(t)
+    if not t:
+        return text.strip()
+
+    # 1. Barge-in cleanup
+    for pat in _BARGEIN_FRAGMENTS:
+        t = re.sub(pat, "", t, flags=re.IGNORECASE).strip()
+
+    if not t:
+        return text.strip()
+
+    # 2. Contracciones payanesas
+    for contraction, expansion in _PAYANES_CONTRACTIONS.items():
+        pat = r"\b" + re.escape(contraction) + r"\b"
+        t = re.sub(pat, expansion, t, flags=re.IGNORECASE)
+
+    # 3. Palabras fusionadas: "callequince" → "calle quince"
+    t = _FUSED_STREET_RE.sub(r"\1 \2", t)
+
+    # 4. Números-palabra en contexto de calle: "calle quince" → "calle 15"
+    t = expand_number_words_in_streets(t)
+
+    # 4b. Reparar direcciones mangled: "carrera 4 a eb 1728" → "carrera 4a # 17b 28"
+    t = repair_mangled_street_address(t)
+
+    # 5. Correcciones STT específicas de Popayán (dict curado)
+    t = correct_stt_errors(t)
+
+    # 5b. Reparación fonética de transcripción contra el catálogo completo
+    #     (generaliza el dict a los ~600 lugares; guardas estrictas, no expande
+    #     ni colisiona — ej. "villa del karmen" → "villa del carmen").
+    t = repair_location_transcription(t)
+
+    # 6. Normalizar espacios
+    t = re.sub(r"\s+", " ", t).strip()
+
+    return t
