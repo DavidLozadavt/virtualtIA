@@ -13,7 +13,7 @@ _Motor de orquestación generativa — agnóstico, escalable, orientado a produc
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Async-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Hybrid Engine](https://img.shields.io/badge/Engine-Hybrid%20Local%20%2B%20LLM-6A0DAD?style=flat-square&logo=openai&logoColor=white)
-![Twilio](https://img.shields.io/badge/Twilio-Voice%20Gateway-F22F46?style=flat-square&logo=twilio&logoColor=white)
+![FreeSWITCH](https://img.shields.io/badge/FreeSWITCH-Voice%20Gateway-1B7F3B?style=flat-square&logo=freeswitch&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL%20%7C%20MariaDB-Pooled-4479A1?style=flat-square&logo=mysql&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Production-success?style=flat-square)
 ![Confidential](https://img.shields.io/badge/Confidentiality-Private%20Tech%20Doc-red?style=flat-square)
@@ -57,7 +57,7 @@ Consulta del usuario
 |---|---|---|
 | **NexiService** | Directorio comercial interactivo con búsqueda, comparación de negocios y control de mapas | Chat (Web / Mobile) |
 | **Rentus** | Asistente inmobiliario con búsqueda geoespacial, negociación y agendamiento de visitas | Chat (Web / Mobile) |
-| **IntelliTaxi** | Operadora telefónica con STT en tiempo real, geocodificación semántica y despacho autónomo | Twilio Voice |
+| **IntelliTaxi** | Operadora telefónica con STT en tiempo real, geocodificación semántica y despacho autónomo | FreeSWITCH Voice |
 
 ---
 
@@ -73,7 +73,7 @@ graph TD
         subgraph SVC ["Services Layer"]
             CS["💬 ChatService"]
             WS["📱 WhatsAppService"]
-            TS["📞 TwilioService"]
+            TS["📞 Telephony (FreeSWITCH)\nVoiceCallEngine · CallHandler"]
         end
 
         subgraph ORCH ["Orchestrator — Cerebro Híbrido"]
@@ -124,9 +124,10 @@ lyra-ai/
 │   ├── middleware.py                    # Rate limiting por sesión/cliente
 │   ├── routers/
 │   │   ├── main.py                      # POST /chat
-│   │   ├── twilio.py                    # POST /voice · /process_speech
+│   │   ├── freeswitch.py                # /freeswitch/inbound-call · /audio-turn · /recording (voz IntelliTaxi)
 │   │   ├── whatsapp.py                  # GET|POST /whatsapp
 │   │   ├── browser_voice.py             # WebSocket voz desde navegador
+│   │   ├── tts.py                       # Sirve audios TTS generados
 │   │   └── admin/
 │   │       ├── config.py                # /admin/status · /health · /config
 │   │       ├── sessions.py              # /admin/sessions
@@ -138,27 +139,40 @@ lyra-ai/
 ├── services/                            # ── Capa de Negocio ───────────────────────────────────────
 │   ├── chat_service.py                  # Mensajes · historial · trust level
 │   ├── whatsapp_service.py              # Máquina de estados · Meta API
-│   └── twilio/
-│       ├── twilio_service.py            # Máquina de estados de llamada · sesiones async
-│       ├── speech_processor.py          # Limpieza STT · extracción de direcciones
-│       ├── twiml_utils.py               # Generadores de XML TwiML (funciones puras)
-│       └── constants.py                 # Correcciones fonéticas · lugares de Popayán
+│   ├── geo.py                           # Proxy de geocodificación (CORS/API keys)
+│   └── telephony/                       # Gateway de voz — FreeSWITCH (reemplazó Twilio)
+│       ├── voice_call_engine.py         # Máquina de estados de la llamada (origen/confirmación)
+│       ├── call_handler.py              # process_text_turn — orquesta turno de texto/voz
+│       ├── esl_client.py                # Cliente ESL (uuid_broadcast / uuid_kill)
+│       ├── stt_service.py               # STT directo (OpenAI/Groq), sin Twilio
+│       ├── tts_service.py               # Síntesis de voz para telefonía
+│       ├── tts_file_store.py            # Cache/servido de audios TTS generados
+│       ├── audio_preprocess.py          # Resample · high-pass · normalize
+│       ├── audio_vad.py                 # VAD por energía (mulaw/pcm16)
+│       ├── ws_audio_buffer.py           # Buffer de audio WebSocket
+│       ├── session_store.py             # Sesiones de llamada en memoria
+│       ├── phone_utils.py               # Normalización de números telefónicos
+│       └── backend_client.py            # Cliente al backend Laravel (IntelliTaxi)
 │
 ├── orchestrator/                        # ── Motor de Orquestación ─────────────────────────────────
 │   ├── tool_runner.py                   # run_agent_loop · árbitro local vs LLM
 │   ├── tool_registry.py                 # Registro dinámico · auto-discovery
+│   ├── tool_adapter.py                  # LegacyToolAdapter — migración gradual
 │   ├── intent_router.py                 # Clasificación determinista (Regex/Keywords)
 │   ├── context_builder.py               # System prompt · contexto del usuario
 │   ├── memory_manager.py                # Sesiones y perfiles en MySQL
 │   ├── response_engine.py               # Post-procesamiento de respuestas
 │   └── interceptors/
 │       ├── manager.py                   # Orquestador de interceptores
-│       └── nexiservice.py               # Bypass local para NexiService (~70-80% queries)
+│       ├── nexiservice.py               # Bypass local para NexiService (~70-80% queries)
+│       └── schoolsena.py                # Bypass local para SchoolSena
 │
 ├── tools/                               # ── Integraciones con APIs Externas ──────────────────────
 │   ├── nexiservice.py                   # search_businesses · fly_to_business · comparaciones · ...
 │   ├── rentus.py                        # Propiedades · agendamiento · geocodificación
 │   ├── intellitaxi.py                   # Órdenes · coordenadas · backend Laravel
+│   ├── navigation.py                    # Navegación programática en la UI
+│   ├── schoolsena.py                    # Agendamiento académico SchoolSena
 │   └── shared/
 │       └── utils.py                     # normalize_text · haversine · parse_date · ...
 │
@@ -168,12 +182,21 @@ lyra-ai/
 │   ├── llm_engine.py                    # Cliente LLM async · OpenRouter / OpenAI
 │   ├── logger.py                        # Logging centralizado con rotación
 │   ├── pusher.py                        # Eventos en tiempo real
-│   └── voice_engine.py                  # TTS con edge-tts
+│   ├── voice_engine.py                  # TTS con edge-tts
+│   ├── location_match.py                # Resolución tipada de ubicaciones (precision-first)
+│   ├── geocoder_service.py              # Pipeline geocodificación: Cache→Google→Nominatim
+│   ├── geo_types.py                     # LocationType · ResolutionStatus · GeoCandidate
+│   ├── address_utils.py                 # NLP/STT: normalización de direcciones colombianas
+│   ├── stt_enhancer.py                  # Motor de mejora STT (fonética, contracciones payanesas)
+│   └── conversation_repair.py           # Barge-in · reparación conversacional
+│
+├── docs/                                # ── Documentación técnica (freeswitch/, voice/, geocoding/)
 │
 └── projects/                            # ── Perfiles Declarativos por Proyecto ───────────────────
     ├── nexiservice.yaml
     ├── rentus.yaml
-    └── intellitaxi.yaml
+    ├── intellitaxi.yaml
+    └── schoolsena.yaml
 ```
 
 ---
@@ -191,7 +214,8 @@ lyra-ai/
 | **PyMySQL** | Driver MySQL/MariaDB |
 | **pydantic-settings** | Configuración tipada por entorno |
 | **PyYAML** | Carga de perfiles de proyecto en runtime |
-| **Twilio Voice** | Gateway telefónico · STT en tiempo real |
+| **FreeSWITCH** | Gateway telefónico (record-loop) · reemplazó Twilio |
+| **openai (Whisper/gpt-4o-mini-transcribe) / Groq** | STT directo para telefonía |
 | **edge-tts** | Generación de voz (TTS) |
 | **pusher** | Eventos en tiempo real hacia el frontend |
 
@@ -203,7 +227,7 @@ lyra-ai/
 
 - Python `3.10` o superior
 - MySQL activo (XAMPP o instancia local)
-- Cuenta de Twilio con número configurado _(solo para IntelliTaxi)_
+- Servidor FreeSWITCH configurado (record-loop, ver `docs/freeswitch/`) _(solo para IntelliTaxi)_
 
 > **API Keys** — Contacta a [@miguelcamilok](https://github.com/miguelcamilok) para obtener credenciales.
 
