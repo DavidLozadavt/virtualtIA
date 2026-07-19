@@ -1,7 +1,10 @@
 """
 core/voice_engine.py — Centralized Speech-to-Text and Text-to-Speech engine for Lyra.
 
-STT: OpenAI Whisper API (whisper-1) — máxima precisión, soporta cualquier tipo de voz
+STT: OpenAI gpt-4o-mini-transcribe — única ruta de transcripción soportada.
+     Supera a whisper-1 en nombres propios/barrios (evidencia:
+     scratch/audio_diagnostic.py, donde whisper-1 rompe "Valle del Ortigal").
+     whisper-1 y el fallback Groq whisper-large-v3 fueron retirados a propósito.
 TTS: edge-tts (Microsoft Neural TTS) — 100% GRATIS, voz humana y natural en español
 
 Voces disponibles para español colombiano (edge-tts):
@@ -42,11 +45,15 @@ aiohttp.TCPConnector.__init__ = _patched_tcp_connector_init
 
 logger = logging.getLogger("lyra.voice")
 
+# Único modelo STT del sistema. No hay fallback a whisper-1 ni a Groq
+# whisper-large-v3: gpt-4o-mini-transcribe se usa de forma exclusiva.
+STT_MODEL = "gpt-4o-mini-transcribe"
 
-# ── Prompt hint para Whisper ──────────────────────────────────────────────────
+
+# ── Prompt hint para el STT ───────────────────────────────────────────────────
 # Sesga el modelo hacia vocabulario cotidiano en español para mejorar precisión
 # con hablantes rápidos, lentos o con poca vocalización.
-_WHISPER_PROMPT_ES = (
+_STT_PROMPT_ES = (
     "Sí. No. Ok. Vale. Dale. Claro. Listo. Bien. Perfecto. "
     "Hola, buenos días. Busco un restaurante, barbería, hotel. "
     "Quiero agendar una cita. Sí, me interesa. No, gracias. Ok, adelante. Dale, muéstrame."
@@ -145,14 +152,15 @@ class VoiceEngine:
     """
     Motor de voz reutilizable en cualquier proyecto Lyra.
 
-    STT: OpenAI Whisper (requiere OPENAI_API_KEY)
+    STT: OpenAI gpt-4o-mini-transcribe (requiere una key REAL de OpenAI —
+         OpenRouter no soporta audio)
     TTS: edge-tts de Microsoft — 100% GRATUITO, voces neurales de alta calidad
     """
 
     SUPPORTED_AUDIO_FORMATS = {"audio/webm", "audio/wav", "audio/mp3", "audio/mpeg", "audio/ogg", "audio/m4a"}
     MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
-    # Mapeo de content-type → extensión para que Whisper decodifique correctamente
+    # Mapeo de content-type → extensión para que el STT decodifique correctamente
     _MIME_TO_EXT = {
         "audio/webm": "webm",
         "audio/wav":  "wav",
@@ -164,34 +172,33 @@ class VoiceEngine:
     }
 
     def __init__(self, api_key: str):
-        # STT: OpenAI Whisper
+        # STT: OpenAI gpt-4o-mini-transcribe, siempre. Sin fallback a whisper-1
+        # ni a Groq whisper-large-v3 (ambos peores en nombres propios/barrios).
+        self.stt_model = STT_MODEL
         try:
             from openai import AsyncOpenAI
             from core.config import settings
-            
-            if settings.GROQ_API_KEY:
-                self.openai_client = AsyncOpenAI(
-                    api_key=settings.GROQ_API_KEY,
-                    base_url="https://api.groq.com/openai/v1"
-                )
-                self.stt_model = "whisper-large-v3"
+
+            # gpt-4o-mini-transcribe requiere una key REAL de OpenAI. OpenRouter
+            # (sk-or...) no soporta audio. Se prefiere la key dedicada de STT
+            # (OPENAI_WHISPER_KEY, ahora "OpenAI STT key"); si no existe, se usa
+            # OPENAI_API_KEY salvo que sea de OpenRouter.
+            stt_key = (settings.OPENAI_WHISPER_KEY or "").strip()
+            if not stt_key and not settings.OPENAI_API_KEY.startswith("sk-or"):
+                stt_key = settings.OPENAI_API_KEY.strip()
+
+            if stt_key:
+                self.openai_client = AsyncOpenAI(api_key=stt_key)
                 self.stt_available = True
-                logger.info("VoiceEngine STT (Groq) inicializado.")
-            elif settings.OPENAI_WHISPER_KEY:
-                self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_WHISPER_KEY)
-                self.stt_model = "whisper-1"
-                self.stt_available = True
-                logger.info("VoiceEngine STT (OpenAI Whisper) inicializado.")
+                logger.info("VoiceEngine STT (OpenAI %s) inicializado.", self.stt_model)
             else:
-                if settings.OPENAI_API_KEY.startswith("sk-or"):
-                    logger.warning("OPENAI_API_KEY es de OpenRouter (no soporta STT audio). Configura GROQ_API_KEY o OPENAI_WHISPER_KEY en tu .env")
-                    self.openai_client = None
-                    self.stt_available = False
-                else:
-                    self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-                    self.stt_model = "whisper-1"
-                    self.stt_available = True
-                    logger.info("VoiceEngine STT (Fallback Whisper) inicializado.")
+                self.openai_client = None
+                self.stt_available = False
+                logger.warning(
+                    "STT deshabilitado: falta una key de OpenAI válida para audio. "
+                    "Configura OPENAI_WHISPER_KEY, o una OPENAI_API_KEY que no sea de "
+                    "OpenRouter (sk-or...). gpt-4o-mini-transcribe no acepta keys sk-or."
+                )
         except ImportError:
             logger.warning("openai package no instalado. STT no disponible.")
             self.openai_client = None
@@ -209,14 +216,18 @@ class VoiceEngine:
         self,
         audio_bytes: bytes,
         language: str = "es",
-        stt_model: str = None,
         content_type: str = "audio/webm",
     ) -> dict:
         """
-        Convierte audio de voz a texto usando Whisper con máxima precisión.
+        Convierte audio de voz a texto con OpenAI gpt-4o-mini-transcribe.
 
-        Mejoras:
-        - verbose_json: segmentos con timestamp y probabilidad de silencio.
+        El modelo es fijo (self.stt_model): no se acepta override por-llamada
+        para que ninguna ruta pueda volver a seleccionar whisper-1.
+
+        Notas del modelo:
+        - response_format="json" es el ÚNICO formato soportado por
+          gpt-4o-mini-transcribe (verbose_json/segments NO están disponibles,
+          por eso no se calcula confianza por no_speech_prob).
         - prompt hint: sesga hacia vocabulario español colombiano.
         - Extensión de archivo correcta según MIME type.
         - Detección de transcripciones basura.
@@ -238,11 +249,11 @@ class VoiceEngine:
             audio_file.name = f"voice_input.{ext}"
 
             response = await self.openai_client.audio.transcriptions.create(
-                model=stt_model or self.stt_model,
+                model=self.stt_model,
                 file=audio_file,
                 language=language if language else None,
-                response_format="verbose_json",
-                prompt=_WHISPER_PROMPT_ES,
+                response_format="json",
+                prompt=_STT_PROMPT_ES,
                 temperature=0.0,
             )
 
@@ -256,17 +267,9 @@ class VoiceEngine:
             if not text:
                 return {"success": False, "text": "", "error": "No se detectó voz en el audio."}
 
-            # Calcular confianza desde segmentos
+            # gpt-4o-mini-transcribe (response_format=json) no devuelve segmentos ni
+            # no_speech_prob, así que no hay confianza por-segmento: se reporta 1.0.
             avg_confidence = 1.0
-            segments = getattr(response, "segments", []) or []
-            if segments:
-                no_speech_probs = [s.get("no_speech_prob", 0) for s in segments if isinstance(s, dict)]
-                if no_speech_probs:
-                    avg_no_speech = sum(no_speech_probs) / len(no_speech_probs)
-                    avg_confidence = round(1.0 - avg_no_speech, 3)
-                    if avg_no_speech > 0.88:
-                        logger.warning(f"Alta probabilidad de silencio ({avg_no_speech:.2f}), rechazando.")
-                        return {"success": False, "text": "", "error": "No se detectó habla clara. Habla más cerca del micrófono."}
 
             if _is_gibberish(text):
                 logger.warning(f"Transcripción basura detectada: '{text[:60]}' — rechazando.")

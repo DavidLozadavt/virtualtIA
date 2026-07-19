@@ -1,13 +1,13 @@
 """Endpointing híbrido acústico + semántico (spec §3.2, §3.7).
 
-Capa acústica: Deepgram emite `speech_final` (pausa detectada, ~300 ms) y
-`UtteranceEnd` (gap en los tiempos de palabra). Capa semántica propia: si el
-texto acumulado termina en continuación evidente ("calle", "en", "número",
-un número colgado), la pausa NO cierra el turno de inmediato — se retiene
-hasta `VOICE_ENDPOINT_HOLD_MS` (con techo `VOICE_ENDPOINT_HOLD_MAX_MS`) por
-si el usuario está dictando una dirección despacio. Esto reemplaza el
-`UTT_SIL_SECS=3` fijo de V1: el caso normal cierra en ~300 ms y el caso
-"dirección dictada con pausas" espera solo lo necesario.
+Capa acústica: el STT emite un final de enunciado con `speech_final` (el
+`completed` del server_vad de OpenAI; con Deepgram era `speech_final`/`UtteranceEnd`).
+Capa semántica propia: si el texto acumulado termina en continuación evidente
+("calle", "en", "número", un número colgado), la pausa NO cierra el turno de
+inmediato — se retiene hasta `VOICE_ENDPOINT_HOLD_MS` (con techo
+`VOICE_ENDPOINT_HOLD_MAX_MS`) por si el usuario está dictando una dirección
+despacio. Esto reemplaza el `UTT_SIL_SECS=3` fijo de V1: el caso normal cierra
+rápido y el caso "dirección dictada con pausas" espera solo lo necesario.
 
 Máquina de estados síncrona con reloj inyectado (testeable sin dormir).
 """

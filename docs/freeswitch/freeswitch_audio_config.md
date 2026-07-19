@@ -7,8 +7,8 @@
 >
 > **Objetivo:** entregar a Lyra audio G.711 PCMU 8 kHz lo más "crudo" posible,
 > sin que FreeSWITCH haga su propio VAD, comfort-noise (CNG) ni AGC. El VAD y
-> el endpointing los hace el STT streaming (Deepgram) y el AEC del runtime V2
-> (`services/voice/`). Si FreeSWITCH también procesa, introduce silencios
+> el endpointing los hace el STT streaming (OpenAI Realtime, server_vad) y el
+> runtime V2 (`services/voice/`). Si FreeSWITCH también procesa, introduce silencios
 > sintéticos, recortes y ganancia variable que degradan la transcripción
 > (la misma palabra devuelve transcripciones distintas en intentos repetidos).
 

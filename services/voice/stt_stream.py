@@ -1,40 +1,51 @@
-"""STT streaming — Deepgram nova-2 por WebSocket (spec §3.2).
+"""STT streaming — OpenAI Realtime transcription (gpt-4o-mini-transcribe) por WebSocket.
 
-Requisitos no negociables cumplidos aquí:
-  - hipótesis parciales continuas (`interim_results=true`),
-  - endpointing nativo acústico (`endpointing`, `speech_final`) + señal por
-    tiempos de palabra (`utterance_end_ms` → mensaje UtteranceEnd),
-  - eventos de inicio de voz (`vad_events=true` → SpeechStarted),
-  - sesgo de vocabulario REAL de decodificación (`keywords`, soportado por
-    nova-2 en todas las lenguas, máx 100 términos) — reemplaza el prompt de
-    texto suave de V1; el vocabulario se deriva del catálogo local (lógica
-    rescatada de core/streaming_pipeline._build_hint_vocab, bucket D).
+Reemplaza a Deepgram manteniendo EXACTAMENTE el mismo flujo aguas abajo: este
+módulo emite los mismos eventos tipados (`TranscriptEvent`, `UtteranceEndEvent`,
+`SpeechStartedEvent`) y expone la misma interfaz pública (`connect`, `send_audio`,
+`events`, `close`) que consumía `DeepgramLiveSTT`, así que
+`runtime.py`/`endpointing.py`/`orchestrator.py` no cambian.
 
-nova-2 soporta español streaming (language=es-419) según la matriz oficial de
-modelos de Deepgram. El audio se envía tal cual llega de FreeSWITCH
-(linear16 @ 8000 Hz mono): Deepgram maneja audio telefónico nativo, sin el
-resample local a 16 kHz que necesitaba Whisper en V1.
+Mapeo protocolo OpenAI Realtime → eventos internos:
+  - `input_audio_buffer.speech_started`                        → SpeechStartedEvent
+  - `conversation.item.input_audio_transcription.delta`        → TranscriptEvent(is_final=False)
+      (los deltas son incrementales: se acumulan en un buffer de interim)
+  - `conversation.item.input_audio_transcription.completed`    → TranscriptEvent(is_final=True,
+      speech_final=True)  — el cierre de enunciado lo decide el server_vad de OpenAI
+
+Audio: FreeSWITCH entrega PCM16 lineal @ 8000 Hz (telefonía). Se envía como
+`g711_ulaw` (8 kHz nativo) — sin resample ni pérdida de etiqueta de sample rate,
+codificado con numpy (sin depender de `audioop`, que no es dependencia del
+proyecto). El sesgo de vocabulario de Popayán (los barrios que Deepgram boosteaba
+con `keywords`) pasa al `prompt` de la sesión de transcripción (sesgo suave; OpenAI
+no tiene boosting de decodificación por keyword).
+
+La resolución de direcciones (core/geocoder_service, core/location_match) y la
+lógica de negocio del FSM no se tocan.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
-from urllib.parse import urlencode
 
 from core.config import settings
 
 logger = logging.getLogger("lyra.voice.stt")
 
-_DEEPGRAM_WSS = "wss://api.deepgram.com/v1/listen"
+_OPENAI_REALTIME_WSS = "wss://api.openai.com/v1/realtime?intent=transcription"
 _KEEPALIVE_INTERVAL_SEC = 5.0
-_KEYWORD_CAP = 100  # límite documentado de Deepgram
+_PROMPT_CAP_CHARS = 480  # sesgo suave acotado (el prompt no es un vocabulario duro)
 
-# ── Vocabulario de boosting (rescatado de streaming_pipeline, bucket D) ──
+# ── Vocabulario de sesgo (nombres distintivos de Popayán para el prompt) ──
+# Antes alimentaba el `keywords` boosting de Deepgram; OpenAI no tiene boosting
+# de decodificación, así que estos nombres se listan en el prompt de la sesión.
 
 _HINT_STOPWORDS = frozenset({
     "el", "la", "los", "las", "de", "del", "san", "santa", "villa", "ciudad",
@@ -54,12 +65,7 @@ _PRIORITY_HINTS = (
     "Villa del Carmen", "Villa del Viento",
 )
 
-_PHONETIC_VARIANT_KEYWORDS = (
-    "Pubensa", "Pubencia", "Campanaryo", "Yanakonas", "Pandeguando",
-    "Belalcasar", "Yambitara",
-)
-
-_KEYWORDS_CACHE: Optional[list[str]] = None
+_PROMPT_CACHE: Optional[str] = None
 
 
 def _catalog_names() -> list[str]:
@@ -97,44 +103,65 @@ def _catalog_names() -> list[str]:
     return names
 
 
-def build_keywords() -> list[str]:
-    """Tokens propios distintivos del catálogo (palabras sueltas poco comunes).
+def build_prompt() -> str:
+    """Prompt de sesgo para la sesión de transcripción.
 
-    Deepgram boostea keywords sueltas: se filtran genéricos que diluyen el
-    boost y se priorizan variantes fonéticas reales observadas del STT.
+    Lista nombres propios distintivos de Popayán (barrios, hitos) para orientar
+    al modelo hacia la ortografía correcta — es sesgo suave, no boosting duro.
     """
-    global _KEYWORDS_CACHE
-    if _KEYWORDS_CACHE is not None:
-        return _KEYWORDS_CACHE
+    global _PROMPT_CACHE
+    if _PROMPT_CACHE is not None:
+        return _PROMPT_CACHE
 
-    from core.stt_enhancer import strip_accents
-
-    tokens: list[str] = []
-    seen: set[str] = set()
-
-    def _add_tok(tok: str) -> None:
-        t = tok.strip(" ,.")
-        tl = strip_accents(t.lower())
-        if len(tl) < 4 or tl in _HINT_STOPWORDS or tl in seen:
-            return
-        seen.add(tl)
-        tokens.append(t)
-
-    for variant in _PHONETIC_VARIANT_KEYWORDS:
-        _add_tok(variant)
-    for name in _catalog_names():
-        for tok in re.split(r"[\s,]+", name):
-            _add_tok(tok)
-            if len(tokens) >= _KEYWORD_CAP:
-                break
-        if len(tokens) >= _KEYWORD_CAP:
+    names = _catalog_names()
+    lead = (
+        "Llamada de taxi en Popayán, Colombia. El usuario dicta una dirección o "
+        "barrio. Nombres propios frecuentes: "
+    )
+    picked: list[str] = []
+    total = len(lead)
+    for nm in names:
+        add = len(nm) + 2
+        if total + add > _PROMPT_CAP_CHARS:
             break
+        picked.append(nm)
+        total += add
+    _PROMPT_CACHE = lead + ", ".join(picked) + "."
+    return _PROMPT_CACHE
 
-    _KEYWORDS_CACHE = tokens[:_KEYWORD_CAP]
-    return _KEYWORDS_CACHE
+
+# ── G.711 μ-law encode (PCM16 8k → ulaw 8k), vectorizado con numpy ──
+
+_ULAW_SEG_END = None  # se inicializa perezosamente con numpy
 
 
-# ── Eventos ──
+def pcm16_to_ulaw(pcm: bytes) -> bytes:
+    """Codifica PCM16 little-endian a G.711 μ-law. Determinista, sin audioop."""
+    if not pcm:
+        return b""
+    import numpy as np
+
+    global _ULAW_SEG_END
+    if _ULAW_SEG_END is None:
+        _ULAW_SEG_END = np.array(
+            [0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF], dtype=np.int32
+        )
+
+    BIAS = 0x84
+    CLIP = 32635
+
+    x = np.frombuffer(pcm, dtype="<i2").astype(np.int32)
+    sign = np.where(x < 0, 0x80, 0x00).astype(np.int32)
+    mag = np.minimum(np.abs(x), CLIP) + BIAS
+    # exponente = primer segmento cuyo límite superior alcanza a `mag`
+    exponent = np.searchsorted(_ULAW_SEG_END, mag, side="left").astype(np.int32)
+    np.clip(exponent, 0, 7, out=exponent)
+    mantissa = (mag >> (exponent + 3)) & 0x0F
+    ulaw = ~(sign | (exponent << 4) | mantissa) & 0xFF
+    return ulaw.astype(np.uint8).tobytes()
+
+
+# ── Eventos (idénticos a los que consumía el endpointer con Deepgram) ──
 
 @dataclass
 class TranscriptEvent:
@@ -159,28 +186,21 @@ class SpeechStartedEvent:
 STTEvent = TranscriptEvent | UtteranceEndEvent | SpeechStartedEvent
 
 
-def parse_deepgram_message(data: dict) -> Optional[STTEvent]:
-    """JSON de Deepgram → evento tipado (None para mensajes sin interés)."""
-    msg_type = data.get("type")
-    if msg_type == "Results":
-        channel = data.get("channel") or {}
-        alternatives = channel.get("alternatives") or []
-        if not alternatives:
-            return None
-        alt = alternatives[0] or {}
-        return TranscriptEvent(
-            text=(alt.get("transcript") or "").strip(),
-            confidence=float(alt.get("confidence") or 0.0),
-            is_final=bool(data.get("is_final")),
-            speech_final=bool(data.get("speech_final")),
-            start=float(data.get("start") or 0.0),
-            duration=float(data.get("duration") or 0.0),
-        )
-    if msg_type == "UtteranceEnd":
-        return UtteranceEndEvent(last_word_end=float(data.get("last_word_end") or 0.0))
-    if msg_type == "SpeechStarted":
-        return SpeechStartedEvent(timestamp=float(data.get("timestamp") or 0.0))
-    return None
+def _confidence_from_logprobs(logprobs: object) -> float:
+    """exp(media de logprobs) ∈ (0,1]; 1.0 si no hay logprobs disponibles."""
+    if not isinstance(logprobs, list) or not logprobs:
+        return 1.0
+    vals = [
+        lp.get("logprob")
+        for lp in logprobs
+        if isinstance(lp, dict) and isinstance(lp.get("logprob"), (int, float))
+    ]
+    if not vals:
+        return 1.0
+    try:
+        return round(min(1.0, math.exp(sum(vals) / len(vals))), 3)
+    except OverflowError:
+        return 1.0
 
 
 class STTStreamError(RuntimeError):
@@ -188,66 +208,82 @@ class STTStreamError(RuntimeError):
 
 
 @dataclass
-class DeepgramLiveSTT:
-    """Sesión streaming de Deepgram para una llamada."""
+class OpenAIRealtimeSTT:
+    """Sesión de transcripción en streaming de OpenAI Realtime para una llamada."""
 
     call_uuid: str
     sample_rate: int = 8000
     _ws: object = field(default=None, init=False)
     _keepalive_task: Optional[asyncio.Task] = field(default=None, init=False)
     _closed: bool = field(default=False, init=False)
+    _interim: str = field(default="", init=False)  # acumulador de deltas del enunciado
+    _interim_logprobs: list = field(default_factory=list, init=False)
 
-    def build_url(self) -> str:
-        params: list[tuple[str, str]] = [
-            ("model", settings.VOICE_STT_MODEL or "nova-2"),
-            ("language", settings.VOICE_STT_LANGUAGE or "es-419"),
-            ("encoding", "linear16"),
-            ("sample_rate", str(self.sample_rate)),
-            ("channels", "1"),
-            ("interim_results", "true"),
-            ("endpointing", str(int(settings.VOICE_STT_ENDPOINTING_MS))),
-            ("utterance_end_ms", str(int(settings.VOICE_STT_UTTERANCE_END_MS))),
-            ("vad_events", "true"),
-            ("punctuate", "true"),
-        ]
-        boost = float(settings.VOICE_STT_KEYWORD_BOOST or 2.0)
-        for kw in build_keywords():
-            params.append(("keywords", f"{kw}:{boost:g}"))
-        return f"{_DEEPGRAM_WSS}?{urlencode(params)}"
+    def _session_config(self) -> dict:
+        return {
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "g711_ulaw",
+                "input_audio_transcription": {
+                    "model": settings.VOICE_STT_MODEL or "gpt-4o-mini-transcribe",
+                    "language": settings.VOICE_STT_LANGUAGE or "es",
+                    "prompt": build_prompt(),
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": float(settings.VOICE_STT_VAD_THRESHOLD),
+                    "prefix_padding_ms": int(settings.VOICE_STT_PREFIX_PADDING_MS),
+                    "silence_duration_ms": int(settings.VOICE_STT_SILENCE_MS),
+                },
+                "input_audio_noise_reduction": {"type": "near_field"},
+                "include": ["item.input_audio_transcription.logprobs"],
+            },
+        }
 
     async def connect(self) -> None:
-        api_key = (settings.DEEPGRAM_API_KEY or "").strip()
+        api_key = settings.openai_stt_key()
         if not api_key:
-            raise STTStreamError("DEEPGRAM_API_KEY no configurada")
+            raise STTStreamError(
+                "Sin OPENAI_API_KEY real para STT (OpenRouter no soporta audio)"
+            )
 
         import websockets
 
         try:
             self._ws = await websockets.connect(
-                self.build_url(),
-                additional_headers={"Authorization": f"Token {api_key}"},
+                _OPENAI_REALTIME_WSS,
+                additional_headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "OpenAI-Beta": "realtime=v1",
+                },
                 max_size=2**22,
                 open_timeout=10,
                 close_timeout=5,
             )
         except Exception as e:
-            raise STTStreamError(f"Deepgram connect failed: {e}") from e
+            raise STTStreamError(f"OpenAI Realtime connect failed: {e}") from e
+
+        try:
+            await self._ws.send(json.dumps(self._session_config()))
+        except Exception as e:
+            raise STTStreamError(f"OpenAI Realtime session config failed: {e}") from e
 
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
         logger.info(
-            "[stt] deepgram connected call_uuid=%s model=%s lang=%s keywords=%d",
+            "[stt] openai realtime connected call_uuid=%s model=%s lang=%s",
             self.call_uuid,
             settings.VOICE_STT_MODEL,
             settings.VOICE_STT_LANGUAGE,
-            len(build_keywords()),
         )
 
     async def _keepalive_loop(self) -> None:
+        # Ping WS a nivel de protocolo: mantiene viva la conexión en silencios
+        # largos sin inyectar audio falso al buffer.
         try:
             while not self._closed and self._ws is not None:
                 await asyncio.sleep(_KEEPALIVE_INTERVAL_SEC)
                 try:
-                    await self._ws.send(json.dumps({"type": "KeepAlive"}))
+                    await self._ws.ping()
                 except Exception:
                     return
         except asyncio.CancelledError:
@@ -257,12 +293,75 @@ class DeepgramLiveSTT:
         if self._closed or self._ws is None or not pcm:
             return
         try:
-            await self._ws.send(pcm)
+            ulaw = pcm16_to_ulaw(pcm)
+            audio_b64 = base64.b64encode(ulaw).decode("ascii")
+            await self._ws.send(
+                json.dumps({"type": "input_audio_buffer.append", "audio": audio_b64})
+            )
         except Exception as e:
             if not self._closed:
                 logger.warning(
                     "[stt] send failed call_uuid=%s err=%s", self.call_uuid, e
                 )
+
+    def _parse(self, data: dict) -> Optional[STTEvent]:
+        """Evento del protocolo OpenAI Realtime → evento interno tipado."""
+        msg_type = data.get("type")
+
+        if msg_type == "input_audio_buffer.speech_started":
+            self._interim = ""
+            self._interim_logprobs = []
+            return SpeechStartedEvent(
+                timestamp=float(data.get("audio_start_ms") or 0.0) / 1000.0
+            )
+
+        if msg_type == "conversation.item.input_audio_transcription.delta":
+            delta = data.get("delta") or ""
+            if not delta:
+                return None
+            self._interim += delta
+            lp = data.get("logprobs")
+            if isinstance(lp, list):
+                self._interim_logprobs.extend(lp)
+            return TranscriptEvent(
+                text=self._interim.strip(),
+                confidence=_confidence_from_logprobs(self._interim_logprobs),
+                is_final=False,
+                speech_final=False,
+            )
+
+        if msg_type == "conversation.item.input_audio_transcription.completed":
+            text = (data.get("transcript") or self._interim or "").strip()
+            confidence = _confidence_from_logprobs(
+                data.get("logprobs") or self._interim_logprobs
+            )
+            self._interim = ""
+            self._interim_logprobs = []
+            return TranscriptEvent(
+                text=text,
+                confidence=confidence,
+                is_final=True,
+                speech_final=True,
+            )
+
+        if msg_type == "conversation.item.input_audio_transcription.failed":
+            err = (data.get("error") or {}).get("message", "")
+            logger.warning(
+                "[stt] transcription failed call_uuid=%s err=%s", self.call_uuid, err
+            )
+            self._interim = ""
+            self._interim_logprobs = []
+            return None
+
+        if msg_type == "error":
+            logger.warning(
+                "[stt] openai realtime error call_uuid=%s payload=%s",
+                self.call_uuid,
+                data.get("error"),
+            )
+            return None
+
+        return None
 
     async def events(self) -> AsyncIterator[STTEvent]:
         if self._ws is None:
@@ -275,7 +374,7 @@ class DeepgramLiveSTT:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                event = parse_deepgram_message(data)
+                event = self._parse(data)
                 if event is not None:
                     yield event
         except Exception as e:
@@ -291,10 +390,6 @@ class DeepgramLiveSTT:
         if self._keepalive_task:
             self._keepalive_task.cancel()
         if self._ws is not None:
-            try:
-                await self._ws.send(json.dumps({"type": "CloseStream"}))
-            except Exception:
-                pass
             try:
                 await self._ws.close()
             except Exception:

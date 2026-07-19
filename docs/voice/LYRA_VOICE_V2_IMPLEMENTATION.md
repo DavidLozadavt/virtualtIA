@@ -1,5 +1,13 @@
 # Lyra Voice V2 — Implementación (2026-07-19)
 
+> **Actualización posterior (STT):** el motor de STT telefónico migró de
+> **Deepgram nova-2** a **OpenAI Realtime (`gpt-4o-mini-transcribe`)** para
+> unificar todo el sistema en OpenAI. El flujo (parciales → endpointing híbrido
+> → NLU → FSM) no cambió; solo el proveedor. Las menciones a Deepgram, `keywords`
+> y `DEEPGRAM_API_KEY` de este documento quedan como registro histórico —
+> ver `services/voice/stt_stream.py`, `docs/freeswitch/STREAMING_DEPLOY.md` y
+> `docs/freeswitch/VPS_DEPLOY.md` para el estado actual.
+
 Implementación completa de `docs/voice/audit_2026-07-18/LYRA_VOICE_V2_SPEC.md`.
 V1 (record-loop) fue eliminado del árbol; existe únicamente V2.
 

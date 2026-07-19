@@ -89,7 +89,7 @@ services/
 ├── voice/                   → Lyra Voice V2: motor conversacional streaming
 │   ├── runtime.py           → Composición full-duplex por llamada
 │   ├── transport.py         → WS mod_audio_stream (frames + playback)
-│   ├── stt_stream.py        → Deepgram streaming (parciales + keywords)
+│   ├── stt_stream.py        → OpenAI Realtime STT (gpt-4o-mini-transcribe, parciales)
 │   ├── endpointing.py       → Endpointing híbrido acústico + semántico
 │   ├── nlu.py               → Extracción de spans (structured outputs)
 │   ├── orchestrator.py      → FSM de negocio de la llamada
@@ -296,8 +296,8 @@ class LegacyToolAdapter:
 1. FreeSWITCH abre el WebSocket full-duplex
    lyra_stream.lua → uuid_audio_stream → WS /freeswitch/audio
 
-2. Audio entrante continuo (PCM16 8k)
-   frame → AEC (eco del TTS cancelado) → Deepgram streaming
+2. Audio entrante continuo (PCM16 8k → g711_ulaw)
+   frame → OpenAI Realtime STT streaming
    (nunca se descarta audio del usuario: full-duplex real)
 
 3. Comprensión del turno

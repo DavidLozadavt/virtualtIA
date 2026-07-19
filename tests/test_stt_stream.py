@@ -1,68 +1,114 @@
-"""Parseo de mensajes Deepgram, keywords del catálogo y URL de conexión."""
+"""Parseo de eventos OpenAI Realtime, codificación g711 μ-law y prompt de sesgo.
 
-from urllib.parse import parse_qs, urlparse
+El STT telefónico migró de Deepgram a OpenAI Realtime (gpt-4o-mini-transcribe)
+manteniendo los mismos eventos tipados que consume el endpointer.
+"""
+
+import struct
 
 from services.voice.stt_stream import (
-    DeepgramLiveSTT,
+    OpenAIRealtimeSTT,
     SpeechStartedEvent,
     TranscriptEvent,
-    UtteranceEndEvent,
-    build_keywords,
-    parse_deepgram_message,
+    build_prompt,
+    pcm16_to_ulaw,
 )
 
 
-def test_parse_results_message():
-    ev = parse_deepgram_message({
-        "type": "Results",
-        "is_final": True,
-        "speech_final": True,
-        "start": 1.2,
-        "duration": 0.8,
-        "channel": {
-            "alternatives": [
-                {"transcript": "estoy en pubenza", "confidence": 0.93}
-            ]
-        },
-    })
+def _new_stt() -> OpenAIRealtimeSTT:
+    return OpenAIRealtimeSTT(call_uuid="test-uuid")
+
+
+def test_speech_started_maps_and_resets_interim():
+    stt = _new_stt()
+    stt._interim = "algo viejo"
+    ev = stt._parse({"type": "input_audio_buffer.speech_started", "audio_start_ms": 400})
+    assert isinstance(ev, SpeechStartedEvent)
+    assert ev.timestamp == 0.4
+    assert stt._interim == ""  # el nuevo enunciado limpia el acumulador
+
+
+def test_delta_accumulates_into_interim():
+    stt = _new_stt()
+    e1 = stt._parse(
+        {"type": "conversation.item.input_audio_transcription.delta", "delta": "estoy en "}
+    )
+    e2 = stt._parse(
+        {"type": "conversation.item.input_audio_transcription.delta", "delta": "pubenza"}
+    )
+    assert isinstance(e1, TranscriptEvent) and not e1.is_final
+    assert e1.text == "estoy en"
+    # el delta es incremental: el interim acumula, no reemplaza
+    assert e2.text == "estoy en pubenza"
+    assert not e2.speech_final
+
+
+def test_completed_is_final_and_resets():
+    stt = _new_stt()
+    stt._parse(
+        {"type": "conversation.item.input_audio_transcription.delta", "delta": "valle del ortigal"}
+    )
+    ev = stt._parse(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "estoy en el valle del ortigal",
+        }
+    )
     assert isinstance(ev, TranscriptEvent)
-    assert ev.text == "estoy en pubenza"
     assert ev.is_final and ev.speech_final
-    assert ev.confidence == 0.93
+    assert ev.text == "estoy en el valle del ortigal"
+    assert stt._interim == ""  # listo para el siguiente enunciado
 
 
-def test_parse_utterance_end_and_speech_started():
-    assert isinstance(
-        parse_deepgram_message({"type": "UtteranceEnd", "last_word_end": 2.1}),
-        UtteranceEndEvent,
+def test_confidence_from_logprobs():
+    import math
+
+    stt = _new_stt()
+    # dos tokens con logprob ~ -0.1 → confianza ~ exp(-0.1) ≈ 0.905
+    ev = stt._parse(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "sí",
+            "logprobs": [{"token": "sí", "logprob": -0.1}, {"token": ".", "logprob": -0.1}],
+        }
     )
-    assert isinstance(
-        parse_deepgram_message({"type": "SpeechStarted", "timestamp": 0.4}),
-        SpeechStartedEvent,
+    assert abs(ev.confidence - math.exp(-0.1)) < 0.01
+    # sin logprobs → 1.0 (no falso-bajo)
+    stt2 = _new_stt()
+    ev2 = stt2._parse(
+        {"type": "conversation.item.input_audio_transcription.completed", "transcript": "hola"}
     )
-    assert parse_deepgram_message({"type": "Metadata"}) is None
+    assert ev2.confidence == 1.0
 
 
-def test_keywords_from_catalog():
-    kws = build_keywords()
-    assert 0 < len(kws) <= 100
-    lowered = [k.lower() for k in kws]
-    assert "pubenza" in lowered            # prioridad
-    assert "pubensa" in lowered            # variante fonética real
-    assert "calle" not in lowered          # genéricos filtrados
-    assert all("," not in k for k in kws)  # tokens sueltos
+def test_unknown_and_error_events_ignored():
+    stt = _new_stt()
+    assert stt._parse({"type": "input_audio_buffer.committed"}) is None
+    assert stt._parse({"type": "error", "error": {"message": "x"}}) is None
 
 
-def test_build_url_parameters():
-    stt = DeepgramLiveSTT(call_uuid="u1")
-    parsed = urlparse(stt.build_url())
-    qs = parse_qs(parsed.query)
-    assert parsed.scheme == "wss" and "deepgram" in parsed.netloc
-    assert qs["model"] == ["nova-2"]
-    assert qs["language"] == ["es-419"]
-    assert qs["encoding"] == ["linear16"]
-    assert qs["sample_rate"] == ["8000"]
-    assert qs["interim_results"] == ["true"]
-    assert qs["vad_events"] == ["true"]
-    assert "endpointing" in qs and "utterance_end_ms" in qs
-    assert all(":" in kw for kw in qs["keywords"])  # intensifier presente
+def test_ulaw_encoding_known_values():
+    # G.711 μ-law: silencio (0) → 0xFF; +full-scale → 0x80; -full-scale → 0x00.
+    assert pcm16_to_ulaw(struct.pack("<h", 0)) == bytes([0xFF])
+    assert pcm16_to_ulaw(struct.pack("<h", 32635)) == bytes([0x80])
+    assert pcm16_to_ulaw(struct.pack("<h", -32635)) == bytes([0x00])
+    # longitud: 1 byte μ-law por cada muestra PCM16 (2 bytes)
+    pcm = struct.pack("<4h", 1000, -1000, 5000, -5000)
+    assert len(pcm16_to_ulaw(pcm)) == 4
+    assert pcm16_to_ulaw(b"") == b""
+
+
+def test_build_prompt_biases_popayan_names():
+    prompt = build_prompt()
+    assert "Popayán" in prompt
+    assert "Pubenza" in prompt  # barrio distintivo listado como sesgo
+    assert len(prompt) <= 520  # acotado
+
+
+def test_session_config_uses_gpt4o_mini_and_ulaw():
+    stt = _new_stt()
+    cfg = stt._session_config()["session"]
+    assert cfg["input_audio_format"] == "g711_ulaw"
+    assert cfg["input_audio_transcription"]["model"] == "gpt-4o-mini-transcribe"
+    assert cfg["input_audio_transcription"]["language"] == "es"
+    assert cfg["turn_detection"]["type"] == "server_vad"

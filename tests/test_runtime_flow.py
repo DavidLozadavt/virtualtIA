@@ -45,7 +45,7 @@ class FakeWebSocket:
 
 
 class FakeSTT:
-    """Reemplaza DeepgramLiveSTT: eventos inyectados por el test."""
+    """Reemplaza OpenAIRealtimeSTT: eventos inyectados por el test."""
 
     instances: list["FakeSTT"] = []
 
@@ -137,7 +137,7 @@ def test_full_call_flow(fast_settings, monkeypatch):
     import services.voice.runtime as rt
 
     FakeSTT.instances.clear()
-    monkeypatch.setattr(rt, "DeepgramLiveSTT", FakeSTT)
+    monkeypatch.setattr(rt, "OpenAIRealtimeSTT", FakeSTT)
 
     fake_esl = FakeESLClient()
     monkeypatch.setattr(rt, "get_esl_client", lambda: fake_esl)

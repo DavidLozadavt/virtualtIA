@@ -20,10 +20,11 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""      # OpenRouter (sk-or-...). Credencial distinta a OpenAI.
     OPENAI_MODEL: str = "openai/gpt-4o-mini"
     
-    # STT del canal de voz de navegador (core/voice_engine; OpenRouter no
-    # soporta audio). El STT telefónico es Deepgram streaming (ver Voice V2).
-    GROQ_API_KEY: str = ""
-    OPENAI_WHISPER_KEY: str = ""  # legacy Whisper dedicado
+    # STT del canal de voz de navegador (core/voice_engine): OpenAI
+    # gpt-4o-mini-transcribe de forma exclusiva (OpenRouter no soporta audio).
+    # El STT telefónico es Deepgram streaming aparte (ver Voice V2).
+    OPENAI_WHISPER_KEY: str = ""  # key OpenAI dedicada para STT (audio). Nombre legacy.
+    GROQ_API_KEY: str = ""        # ya NO se usa para STT; sólo lo lee el script de diagnóstico
 
     MODEL_PATH: str = "models/Phi-3-mini-4k-instruct-q4.gguf"
     MODEL_N_CTX: int = 4096
@@ -67,15 +68,17 @@ class Settings(BaseSettings):
     FREESWITCH_ESL_ENABLED: bool = True
 
     # ── Lyra Voice V2 — motor conversacional streaming ──
-    # STT streaming (Deepgram nova-2, WebSocket, hipótesis parciales +
-    # endpointing nativo). nova-2 soporta español streaming (es / es-419) y el
-    # parámetro `keywords` (boosting real de decodificación, máx 100 términos).
-    DEEPGRAM_API_KEY: str = ""
-    VOICE_STT_MODEL: str = "nova-2"
-    VOICE_STT_LANGUAGE: str = "es-419"
-    VOICE_STT_ENDPOINTING_MS: int = 300      # pausa acústica → speech_final
-    VOICE_STT_UTTERANCE_END_MS: int = 1000   # gap de palabras → UtteranceEnd
-    VOICE_STT_KEYWORD_BOOST: float = 2.0     # intensifier de keywords del catálogo
+    # STT streaming vía OpenAI Realtime transcription (WebSocket,
+    # gpt-4o-mini-transcribe): parciales en vivo (input_audio_transcription.delta),
+    # eventos de voz (speech_started) y cierre de enunciado por server_vad. El
+    # audio telefónico 8k se envía como g711_ulaw nativo (sin resample). Requiere
+    # una OPENAI_API_KEY real (no OpenRouter, que no soporta audio); ver
+    # openai_stt_key(). El sesgo de barrios de Popayán va en el prompt de sesión.
+    VOICE_STT_MODEL: str = "gpt-4o-mini-transcribe"
+    VOICE_STT_LANGUAGE: str = "es"
+    VOICE_STT_SILENCE_MS: int = 600          # server_vad: silencio que cierra el enunciado
+    VOICE_STT_VAD_THRESHOLD: float = 0.5     # server_vad: sensibilidad de detección de voz
+    VOICE_STT_PREFIX_PADDING_MS: int = 300   # server_vad: audio previo al inicio de voz
 
     # Endpointing híbrido: retención semántica cuando el parcial termina en
     # continuación ("calle", "en", número colgado) antes de cerrar el turno.
@@ -108,6 +111,18 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    def openai_stt_key(self) -> str:
+        """Credencial OpenAI real para STT de voz (Realtime transcription).
+
+        OpenRouter (sk-or...) no soporta audio, así que se rechaza. Se prefiere
+        la key dedicada OPENAI_WHISPER_KEY; si no, se usa OPENAI_API_KEY salvo
+        que sea de OpenRouter. Misma política que core/voice_engine (STT navegador).
+        """
+        key = (self.OPENAI_WHISPER_KEY or "").strip()
+        if not key and not self.OPENAI_API_KEY.startswith("sk-or"):
+            key = self.OPENAI_API_KEY.strip()
+        return key
 
     def llm_api_key(self) -> str:
         """Credencial para llamadas de chat al LLM.

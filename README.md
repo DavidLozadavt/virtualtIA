@@ -143,7 +143,7 @@ lyra-ai/
 │   ├── voice/                           # Lyra Voice V2 — motor conversacional streaming
 │   │   ├── runtime.py                   # Composición full-duplex por llamada
 │   │   ├── transport.py                 # WS mod_audio_stream (frames + playback streamAudio)
-│   │   ├── stt_stream.py                # Deepgram nova-2 streaming (parciales + keywords)
+│   │   ├── stt_stream.py                # OpenAI Realtime STT (gpt-4o-mini-transcribe, parciales)
 │   │   ├── endpointing.py               # Endpointing híbrido acústico + semántico
 │   │   ├── nlu.py                       # Extracción de spans (structured outputs)
 │   │   ├── orchestrator.py              # FSM de negocio (estados V1 preservados)
@@ -221,7 +221,7 @@ lyra-ai/
 | **pydantic-settings** | Configuración tipada por entorno |
 | **PyYAML** | Carga de perfiles de proyecto en runtime |
 | **FreeSWITCH + mod_audio_stream** | Gateway telefónico — WS streaming full-duplex |
-| **Deepgram (nova-2)** | STT streaming telefónico (parciales + endpointing + keywords) |
+| **OpenAI Realtime (gpt-4o-mini-transcribe)** | STT streaming telefónico (parciales + server_vad) |
 | **openai (gpt-4o-mini)** | NLU de turno (structured outputs) y chat |
 | **edge-tts** | Generación de voz (TTS) streaming por oración |
 | **pusher** | Eventos en tiempo real hacia el frontend |

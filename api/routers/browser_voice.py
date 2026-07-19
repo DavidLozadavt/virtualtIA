@@ -2,20 +2,21 @@
 gateway/browser_voice_router.py — REST endpoints for browser-based voice (STT + TTS).
 
 Provides:
-  POST /voice/transcribe   — Audio file → transcribed text (Whisper)
-  POST /voice/synthesize   — Text → MP3 audio (OpenAI TTS)
+  POST /voice/transcribe   — Audio file → transcribed text (gpt-4o-mini-transcribe)
+  POST /voice/synthesize   — Text → MP3 audio (edge-tts)
+
+STT model is fixed to gpt-4o-mini-transcribe en core/voice_engine (no override
+por proyecto). No configures `stt_model` en el YAML: se ignora a propósito.
 
 Per-project activation: set `voice.enabled: true` in the project's YAML config.
-This is completely separate from Twilio telephony (twilio_voice.py).
 
 How to enable for a new project:
   1. Add to your project's YAML:
        voice:
          enabled: true
          language: es
-         stt_model: whisper-1
-         tts_model: tts-1
-         tts_voice: nova
+         tts_model: edge-tts
+         tts_voice: es-CO-SalomeNeural
   2. That's it. These endpoints handle the rest.
 """
 
@@ -77,7 +78,7 @@ async def transcribe_audio(
     audio: UploadFile = File(...),
 ):
     """
-    Transcribe browser audio to text using Whisper.
+    Transcribe browser audio to text using gpt-4o-mini-transcribe.
 
     Accepts: WebM, WAV, MP3, OGG, M4A (recorded by MediaRecorder in browser)
     Returns: { "success": true, "text": "transcribed text", "language": "es" }
@@ -99,14 +100,13 @@ async def transcribe_audio(
     if len(audio_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio exceeds 10MB limit.")
 
-    # Pasar el content-type real del archivo para que Whisper lo decodifique correctamente
+    # Pasar el content-type real del archivo para que el STT lo decodifique correctamente
     content_type = audio.content_type or "audio/webm"
 
     engine = get_voice_engine()
     result = await engine.transcribe(
         audio_bytes=audio_bytes,
         language=voice_cfg.get("language", "es"),
-        stt_model=voice_cfg.get("stt_model", "whisper-1"),
         content_type=content_type,
     )
 

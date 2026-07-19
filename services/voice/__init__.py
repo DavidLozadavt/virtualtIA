@@ -3,9 +3,8 @@
 Arquitectura (docs/voice/audit_2026-07-18/LYRA_VOICE_V2_SPEC.md):
 
   FreeSWITCH (mod_audio_stream, WS bidireccional)
-      → transport   (frames PCM 8k + metadata; playback streamAudio con pacing)
-      → aec         (cancelación de eco NLMS lado servidor)
-      → stt_stream  (Deepgram nova-2 streaming, parciales + endpointing nativo)
+      → transport   (frames PCM 8k + metadata; playback vía ESL uuid_broadcast)
+      → stt_stream  (OpenAI Realtime gpt-4o-mini-transcribe, parciales + server_vad)
       → endpointing (híbrido acústico + semántico)
       → nlu         (LLM structured-output: extrae SOLO spans, nunca resuelve)
       → orchestrator(estados de negocio del FSM preservados tal cual)

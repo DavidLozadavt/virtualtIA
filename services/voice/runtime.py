@@ -2,9 +2,9 @@
 
 Por llamada:
 
-  frames WS → [grabadora pista usuario] → Deepgram (siempre, sin gate)
+  frames WS → [grabadora pista usuario] → OpenAI Realtime STT (siempre, sin gate)
              ↘ clasificador de barge-in (solo mientras el bot habla)
-  eventos Deepgram → endpointer híbrido → TurnReady → filtros → NLU → FSM
+  eventos STT → endpointer híbrido → TurnReady → filtros → NLU → FSM
   respuesta → TTS (texto completo) → WAV compartido → ESL uuid_broadcast
 
 Los turnos se serializan en una cola (el orden de eventos nunca se cruza);
@@ -54,7 +54,7 @@ from services.voice.orchestrator import (
 )
 from services.voice.recorder import CallRecorder
 from services.voice.stt_stream import (
-    DeepgramLiveSTT,
+    OpenAIRealtimeSTT,
     SpeechStartedEvent,
     STTStreamError,
     TranscriptEvent,
@@ -105,7 +105,7 @@ class VoiceCallRuntime:
             hold_ms=int(settings.VOICE_ENDPOINT_HOLD_MS),
             hold_max_ms=int(settings.VOICE_ENDPOINT_HOLD_MAX_MS),
         )
-        self.stt: Optional[DeepgramLiveSTT] = None
+        self.stt: Optional[OpenAIRealtimeSTT] = None
 
         self._initialized = False
         self._ending = False
@@ -162,7 +162,7 @@ class VoiceCallRuntime:
             self.store.save(self.session)
         self.recorder = CallRecorder(call_uuid)
 
-        self.stt = DeepgramLiveSTT(call_uuid=call_uuid)
+        self.stt = OpenAIRealtimeSTT(call_uuid=call_uuid)
         try:
             await self.stt.connect()
         except STTStreamError as e:
