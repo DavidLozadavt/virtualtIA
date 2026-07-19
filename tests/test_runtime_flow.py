@@ -204,8 +204,10 @@ def test_full_call_flow(fast_settings, monkeypatch):
         assert path.startswith("/tmp/lyra-tts/") and path.endswith(".wav")
         assert leg == "aleg"
 
-    # Colgado real vía ESL uuid_kill.
-    assert fake_esl.kills == ["e2e-uuid"]
+    # Colgado real vía ESL uuid_kill. `_shutdown` reintenta como red de
+    # seguridad (idempotente) si `_hangup` no llegó a completarlo — por eso
+    # puede aparecer más de una vez, siempre sobre el mismo call_uuid.
+    assert fake_esl.kills and all(u == "e2e-uuid" for u in fake_esl.kills)
 
     # La sesión terminal sobrevive con service_created (regla V1 preservada).
     sess = store.get("e2e-uuid")

@@ -181,6 +181,18 @@ class VoiceCallRuntime:
             call_uuid,
             self.transport.caller_number,
         )
+        if self.session.service_created or self.session.state == STATE_FINISHED:
+            # Reconexión sobre un canal que Lyra ya dio por terminado (p. ej.
+            # mod_audio_stream reabriendo el WS tras un uuid_kill que no
+            # alcanzó a completarse) — no volver a saludar ni resetear el
+            # estado: colgar directo, es la red de seguridad real.
+            logger.warning(
+                "[runtime] reconexión sobre sesión terminal call_uuid=%s — colgando",
+                call_uuid,
+            )
+            await self._hangup()
+            return
+
         await self._turn_queue.put(("greeting", "", 0.0))
 
     # ── audio entrante ──
@@ -522,17 +534,29 @@ class VoiceCallRuntime:
         if self._ending:
             return
         self._ending = True
-        call_uuid = self.transport.call_uuid or ""
-        # _speak_and_wait ya esperó la duración completa del broadcast antes
-        # de llegar aquí; solo un margen de seguridad corto por latencia de
-        # red/ESL antes de matar el canal.
-        await asyncio.sleep(0.3)
-        if settings.FREESWITCH_ESL_ENABLED and call_uuid:
-            try:
-                await get_esl_client().uuid_kill(call_uuid)
-            except Exception as e:
-                logger.warning("[runtime] uuid_kill failed: %s", e)
+        await self._kill_channel()
         await self.transport.close()
+
+    async def _kill_channel(self) -> None:
+        """Cuelga el canal real de FreeSWITCH vía ESL.
+
+        Blindado con `asyncio.shield`: si la tarea que nos contiene se
+        cancela a mitad de camino (p. ej. una carrera con `_shutdown()`),
+        el propio `uuid_kill` sigue corriendo hasta terminar en vez de
+        abortarse a medias — sin esto el canal podía quedar vivo y
+        `mod_audio_stream` reabría el WS, repitiendo el saludo indefinidamente.
+        Idempotente: llamarlo dos veces (aquí y en `_shutdown`) es inofensivo,
+        un `uuid_kill` sobre un canal ya muerto solo responde `-ERR`.
+        """
+        call_uuid = self.transport.call_uuid or ""
+        if not (settings.FREESWITCH_ESL_ENABLED and call_uuid):
+            return
+        try:
+            await asyncio.shield(get_esl_client().uuid_kill(call_uuid))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("[runtime] uuid_kill failed: %s", e)
 
     async def _shutdown(self) -> None:
         self._ending = True
@@ -545,6 +569,11 @@ class VoiceCallRuntime:
                 await task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+        # Red de seguridad: si `_hangup()` nunca llegó a ejecutarse (o su
+        # `uuid_kill` quedó a medias por la cancelación de arriba), el canal
+        # real de FreeSWITCH puede seguir vivo — sin esto, mod_audio_stream
+        # reabre el WS y el runtime siguiente vuelve a saludar. Idempotente.
+        await self._kill_channel()
         if self.stt is not None:
             await self.stt.close()
         if self.recorder is not None:
