@@ -26,9 +26,7 @@ lógica de negocio del FSM no se tocan.
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import json
 import logging
 import math
 import re
@@ -39,8 +37,6 @@ from core.config import settings
 
 logger = logging.getLogger("lyra.voice.stt")
 
-_OPENAI_REALTIME_WSS = "wss://api.openai.com/v1/realtime?intent=transcription"
-_KEEPALIVE_INTERVAL_SEC = 5.0
 _PROMPT_CAP_CHARS = 480  # sesgo suave acotado (el prompt no es un vocabulario duro)
 
 # ── Vocabulario de sesgo (nombres distintivos de Popayán para el prompt) ──
@@ -209,35 +205,45 @@ class STTStreamError(RuntimeError):
 
 @dataclass
 class OpenAIRealtimeSTT:
-    """Sesión de transcripción en streaming de OpenAI Realtime para una llamada."""
+    """Sesión de transcripción en streaming de OpenAI Realtime para una llamada.
+
+    Usa el conector tipado del SDK (`AsyncOpenAI().realtime.connect()`), que arma
+    el handshake GA correcto (auth Bearer, sin el shape beta `realtime=v1` que las
+    cuentas actuales rechazan con `beta_api_shape_disabled`). El audio 8k va como
+    `audio/pcmu` (G.711 μ-law), único formato telefónico nativo — `audio/pcm` del
+    Realtime solo admite 24 kHz.
+    """
 
     call_uuid: str
     sample_rate: int = 8000
-    _ws: object = field(default=None, init=False)
-    _keepalive_task: Optional[asyncio.Task] = field(default=None, init=False)
+    _client: object = field(default=None, init=False)
+    _cm: object = field(default=None, init=False)  # connection manager (context)
+    _conn: object = field(default=None, init=False)  # AsyncRealtimeConnection
     _closed: bool = field(default=False, init=False)
     _interim: str = field(default="", init=False)  # acumulador de deltas del enunciado
     _interim_logprobs: list = field(default_factory=list, init=False)
 
     def _session_config(self) -> dict:
         return {
-            "type": "transcription_session.update",
-            "session": {
-                "input_audio_format": "g711_ulaw",
-                "input_audio_transcription": {
-                    "model": settings.VOICE_STT_MODEL or "gpt-4o-mini-transcribe",
-                    "language": settings.VOICE_STT_LANGUAGE or "es",
-                    "prompt": build_prompt(),
-                },
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": float(settings.VOICE_STT_VAD_THRESHOLD),
-                    "prefix_padding_ms": int(settings.VOICE_STT_PREFIX_PADDING_MS),
-                    "silence_duration_ms": int(settings.VOICE_STT_SILENCE_MS),
-                },
-                "input_audio_noise_reduction": {"type": "near_field"},
-                "include": ["item.input_audio_transcription.logprobs"],
+            "type": "transcription",
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcmu"},
+                    "transcription": {
+                        "model": settings.VOICE_STT_MODEL or "gpt-4o-mini-transcribe",
+                        "language": settings.VOICE_STT_LANGUAGE or "es",
+                        "prompt": build_prompt(),
+                    },
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": float(settings.VOICE_STT_VAD_THRESHOLD),
+                        "prefix_padding_ms": int(settings.VOICE_STT_PREFIX_PADDING_MS),
+                        "silence_duration_ms": int(settings.VOICE_STT_SILENCE_MS),
+                    },
+                    "noise_reduction": {"type": "near_field"},
+                }
             },
+            "include": ["item.input_audio_transcription.logprobs"],
         }
 
     async def connect(self) -> None:
@@ -247,28 +253,22 @@ class OpenAIRealtimeSTT:
                 "Sin OPENAI_API_KEY real para STT (OpenRouter no soporta audio)"
             )
 
-        import websockets
+        from openai import AsyncOpenAI
 
         try:
-            self._ws = await websockets.connect(
-                _OPENAI_REALTIME_WSS,
-                additional_headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "OpenAI-Beta": "realtime=v1",
-                },
-                max_size=2**22,
-                open_timeout=10,
-                close_timeout=5,
+            self._client = AsyncOpenAI(api_key=api_key)
+            # Sesión de transcripción: se abre con `intent=transcription` en la
+            # URL (no un `model` de realtime — el modelo de STT se fija en
+            # session.audio.input.transcription). Sin intent el server responde
+            # 4000 missing_model; con un model de transcripción, invalid_model.
+            self._cm = self._client.realtime.connect(
+                extra_query={"intent": "transcription"}
             )
+            self._conn = await self._cm.__aenter__()
+            await self._conn.session.update(session=self._session_config())
         except Exception as e:
             raise STTStreamError(f"OpenAI Realtime connect failed: {e}") from e
 
-        try:
-            await self._ws.send(json.dumps(self._session_config()))
-        except Exception as e:
-            raise STTStreamError(f"OpenAI Realtime session config failed: {e}") from e
-
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
         logger.info(
             "[stt] openai realtime connected call_uuid=%s model=%s lang=%s",
             self.call_uuid,
@@ -276,28 +276,12 @@ class OpenAIRealtimeSTT:
             settings.VOICE_STT_LANGUAGE,
         )
 
-    async def _keepalive_loop(self) -> None:
-        # Ping WS a nivel de protocolo: mantiene viva la conexión en silencios
-        # largos sin inyectar audio falso al buffer.
-        try:
-            while not self._closed and self._ws is not None:
-                await asyncio.sleep(_KEEPALIVE_INTERVAL_SEC)
-                try:
-                    await self._ws.ping()
-                except Exception:
-                    return
-        except asyncio.CancelledError:
-            pass
-
     async def send_audio(self, pcm: bytes) -> None:
-        if self._closed or self._ws is None or not pcm:
+        if self._closed or self._conn is None or not pcm:
             return
         try:
-            ulaw = pcm16_to_ulaw(pcm)
-            audio_b64 = base64.b64encode(ulaw).decode("ascii")
-            await self._ws.send(
-                json.dumps({"type": "input_audio_buffer.append", "audio": audio_b64})
-            )
+            audio_b64 = base64.b64encode(pcm16_to_ulaw(pcm)).decode("ascii")
+            await self._conn.input_audio_buffer.append(audio=audio_b64)
         except Exception as e:
             if not self._closed:
                 logger.warning(
@@ -364,19 +348,18 @@ class OpenAIRealtimeSTT:
         return None
 
     async def events(self) -> AsyncIterator[STTEvent]:
-        if self._ws is None:
+        if self._conn is None:
             raise STTStreamError("events() antes de connect()")
         try:
-            async for raw in self._ws:
-                if isinstance(raw, (bytes, bytearray)):
+            async for event in self._conn:
+                # Los eventos del SDK son modelos tipados; se normalizan a dict
+                # (formato de wire) para reusar el parseo por tipo.
+                data = event.to_dict() if hasattr(event, "to_dict") else event
+                if not isinstance(data, dict):
                     continue
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                event = self._parse(data)
-                if event is not None:
-                    yield event
+                parsed = self._parse(data)
+                if parsed is not None:
+                    yield parsed
         except Exception as e:
             if not self._closed:
                 logger.warning(
@@ -387,11 +370,9 @@ class OpenAIRealtimeSTT:
         if self._closed:
             return
         self._closed = True
-        if self._keepalive_task:
-            self._keepalive_task.cancel()
-        if self._ws is not None:
+        if self._cm is not None:
             try:
-                await self._ws.close()
+                await self._cm.__aexit__(None, None, None)
             except Exception:
                 pass
         logger.info("[stt] closed call_uuid=%s", self.call_uuid)

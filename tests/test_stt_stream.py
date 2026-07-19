@@ -106,9 +106,12 @@ def test_build_prompt_biases_popayan_names():
 
 
 def test_session_config_uses_gpt4o_mini_and_ulaw():
-    stt = _new_stt()
-    cfg = stt._session_config()["session"]
-    assert cfg["input_audio_format"] == "g711_ulaw"
-    assert cfg["input_audio_transcription"]["model"] == "gpt-4o-mini-transcribe"
-    assert cfg["input_audio_transcription"]["language"] == "es"
-    assert cfg["turn_detection"]["type"] == "server_vad"
+    # Shape GA: session.type=transcription, audio.input.{format,transcription,turn_detection}
+    cfg = _new_stt()._session_config()
+    assert cfg["type"] == "transcription"
+    inp = cfg["audio"]["input"]
+    assert inp["format"]["type"] == "audio/pcmu"  # G.711 μ-law (8k telefónico)
+    assert inp["transcription"]["model"] == "gpt-4o-mini-transcribe"
+    assert inp["transcription"]["language"] == "es"
+    assert inp["turn_detection"]["type"] == "server_vad"
+    assert cfg["include"] == ["item.input_audio_transcription.logprobs"]
