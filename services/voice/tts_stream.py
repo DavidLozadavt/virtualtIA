@@ -25,7 +25,12 @@ logger = logging.getLogger("lyra.voice.tts")
 
 SAMPLE_RATE = 8000
 BYTES_PER_SECOND = SAMPLE_RATE * 2  # PCM16 mono
-_CHUNK_BYTES = 3200  # 200 ms por chunk hacia el transporte
+# mod_audio_stream v1.0.3 (playback bidireccional) asume el segmento de stream
+# terminado si no recibe datos en 100ms, y espera paquetes de ~20ms enviados
+# cada ≤20ms (idealmente 10ms) — ver README.playback.md. Chunks de 200ms
+# dejaban el módulo sin datos por más de su timeout entre cada envío: nunca
+# alcanzaba a completar un ciclo de reproducción (cero eventos chunk_played).
+_CHUNK_BYTES = 320  # 20 ms por chunk hacia el transporte
 _CACHE_MAX_ENTRIES = 200
 
 

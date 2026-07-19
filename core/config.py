@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # Full-duplex / barge-in.
     VOICE_AEC_TAPS: int = 256                # taps NLMS (32 ms de cola @8k)
     VOICE_BARGE_MIN_MS: int = 250            # habla sostenida mínima para interrumpir
-    VOICE_PLAYBACK_LEAD_MS: int = 400        # buffer máx adelantado al reproducir
+    VOICE_PLAYBACK_LEAD_MS: int = 100        # buffer máx adelantado al reproducir
     VOICE_SILENCE_PROMPT_SEC: float = 6.0    # silencio tras prompt → re-pregunta
     VOICE_MAX_TURNS: int = 40                # tope duro de turnos por llamada
 
