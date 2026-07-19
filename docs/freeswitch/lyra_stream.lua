@@ -26,6 +26,11 @@ local caller = session:getVariable("caller_id_number") or ""
 
 session:answer()
 
+-- Requerido por mod_audio_stream v1.0.3+ para activar el modo bidireccional
+-- (auto-playback de los mensajes streamAudio). Sin esto el módulo escribe el
+-- audio recibido a archivos temporales pero nunca lo inyecta en el RTP.
+session:setVariable("STREAM_PLAYBACK", "true")
+
 local ws_url = WS_BASE .. "/freeswitch/audio"
   .. "?call_uuid=" .. urlencode(uuid)
   .. "&caller_number=" .. urlencode(caller)
