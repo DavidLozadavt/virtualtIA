@@ -20,12 +20,10 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""      # OpenRouter (sk-or-...). Credencial distinta a OpenAI.
     OPENAI_MODEL: str = "openai/gpt-4o-mini"
     
-    # STT Settings (because OpenRouter does not support audio)
-    STT_PROVIDER: str = ""  # openai | groq | deepgram (alias global; telefonía usa TELEPHONY_STT_PROVIDER)
+    # STT del canal de voz de navegador (core/voice_engine; OpenRouter no
+    # soporta audio). El STT telefónico es Deepgram streaming (ver Voice V2).
     GROQ_API_KEY: str = ""
     OPENAI_WHISPER_KEY: str = ""  # legacy Whisper dedicado
-    OPENAI_STT_API_KEY: str = ""  # STT telefonía; si vacío usa OPENAI_API_KEY
-    OPENAI_STT_MODEL: str = ""  # ej. gpt-4o-mini-transcribe
 
     MODEL_PATH: str = "models/Phi-3-mini-4k-instruct-q4.gguf"
     MODEL_N_CTX: int = 4096
@@ -54,39 +52,44 @@ class Settings(BaseSettings):
     FREESWITCH_ESL_HOST: str = "127.0.0.1"
     FREESWITCH_ESL_PORT: int = 8021
     FREESWITCH_ESL_PASSWORD: str = "ClueCon"
-    # Fallback SOLO cuando no hay request ni FREESWITCH_HTTP_BASE_URL: en runtime
-    # build_ws_audio_url deriva el WS del mismo host:puerto que FreeSWITCH ya
-    # alcanza para el WAV (172.17.0.1:8098 en contenedor). Puerto = PORT del app.
-    FREESWITCH_WS_AUDIO_URL: str = "ws://127.0.0.1:8098/freeswitch/audio"
-    FREESWITCH_HTTP_BASE_URL: str = ""  # ej. http://127.0.0.1:8098 (para audio_url en inbound-call)
-    FREESWITCH_TTS_CACHE_DIR: str = "data/freeswitch_tts"
-    # Grabaciones de llamada completa (record_session) subidas por FreeSWITCH al
-    # final de la llamada. Se sirven por call_uuid para reproducirlas en el
-    # frontend del servicio. Dir controlado por el app (host), no el contenedor.
+    # Grabaciones de llamada completa (mezcladas server-side por el runtime V2).
+    # Se sirven por call_uuid para reproducirlas en el frontend del servicio.
     FREESWITCH_RECORDINGS_DIR: str = "data/freeswitch_recordings"
 
-    TELEPHONY_STT_PROVIDER: str = ""  # openai | groq | deepgram (vacío = auto según API keys)
-    TELEPHONY_STT_MODEL: str = ""  # openai: gpt-4o-mini-transcribe; groq: whisper-large-v3
-    TELEPHONY_STT_LANGUAGE: str = "es"
-    TELEPHONY_AUDIO_CODEC: str = "PCMU"
     TELEPHONY_SAMPLE_RATE: int = 8000
-    TELEPHONY_WS_AUDIO_ENCODING: str = "pcm16"  # pcm16 | mulaw (mod_audio_stream mono 8k)
-
-    # Segmentación de audio FreeSWITCH (mod_audio_stream). Duración máxima de una
-    # locución antes de forzar el flush al STT. Adultos mayores dictan direcciones
-    # pausado: 3s cortaba la dirección a la mitad → fallback amplio (12s).
-    FS_MAX_UTTERANCE_SEC: float = 12.0
-
-    # VAD por energía. Base/fallback; el detector calibra el umbral real contra el
-    # piso de ruido medido al inicio de cada locución (voces bajas/temblorosas).
-    FS_VAD_SILENCE_RMS: float = 400.0      # techo del umbral adaptativo
-    FS_VAD_SILENCE_FRAMES: int = 25         # frames de silencio base (~500ms @20ms)
-    FS_VAD_MIN_SPEECH_FRAMES: int = 8
-    FS_VAD_NOISE_CALIB_MS: int = 300        # ventana inicial para medir ruido de fondo
-    FS_VAD_NOISE_MULT: float = 1.8          # umbral = piso_ruido * mult (acotado)
-    FS_VAD_HANGOVER_MS: int = 600           # padding de silencio antes de cerrar turno
 
     FREESWITCH_ESL_ENABLED: bool = True
+
+    # ── Lyra Voice V2 — motor conversacional streaming ──
+    # STT streaming (Deepgram nova-2, WebSocket, hipótesis parciales +
+    # endpointing nativo). nova-2 soporta español streaming (es / es-419) y el
+    # parámetro `keywords` (boosting real de decodificación, máx 100 términos).
+    DEEPGRAM_API_KEY: str = ""
+    VOICE_STT_MODEL: str = "nova-2"
+    VOICE_STT_LANGUAGE: str = "es-419"
+    VOICE_STT_ENDPOINTING_MS: int = 300      # pausa acústica → speech_final
+    VOICE_STT_UTTERANCE_END_MS: int = 1000   # gap de palabras → UtteranceEnd
+    VOICE_STT_KEYWORD_BOOST: float = 2.0     # intensifier de keywords del catálogo
+
+    # Endpointing híbrido: retención semántica cuando el parcial termina en
+    # continuación ("calle", "en", número colgado) antes de cerrar el turno.
+    VOICE_ENDPOINT_HOLD_MS: int = 900
+    VOICE_ENDPOINT_HOLD_MAX_MS: int = 2200   # techo total de retención semántica
+
+    # NLU structured-output (extracción de spans; nunca resuelve direcciones).
+    VOICE_NLU_MODEL: str = "gpt-4o-mini"
+    VOICE_NLU_API_KEY: str = ""              # si vacío usa OPENAI_API_KEY (no sk-or)
+    VOICE_NLU_TIMEOUT_SEC: float = 3.5
+
+    # TTS streaming por oración (edge-tts incremental → PCM 8k vía ffmpeg pipe).
+    VOICE_TTS_TIMEOUT_SEC: float = 10.0
+
+    # Full-duplex / barge-in.
+    VOICE_AEC_TAPS: int = 256                # taps NLMS (32 ms de cola @8k)
+    VOICE_BARGE_MIN_MS: int = 250            # habla sostenida mínima para interrumpir
+    VOICE_PLAYBACK_LEAD_MS: int = 400        # buffer máx adelantado al reproducir
+    VOICE_SILENCE_PROMPT_SEC: float = 6.0    # silencio tras prompt → re-pregunta
+    VOICE_MAX_TURNS: int = 40                # tope duro de turnos por llamada
 
     LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
 
@@ -106,8 +109,8 @@ class Settings(BaseSettings):
         """Credencial para llamadas de chat al LLM.
 
         OpenRouter y OpenAI usan sistemas de keys distintos, por eso se eligen
-        por proveedor. Las keys de STT se resuelven aparte (voice_engine /
-        stt_service) porque OpenRouter no soporta audio.
+        por proveedor. Las keys de STT/NLU de voz se resuelven aparte
+        (voice_engine / services.voice) porque OpenRouter no soporta audio.
         """
         if self.LLM_PROVIDER == "openrouter":
             return self.OPENROUTER_API_KEY

@@ -73,7 +73,7 @@ graph TD
         subgraph SVC ["Services Layer"]
             CS["💬 ChatService"]
             WS["📱 WhatsAppService"]
-            TS["📞 Telephony (FreeSWITCH)\nVoiceCallEngine · CallHandler"]
+            TS["📞 Voice V2 (FreeSWITCH)\nRuntime streaming · NLU · TurnOrchestrator"]
         end
 
         subgraph ORCH ["Orchestrator — Cerebro Híbrido"]
@@ -124,7 +124,7 @@ lyra-ai/
 │   ├── middleware.py                    # Rate limiting por sesión/cliente
 │   ├── routers/
 │   │   ├── main.py                      # POST /chat
-│   │   ├── freeswitch.py                # /freeswitch/inbound-call · /audio-turn · /recording (voz IntelliTaxi)
+│   │   ├── freeswitch.py                # WS /freeswitch/audio (full-duplex) · /recording · /health
 │   │   ├── whatsapp.py                  # GET|POST /whatsapp
 │   │   ├── browser_voice.py             # WebSocket voz desde navegador
 │   │   ├── tts.py                       # Sirve audios TTS generados
@@ -140,19 +140,25 @@ lyra-ai/
 │   ├── chat_service.py                  # Mensajes · historial · trust level
 │   ├── whatsapp_service.py              # Máquina de estados · Meta API
 │   ├── geo.py                           # Proxy de geocodificación (CORS/API keys)
-│   └── telephony/                       # Gateway de voz — FreeSWITCH (reemplazó Twilio)
-│       ├── voice_call_engine.py         # Máquina de estados de la llamada (origen/confirmación)
-│       ├── call_handler.py              # process_text_turn — orquesta turno de texto/voz
-│       ├── esl_client.py                # Cliente ESL (uuid_broadcast / uuid_kill)
-│       ├── stt_service.py               # STT directo (OpenAI/Groq), sin Twilio
-│       ├── tts_service.py               # Síntesis de voz para telefonía
-│       ├── tts_file_store.py            # Cache/servido de audios TTS generados
-│       ├── audio_preprocess.py          # Resample · high-pass · normalize
-│       ├── audio_vad.py                 # VAD por energía (mulaw/pcm16)
-│       ├── ws_audio_buffer.py           # Buffer de audio WebSocket
-│       ├── session_store.py             # Sesiones de llamada en memoria
-│       ├── phone_utils.py               # Normalización de números telefónicos
-│       └── backend_client.py            # Cliente al backend Laravel (IntelliTaxi)
+│   ├── voice/                           # Lyra Voice V2 — motor conversacional streaming
+│   │   ├── runtime.py                   # Composición full-duplex por llamada
+│   │   ├── transport.py                 # WS mod_audio_stream (frames + playback streamAudio)
+│   │   ├── stt_stream.py                # Deepgram nova-2 streaming (parciales + keywords)
+│   │   ├── endpointing.py               # Endpointing híbrido acústico + semántico
+│   │   ├── nlu.py                       # Extracción de spans (structured outputs)
+│   │   ├── orchestrator.py              # FSM de negocio (estados V1 preservados)
+│   │   ├── tts_stream.py                # edge-tts incremental por oración + caché
+│   │   ├── aec.py                       # Cancelación de eco NLMS (lado servidor)
+│   │   ├── barge_in.py                  # Clasificador interrupción vs backchannel
+│   │   ├── recorder.py                  # Grabación de llamada mezclada server-side
+│   │   └── filters.py                   # Anti-alucinación STT · anti-eco textual
+│   └── telephony/                       # Contratos de negocio del canal de voz
+│       ├── session_store.py             # Sesiones de llamada (memoria/Redis)
+│       ├── backend_client.py            # Cliente al backend Laravel (IntelliTaxi)
+│       ├── esl_client.py                # Cliente ESL (uuid_kill)
+│       ├── idempotency.py               # Guard de creación de servicio por call_uuid
+│       ├── ffmpeg_bin.py                # Resolución del binario ffmpeg
+│       └── phone_utils.py               # Normalización de números telefónicos
 │
 ├── orchestrator/                        # ── Motor de Orquestación ─────────────────────────────────
 │   ├── tool_runner.py                   # run_agent_loop · árbitro local vs LLM
@@ -214,9 +220,10 @@ lyra-ai/
 | **PyMySQL** | Driver MySQL/MariaDB |
 | **pydantic-settings** | Configuración tipada por entorno |
 | **PyYAML** | Carga de perfiles de proyecto en runtime |
-| **FreeSWITCH** | Gateway telefónico (record-loop) · reemplazó Twilio |
-| **openai (Whisper/gpt-4o-mini-transcribe) / Groq** | STT directo para telefonía |
-| **edge-tts** | Generación de voz (TTS) |
+| **FreeSWITCH + mod_audio_stream** | Gateway telefónico — WS streaming full-duplex |
+| **Deepgram (nova-2)** | STT streaming telefónico (parciales + endpointing + keywords) |
+| **openai (gpt-4o-mini)** | NLU de turno (structured outputs) y chat |
+| **edge-tts** | Generación de voz (TTS) streaming por oración |
 | **pusher** | Eventos en tiempo real hacia el frontend |
 
 ---
@@ -227,7 +234,7 @@ lyra-ai/
 
 - Python `3.10` o superior
 - MySQL activo (XAMPP o instancia local)
-- Servidor FreeSWITCH configurado (record-loop, ver `docs/freeswitch/`) _(solo para IntelliTaxi)_
+- Servidor FreeSWITCH con `mod_audio_stream` (ver `docs/freeswitch/STREAMING_DEPLOY.md`) _(solo para IntelliTaxi)_
 
 > **API Keys** — Contacta a [@miguelcamilok](https://github.com/miguelcamilok) para obtener credenciales.
 

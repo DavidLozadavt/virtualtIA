@@ -6,12 +6,11 @@
 > aplicarse **manualmente en el servidor FreeSWITCH**.
 >
 > **Objetivo:** entregar a Lyra audio G.711 PCMU 8 kHz lo más "crudo" posible,
-> sin que FreeSWITCH haga su propio VAD, comfort-noise (CNG) ni AGC. Todo ese
-> procesamiento ya lo hace la aplicación (`services/telephony/audio_vad.py` y el
-> remuestreo/preproceso en `services/telephony/stt_service.py`). Si FreeSWITCH
-> también lo hace, introduce silencios sintéticos, recortes y ganancia variable
-> que son la causa raíz de transcripciones inconsistentes (la misma palabra
-> devuelve transcripciones distintas en intentos repetidos).
+> sin que FreeSWITCH haga su propio VAD, comfort-noise (CNG) ni AGC. El VAD y
+> el endpointing los hace el STT streaming (Deepgram) y el AEC del runtime V2
+> (`services/voice/`). Si FreeSWITCH también procesa, introduce silencios
+> sintéticos, recortes y ganancia variable que degradan la transcripción
+> (la misma palabra devuelve transcripciones distintas en intentos repetidos).
 
 ---
 
@@ -35,7 +34,7 @@ Rutas estándar de una instalación FreeSWITCH (Debian/Ubuntu, paquete oficial):
   (o `external/entel.xml` si el gateway vive en un include).
 - Variables globales: `/etc/freeswitch/vars.xml`
 - Dialplan entrante: `/etc/freeswitch/dialplan/public/99_lyra_ai.xml`
-  (el que se generó desde `docs/freeswitch/ai_dialplan.xml.template`).
+  (copiado desde `docs/freeswitch/99_lyra_ai.xml`).
 
 > Aplica los cambios en el **orden** de las secciones 1→4. El más importante y
 > el más seguro (no requiere reinicio) es el de **dialplan** (sección 3): fija
