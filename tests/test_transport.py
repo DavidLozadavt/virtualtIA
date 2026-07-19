@@ -1,23 +1,6 @@
-"""Transporte mod_audio_stream: protocolo, identidad y playback."""
+"""Transporte mod_audio_stream: protocolo e identidad (solo captura)."""
 
-import base64
-import json
-
-from services.voice.transport import (
-    build_stream_audio_message,
-    resolve_call_uuid,
-    resolve_caller_number,
-)
-
-
-def test_stream_audio_message_format():
-    pcm = b"\x01\x02" * 160
-    msg = json.loads(build_stream_audio_message(pcm))
-    assert msg["type"] == "streamAudio"
-    data = msg["data"]
-    assert data["audioDataType"] == "raw"
-    assert data["sampleRate"] == 8000
-    assert base64.b64decode(data["audioData"]) == pcm
+from services.voice.transport import resolve_call_uuid, resolve_caller_number
 
 
 def test_resolve_identity_from_query():

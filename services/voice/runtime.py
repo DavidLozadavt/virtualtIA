@@ -1,16 +1,28 @@
-"""Runtime de llamada V2 — composición full-duplex de todo el pipeline.
+"""Runtime de llamada V2 — composición del pipeline de voz.
 
 Por llamada:
 
-  frames WS → AEC → [grabadora pista usuario] → Deepgram (siempre, sin gate)
-                     ↘ clasificador de barge-in (solo mientras el bot habla)
+  frames WS → [grabadora pista usuario] → Deepgram (siempre, sin gate)
+             ↘ clasificador de barge-in (solo mientras el bot habla)
   eventos Deepgram → endpointer híbrido → TurnReady → filtros → NLU → FSM
-  respuesta → TTS por oración → playback paced (streamAudio) → AEC far-end
-                                                             → grabadora bot
+  respuesta → TTS (texto completo) → WAV compartido → ESL uuid_broadcast
 
 Los turnos se serializan en una cola (el orden de eventos nunca se cruza);
 la escucha jamás se pausa: durante el playback el audio del usuario sigue
 llegando al STT y el clasificador decide si es interrupción real.
+
+Pivote de playback (2026-07-19): `mod_audio_stream` v1.0.3 (binario oficial,
+playback vía streamAudio por WS) no inyecta audio en el canal pese a seguir
+la documentación al pie de la letra — confirmado con logs reales, pendiente
+de soporte del vendor. El playback usa mientras tanto ESL `uuid_broadcast`
+sobre un WAV en disco compartido (ver `audio_file_store.py`), el mecanismo
+ya probado en V1. La captura (este mismo WS, streaming completo sin gate) no
+cambió. El AEC de referencia far-end queda sin usar: `uuid_broadcast`
+reproduce dentro de FreeSWITCH sin que Python controle el timing real, así
+que ya no hay una referencia de tiempo válida para cancelar eco por NLMS —
+la defensa contra eco pasa a ser el filtro de texto
+(`filters.looks_like_bot_echo`) más el clasificador de barge-in, que exige
+contenido con significado, no solo energía.
 """
 
 from __future__ import annotations
@@ -31,7 +43,7 @@ from services.telephony.session_store import (
     get_session_store,
 )
 from services.voice import filters
-from services.voice.aec import EchoCanceller
+from services.voice.audio_file_store import get_audio_file_store
 from services.voice.barge_in import InterruptionClassifier
 from services.voice.endpointing import HybridEndpointer, StablePartial, TurnReady
 from services.voice.nlu import TurnNLU
@@ -88,7 +100,6 @@ class VoiceCallRuntime:
 
         self.session: Optional[CallSession] = None
         self.recorder: Optional[CallRecorder] = None
-        self.aec = EchoCanceller()
         self.classifier = InterruptionClassifier()
         self.endpointer = HybridEndpointer(
             hold_ms=int(settings.VOICE_ENDPOINT_HOLD_MS),
@@ -177,12 +188,11 @@ class VoiceCallRuntime:
     async def _on_audio(self, pcm: bytes) -> None:
         if self._ending or self.recorder is None:
             return
-        residual = self.aec.process_near(pcm)
-        self.recorder.add_user_audio(residual)
+        self.recorder.add_user_audio(pcm)
         if self.stt is not None:
-            await self.stt.send_audio(residual)
+            await self.stt.send_audio(pcm)
         if self._playing:
-            self.classifier.feed_audio(residual)
+            self.classifier.feed_audio(pcm)
             if self.classifier.should_interrupt():
                 await self._handle_barge_in()
 
@@ -408,10 +418,10 @@ class VoiceCallRuntime:
             + float(settings.VOICE_SILENCE_PROMPT_SEC)
         )
 
-    # ── playback streaming con pacing ──
+    # ── playback vía ESL uuid_broadcast ──
 
     async def _speak_and_wait(self, text: str) -> None:
-        """Reproduce `text` por oraciones; retorna al terminar o al ser interrumpido."""
+        """Reproduce `text`; retorna al terminar o al ser interrumpido."""
         if not (text or "").strip() or self._ending:
             return
         task = asyncio.create_task(self._play_text(text))
@@ -424,31 +434,25 @@ class VoiceCallRuntime:
             raise exc
 
     async def _play_text(self, text: str) -> None:
+        """Sintetiza el texto completo, lo sube a broadcast y espera su duración.
+
+        `mod_audio_stream` no reproduce vía WS (ver docstring del módulo) —
+        se usa `uuid_broadcast` sobre un WAV compartido, como en V1.
+        """
         from services.voice.text_normalize import split_sentences
 
-        loop = asyncio.get_running_loop()
         self._playing = True
         self.classifier.reset()
-        self._play_started = loop.time()
         self._sentence_marks = []
-        sent_sec = 0.0
-        lead = float(settings.VOICE_PLAYBACK_LEAD_MS) / 1000.0
+        call_uuid = self.transport.call_uuid or ""
+        pcm = bytearray()
         try:
             for sentence in split_sentences(text):
                 attempt = 0
                 while True:
                     try:
                         async for chunk in self.tts.synthesize_sentence(sentence):
-                            if self.transport.closed or self._ending:
-                                return
-                            await self.transport.send_audio(chunk)
-                            self.aec.add_far(chunk)
-                            if self.recorder is not None:
-                                self.recorder.add_bot_audio(chunk)
-                            sent_sec += len(chunk) / BYTES_PER_SECOND
-                            ahead = sent_sec - (loop.time() - self._play_started)
-                            if ahead > lead:
-                                await asyncio.sleep(ahead - lead)
+                            pcm.extend(chunk)
                         break
                     except TTSError:
                         attempt += 1
@@ -457,11 +461,26 @@ class VoiceCallRuntime:
                         logger.warning(
                             "[runtime] TTS retry sentence=%r", sentence[:60]
                         )
-                self._sentence_marks.append((sent_sec, sentence))
-            # Dejar drenar el buffer adelantado antes de declarar terminado.
-            remaining = sent_sec - (loop.time() - self._play_started)
-            if remaining > 0:
-                await asyncio.sleep(remaining)
+                self._sentence_marks.append((len(pcm) / BYTES_PER_SECOND, sentence))
+
+            if not pcm or self.transport.closed or self._ending:
+                return
+
+            if self.recorder is not None:
+                self.recorder.add_bot_audio(bytes(pcm))
+
+            store = get_audio_file_store()
+            _, container_path, duration = store.save_pcm(bytes(pcm), call_uuid=call_uuid)
+
+            if not (settings.FREESWITCH_ESL_ENABLED and call_uuid):
+                raise TTSError("ESL deshabilitado o sin call_uuid — no se puede reproducir")
+
+            self._play_started = asyncio.get_running_loop().time()
+            ok = await get_esl_client().uuid_broadcast(call_uuid, container_path, "aleg")
+            if not ok:
+                raise TTSError(f"uuid_broadcast falló call_uuid={call_uuid}")
+
+            await asyncio.sleep(duration)
         finally:
             self._playing = False
             self.classifier.reset()
@@ -479,6 +498,12 @@ class VoiceCallRuntime:
         logger.info(
             "[runtime] barge-in confirmed call_uuid=%s", self.transport.call_uuid
         )
+        call_uuid = self.transport.call_uuid or ""
+        if settings.FREESWITCH_ESL_ENABLED and call_uuid:
+            try:
+                await get_esl_client().uuid_break(call_uuid)
+            except Exception as e:
+                logger.warning("[runtime] uuid_break failed: %s", e)
         task.cancel()
         if self.session is not None:
             self.orchestrator.note_partial_delivery(self.session, self._heard_text())
@@ -498,11 +523,10 @@ class VoiceCallRuntime:
             return
         self._ending = True
         call_uuid = self.transport.call_uuid or ""
-        # El pacing deja ~VOICE_PLAYBACK_LEAD_MS de audio en el buffer de
-        # FreeSWITCH: esperar a que suene antes de matar el canal.
-        await asyncio.sleep(
-            float(settings.VOICE_PLAYBACK_LEAD_MS) / 1000.0 + 0.35
-        )
+        # _speak_and_wait ya esperó la duración completa del broadcast antes
+        # de llegar aquí; solo un margen de seguridad corto por latencia de
+        # red/ESL antes de matar el canal.
+        await asyncio.sleep(0.3)
         if settings.FREESWITCH_ESL_ENABLED and call_uuid:
             try:
                 await get_esl_client().uuid_kill(call_uuid)

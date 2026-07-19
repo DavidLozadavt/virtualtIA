@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # Se sirven por call_uuid para reproducirlas en el frontend del servicio.
     FREESWITCH_RECORDINGS_DIR: str = "data/freeswitch_recordings"
 
+    # Playback vía ESL uuid_broadcast (pivote 2026-07-19, ver audio_file_store.py):
+    # directorio compartido entre el proceso Python (host) y el contenedor
+    # FreeSWITCH (bind mount). Mismo contenido, dos rutas distintas.
+    FREESWITCH_TTS_SHARED_DIR: str = "data/freeswitch_tts_shared"  # ruta del host
+    FREESWITCH_TTS_CONTAINER_DIR: str = "/tmp/lyra-tts"  # ruta dentro del contenedor
+
     TELEPHONY_SAMPLE_RATE: int = 8000
 
     FREESWITCH_ESL_ENABLED: bool = True
@@ -84,10 +90,8 @@ class Settings(BaseSettings):
     # TTS streaming por oración (edge-tts incremental → PCM 8k vía ffmpeg pipe).
     VOICE_TTS_TIMEOUT_SEC: float = 10.0
 
-    # Full-duplex / barge-in.
-    VOICE_AEC_TAPS: int = 256                # taps NLMS (32 ms de cola @8k)
+    # Barge-in (clasificador de interrupción real vs. backchannel).
     VOICE_BARGE_MIN_MS: int = 250            # habla sostenida mínima para interrumpir
-    VOICE_PLAYBACK_LEAD_MS: int = 100        # buffer máx adelantado al reproducir
     VOICE_SILENCE_PROMPT_SEC: float = 6.0    # silencio tras prompt → re-pregunta
     VOICE_MAX_TURNS: int = 40                # tope duro de turnos por llamada
 

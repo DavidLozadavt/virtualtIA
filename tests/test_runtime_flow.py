@@ -1,12 +1,14 @@
-"""Flujo completo del runtime V2 con transporte/STT/TTS simulados.
+"""Flujo completo del runtime V2 con transporte/STT/TTS/ESL simulados.
 
 Simula una llamada real de punta a punta:
-  conexión WS → saludo streaming → "estoy en pubenza" → confirmación →
-  "sí" → creación de servicio (backend fake) → despedida → colgado.
+  conexión WS → saludo (uuid_broadcast) → "estoy en pubenza" → confirmación →
+  "sí" → creación de servicio (backend fake) → despedida → colgado (uuid_kill).
+
+Playback vía ESL uuid_broadcast (pivote 2026-07-19, ver runtime.py) — el WS
+de mod_audio_stream se usa solo para captura, ya no para audio saliente.
 """
 
 import asyncio
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -22,21 +24,17 @@ from services.voice.tts_stream import StreamingTTS
 
 
 class FakeWebSocket:
-    """WS mínimo compatible con FreeSwitchTransport."""
+    """WS mínimo compatible con FreeSwitchTransport (solo captura)."""
 
     def __init__(self, call_uuid="e2e-uuid", caller="3001234567"):
         self.query_params = {"call_uuid": call_uuid, "caller_number": caller}
         self.headers = {}
         self.scope = {"app": None}
-        self.sent: list[dict] = []
         self._inbox: asyncio.Queue = asyncio.Queue()
         self.closed = False
 
     async def receive(self):
         return await self._inbox.get()
-
-    async def send_text(self, text: str):
-        self.sent.append(json.loads(text))
 
     async def close(self):
         self.closed = True
@@ -76,6 +74,27 @@ class FakeSTT:
         self.queue.put_nowait(None)
 
 
+class FakeESLClient:
+    """Reemplaza FreeSwitchESLClient: registra llamadas en vez de conectar TCP."""
+
+    def __init__(self):
+        self.broadcasts: list[tuple[str, str, str]] = []
+        self.kills: list[str] = []
+        self.breaks: list[str] = []
+
+    async def uuid_broadcast(self, call_uuid: str, media_uri: str, leg: str = "aleg") -> bool:
+        self.broadcasts.append((call_uuid, media_uri, leg))
+        return True
+
+    async def uuid_kill(self, call_uuid: str, cause: str = "NORMAL_CLEARING") -> bool:
+        self.kills.append(call_uuid)
+        return True
+
+    async def uuid_break(self, call_uuid: str) -> bool:
+        self.breaks.append(call_uuid)
+        return True
+
+
 class FakeGeocoder:
     def prewarm(self, query, attempt=1):
         pass
@@ -106,9 +125,10 @@ def _final(text):
 
 @pytest.fixture()
 def fast_settings(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "FREESWITCH_ESL_ENABLED", False)
-    monkeypatch.setattr(settings, "FREESWITCH_RECORDINGS_DIR", str(tmp_path))
-    monkeypatch.setattr(settings, "VOICE_PLAYBACK_LEAD_MS", 5000)  # sin sleeps de pacing
+    monkeypatch.setattr(settings, "FREESWITCH_ESL_ENABLED", True)
+    monkeypatch.setattr(settings, "FREESWITCH_RECORDINGS_DIR", str(tmp_path / "recordings"))
+    monkeypatch.setattr(settings, "FREESWITCH_TTS_SHARED_DIR", str(tmp_path / "tts_shared"))
+    monkeypatch.setattr(settings, "FREESWITCH_TTS_CONTAINER_DIR", "/tmp/lyra-tts")
     monkeypatch.setattr(settings, "VOICE_SILENCE_PROMPT_SEC", 30.0)
     return tmp_path
 
@@ -118,6 +138,9 @@ def test_full_call_flow(fast_settings, monkeypatch):
 
     FakeSTT.instances.clear()
     monkeypatch.setattr(rt, "DeepgramLiveSTT", FakeSTT)
+
+    fake_esl = FakeESLClient()
+    monkeypatch.setattr(rt, "get_esl_client", lambda: fake_esl)
 
     tts = StreamingTTS()
 
@@ -140,12 +163,12 @@ def test_full_call_flow(fast_settings, monkeypatch):
 
     async def scenario():
         run_task = asyncio.create_task(runtime.run())
-        # Espera a que el saludo suene (mensajes streamAudio enviados).
+        # Espera a que el saludo se reproduzca (uuid_broadcast disparado).
         for _ in range(100):
             await asyncio.sleep(0.02)
-            if ws.sent:
+            if fake_esl.broadcasts:
                 break
-        assert ws.sent, "el saludo nunca se envió"
+        assert fake_esl.broadcasts, "el saludo nunca se reprodujo"
         stt = FakeSTT.instances[0]
 
         # Turno 1: el usuario da el barrio envuelto en cortesía.
@@ -174,14 +197,24 @@ def test_full_call_flow(fast_settings, monkeypatch):
 
     asyncio.run(scenario())
 
-    # Playback: todos los mensajes salientes son streamAudio válidos.
-    assert all(m["type"] == "streamAudio" for m in ws.sent)
-    assert all(m["data"]["sampleRate"] == 8000 for m in ws.sent)
+    # Playback: cada turno hablado disparó un uuid_broadcast con WAV real.
+    assert len(fake_esl.broadcasts) >= 2
+    for call_uuid, path, leg in fake_esl.broadcasts:
+        assert call_uuid == "e2e-uuid"
+        assert path.startswith("/tmp/lyra-tts/") and path.endswith(".wav")
+        assert leg == "aleg"
+
+    # Colgado real vía ESL uuid_kill.
+    assert fake_esl.kills == ["e2e-uuid"]
 
     # La sesión terminal sobrevive con service_created (regla V1 preservada).
     sess = store.get("e2e-uuid")
     assert sess is not None and sess.service_created
 
     # Grabación server-side escrita (pista del bot presente).
-    rec = fast_settings / "e2e-uuid.wav"
+    rec = fast_settings / "recordings" / "e2e-uuid.wav"
     assert rec.is_file() and rec.stat().st_size > 44
+
+    # Los WAV de playback quedaron en el directorio compartido.
+    shared = list((fast_settings / "tts_shared").glob("*.wav"))
+    assert len(shared) >= 2

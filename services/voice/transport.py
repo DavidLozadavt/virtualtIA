@@ -1,20 +1,20 @@
-"""Transporte FreeSWITCH ↔ Lyra vía mod_audio_stream (spec §3.1).
+"""Transporte FreeSWITCH ↔ Lyra vía mod_audio_stream — captura del usuario.
 
 Entrada: frames del WS de mod_audio_stream — binarios (PCM16 8k mono, pata
-del llamante) o texto (JSON de protocolo: connected/start/media/stop).
-Salida: playback full-duplex con mensajes `streamAudio` (formato documentado
-del módulo):
+del llamante) o texto (JSON de protocolo: connected/start/media/stop). Este
+WS se usa SOLO para captura (full-duplex real: el audio del usuario nunca se
+descarta ni se gatea, a diferencia del anti-patrón half-duplex de V1).
 
-    {"type": "streamAudio",
-     "data": {"audioDataType": "raw", "sampleRate": 8000,
-              "audioData": "<base64 pcm16>"}}
-
-No hay comando de kill de playback en el módulo open-source: la cancelación
-de barge-in se logra empujando chunks pequeños con pacing casi-real-time
-(runtime), de modo que "dejar de enviar" corta el audio en ≤~400 ms.
-
-Sin gate de reproducción: el audio del usuario NUNCA se descarta aquí
-(el anti-patrón half-duplex de V1 queda eliminado; el eco lo maneja el AEC).
+Playback: NO vía este WS. `mod_audio_stream` v1.0.3 (binario oficial,
+licencia gratuita <10 canales) documenta reproducción bidireccional vía
+mensajes `streamAudio`, pero en pruebas reales (2026-07-19, logs de
+FreeSWITCH + evento `mod_audio_stream::play` confirmando recepción de cada
+chunk) nunca inyecta audio en el canal — sin `chunk_played`/`queue_completed`
+ni audio audible, pese a seguir la documentación al pie de la letra
+(`STREAM_PLAYBACK`, formato JSON, chunking a 20ms). Pendiente de soporte del
+vendor. Mientras tanto el playback usa el mecanismo probado de V1: WAV local
++ ESL `uuid_broadcast` (ver `services/voice/audio_file_store.py` y
+`runtime.py`).
 """
 
 from __future__ import annotations
@@ -123,20 +123,6 @@ def resolve_caller_number(query_params: Any, headers: Any, data: Optional[dict] 
     return None
 
 
-def build_stream_audio_message(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> str:
-    """Mensaje de playback de mod_audio_stream (audio crudo base64)."""
-    return json.dumps(
-        {
-            "type": "streamAudio",
-            "data": {
-                "audioDataType": "raw",
-                "sampleRate": sample_rate,
-                "audioData": base64.b64encode(pcm).decode("ascii"),
-            },
-        }
-    )
-
-
 @dataclass
 class FreeSwitchTransport:
     """Sesión WS con mod_audio_stream para una llamada."""
@@ -210,20 +196,6 @@ class FreeSwitchTransport:
                 return
             elif event == "connected":
                 logger.info("[transport] protocol connected call_uuid=%s", self.call_uuid)
-
-    async def send_audio(self, pcm: bytes) -> None:
-        if self._closed or not pcm:
-            return
-        try:
-            await self.websocket.send_text(build_stream_audio_message(pcm))
-        except Exception as e:
-            if not self._closed:
-                logger.warning(
-                    "[transport] send_audio failed call_uuid=%s err=%s",
-                    self.call_uuid,
-                    e,
-                )
-                self._closed = True
 
     async def close(self) -> None:
         if self._closed:
