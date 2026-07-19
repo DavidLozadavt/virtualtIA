@@ -160,6 +160,20 @@ class VoiceCallRuntime:
         if self.transport.caller_number and not self.session.caller_phone:
             self.session.caller_phone = self.transport.caller_number
             self.store.save(self.session)
+        if self.session.service_created or self.session.state == STATE_FINISHED:
+            # Reconexión sobre un canal que Lyra ya dio por terminado (p. ej.
+            # mod_audio_stream reabriendo el WS tras un uuid_kill que no
+            # alcanzó a completarse) — colgar directo, sin conectar el STT ni
+            # abrir la grabadora: abrir una sesión OpenAI Realtime aquí sería una
+            # conexión facturable que no transcribiría nada. Es la red de
+            # seguridad real; no re-saluda ni resetea el estado.
+            logger.warning(
+                "[runtime] reconexión sobre sesión terminal call_uuid=%s — colgando",
+                call_uuid,
+            )
+            await self._hangup()
+            return
+
         self.recorder = CallRecorder(call_uuid)
 
         self.stt = OpenAIRealtimeSTT(call_uuid=call_uuid)
@@ -181,17 +195,6 @@ class VoiceCallRuntime:
             call_uuid,
             self.transport.caller_number,
         )
-        if self.session.service_created or self.session.state == STATE_FINISHED:
-            # Reconexión sobre un canal que Lyra ya dio por terminado (p. ej.
-            # mod_audio_stream reabriendo el WS tras un uuid_kill que no
-            # alcanzó a completarse) — no volver a saludar ni resetear el
-            # estado: colgar directo, es la red de seguridad real.
-            logger.warning(
-                "[runtime] reconexión sobre sesión terminal call_uuid=%s — colgando",
-                call_uuid,
-            )
-            await self._hangup()
-            return
 
         await self._turn_queue.put(("greeting", "", 0.0))
 
