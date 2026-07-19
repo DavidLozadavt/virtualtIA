@@ -7,3 +7,5 @@ logs/*
 !logs/.gitkeep
 scratch/*
 !scratch/.gitkeep
+.claude/*
+CLAUDE.md
