@@ -56,6 +56,10 @@ class CallSession:
     pending_disambiguation: Optional[dict] = None
     geo_original_query: Optional[str] = None
     geo_attempt: int = 0
+    # Candidatos de la resolución inicial de una dirección VÁLIDA con múltiples
+    # barrios compatibles. Universo cerrado para el resolvedor de contexto
+    # geográfico (core.geo_context_resolver). Lista de dicts serializables.
+    geo_candidates: Optional[list] = None
 
     def touch(self) -> None:
         self.updated_at = time.time()

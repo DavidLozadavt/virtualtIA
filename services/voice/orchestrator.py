@@ -35,6 +35,7 @@ from core.address_utils import (
     reattach_address_details,
 )
 from core.co_address_parser import AddressState, parse_co_address
+from core.geo_context_resolver import select_candidate
 from core.conversation_repair import (
     ConversationMemory,
     get_progressive_retry_message,
@@ -192,6 +193,44 @@ class SpeculativeGeocoder:
             except Exception:
                 pass  # la especulación falló: reintentar en frío
         return await run_pipeline(query, attempt=attempt)
+
+
+def _serialize_geo_candidates(geo_result) -> list:
+    """Serializa los candidatos de una GeoResolution a dicts guardables en sesión.
+
+    Universo cerrado para el resolvedor de contexto geográfico. No incluye lógica
+    de dirección ni geocoding: solo copia los campos que el resolvedor consume.
+    """
+    cands = getattr(geo_result, "candidates", None) or []
+    out = []
+    for c in cands:
+        out.append({
+            "neighborhood": getattr(c, "neighborhood", None),
+            "display_name": getattr(c, "display_name", None),
+            "lat": getattr(c, "lat", None),
+            "lng": getattr(c, "lng", None),
+            "confidence": getattr(c, "confidence", None),
+        })
+    return out
+
+
+def _dedup_named(names: list) -> list:
+    """Nombres de barrio no vacíos, sin duplicados, preservando el orden."""
+    seen, out = set(), []
+    for n in names:
+        if n and n.strip() and n.lower() not in seen:
+            seen.add(n.lower())
+            out.append(n.strip())
+    return out
+
+
+def _join_options(names: list) -> str:
+    """'A' | 'A o B' | 'A, B o C' para preguntar entre candidatos."""
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" o {names[-1]}"
 
 
 class TurnOrchestrator:
@@ -613,6 +652,7 @@ class TurnOrchestrator:
                 ):
                     session.geo_original_query = origen
                     session.geo_attempt = 1
+                    session.geo_candidates = _serialize_geo_candidates(geo_result)
                     session.state = STATE_WAITING_GEO_CONTEXT
                     msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
                     session.last_message = msg
@@ -650,6 +690,7 @@ class TurnOrchestrator:
                     # solo los NO confiables pasan a pedir barrio/referencia.
                     session.geo_original_query = origen
                     session.geo_attempt = 1
+                    session.geo_candidates = _serialize_geo_candidates(geo_result)
                     session.state = STATE_WAITING_GEO_CONTEXT
                     msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
                     session.last_message = msg
@@ -680,6 +721,63 @@ class TurnOrchestrator:
     ) -> VoiceTurnResult:
         orig_q = session.geo_original_query or session.origen_text or ""
         context_text = nlu.best_pickup or text
+
+        # ── Resolvedor de contexto geográfico ────────────────────────────────
+        # Dirección VÁLIDA con múltiples candidatos: la respuesta natural del
+        # usuario ("María Oriente segundo puente") NUNCA se concatena a la query
+        # ni reemplaza la dirección. Se usa como EVIDENCIA para escoger entre los
+        # candidatos ya encontrados. La dirección original se conserva intacta.
+        candidates = session.geo_candidates or []
+        if len(candidates) >= 2:
+            sel = select_candidate(context_text, candidates)
+            if sel is not None:
+                session.origen_text = orig_q            # dirección intacta
+                session.origen_barrio = sel.neighborhood  # barrio oficial elegido
+                session.geo_candidates = None
+                session.state = STATE_CONFIRMING_ORIGIN
+                logger.info(
+                    "[orchestrator] geo context resolved via %s call_uuid=%s "
+                    "barrio=%r ref=%r",
+                    sel.method, session.call_uuid, sel.neighborhood, context_text,
+                )
+                msg = f"¿{orig_q}, barrio {sel.neighborhood}, es correcto?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN,
+                    short_answer=True, session=session,
+                )
+            # Inconclusivo: NO concatenar. Re-preguntar entre los candidatos.
+            session.geo_attempt += 1
+            names = _dedup_named([c.get("neighborhood") for c in candidates])
+            if session.geo_attempt <= 3 and len(names) >= 2:
+                msg = f"¿La dirección queda en {_join_options(names)}?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN,
+                    short_answer=True, session=session,
+                )
+            # Agotado / sin nombres: handoff con el primer barrio, dirección intacta.
+            barrio = names[0] if names else (context_text.strip() or orig_q)
+            session.origen_text = orig_q
+            session.origen_barrio = barrio
+            session.geo_candidates = None
+            session.state = STATE_CREATING_SERVICE
+            logger.warning(
+                "[orchestrator] geo context inconclusive → barrio handoff "
+                "call_uuid=%s barrio=%r", session.call_uuid, barrio,
+            )
+            msg = (
+                f"Listo, te ubico en el barrio {barrio}. El conductor te "
+                "llamará para afinar el punto exacto. Un momento por favor."
+            )
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg, action=VoiceAction.CREATE_SERVICE,
+                short_answer=True, session=session,
+            )
+
+        # Sin candidatos múltiples → flujo actual: dar contexto a una dirección
+        # débil que aún no resolvió (búsqueda legítima). Comportamiento sin cambios.
         enriched = f"{orig_q}, {context_text}".strip(", ")
         geo_result = await self.geocoder.resolve(enriched, attempt=session.geo_attempt + 1)
         session.geo_attempt = geo_result.attempt

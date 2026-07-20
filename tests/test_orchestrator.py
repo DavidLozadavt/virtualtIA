@@ -369,3 +369,45 @@ def test_speculative_geocoder_reuses_prewarmed_task(monkeypatch):
     result = asyncio.run(scenario())
     assert result.selected.neighborhood == "Centro"
     assert len(calls) == 1  # una sola ejecución: la especulativa se reutilizó
+
+
+# ── resolvedor de contexto geográfico (desambiguación entre candidatos) ──
+
+def test_geo_context_selects_candidate_from_natural_reference():
+    geo = FakeGeocoder()  # NO debe llamarse (sin nueva búsqueda)
+    orch = _orch(geo=geo)
+    s = _session(
+        state=STATE_WAITING_GEO_CONTEXT,
+        geo_original_query="Cl. 17 #6E-12",
+        origen_text="Cl. 17 #6E-12",
+        geo_attempt=1,
+        geo_candidates=[
+            {"neighborhood": "Santa Teresa", "display_name": "Santa Teresa",
+             "lat": 2.4310, "lng": -76.6010, "confidence": 0.5},
+            {"neighborhood": "Prados del Norte", "display_name": "Prados del Norte",
+             "lat": 2.4830, "lng": -76.5620, "confidence": 0.5},
+        ],
+    )
+    turn = run(orch.process_turn(
+        s, text="María Oriente segundo puente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente segundo puente")))
+    assert geo.calls == []                       # nunca abrió una búsqueda nueva
+    assert s.origen_text == "Cl. 17 #6E-12"      # dirección intacta
+    assert s.origen_barrio == "Santa Teresa"     # candidato elegido (no la respuesta)
+    assert s.state == STATE_CONFIRMING_ORIGIN
+    assert "María Oriente segundo puente" not in (turn.speak_text or "")
+
+
+def test_geo_context_no_candidates_keeps_legacy_flow():
+    # Sin candidatos múltiples → flujo actual (dar contexto a dirección débil).
+    geo = FakeGeocoder([_geo(ResolutionStatus.RESOLVED, barrio="La Esmeralda")])
+    orch = _orch(geo=geo)
+    s = _session(
+        state=STATE_WAITING_GEO_CONTEXT,
+        geo_original_query="calle 8c # 17-55",
+        origen_text="calle 8c # 17-55",
+        geo_attempt=1,
+    )
+    run(orch.process_turn(s, text="la esmeralda",
+                          nlu=_nlu("provide_pickup", pickup="la esmeralda")))
+    assert geo.calls  # el flujo legacy SÍ geocodifica (comportamiento sin cambios)
