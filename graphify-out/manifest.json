@@ -35,9 +35,9 @@
     "semantic_hash": "2cd18def82f23f1ac31629efe9444037"
   },
   "api/routers/browser_voice.py": {
-    "mtime": 1781067469.7233224,
-    "ast_hash": "909148b747e3e31d6ffb5318520ceb22",
-    "semantic_hash": "909148b747e3e31d6ffb5318520ceb22"
+    "mtime": 1784500037.2640514,
+    "ast_hash": "e245430b874d74b94fa60c004b235c55",
+    "semantic_hash": ""
   },
   "api/routers/main.py": {
     "mtime": 1779904016.4307213,
@@ -75,13 +75,13 @@
     "semantic_hash": "45af9352edef4c9c88cf3af23ad23988"
   },
   "core/address_utils.py": {
-    "mtime": 1781988353.3347068,
-    "ast_hash": "072751b15256a1fb015c241fd0f12607",
-    "semantic_hash": "072751b15256a1fb015c241fd0f12607"
+    "mtime": 1784522561.1976385,
+    "ast_hash": "1ca48e2c47e8e3f48290e0d97ec5e795",
+    "semantic_hash": ""
   },
   "core/config.py": {
-    "mtime": 1784452448.0310962,
-    "ast_hash": "7ad431fb3a05ccd1dc5833045166f927",
+    "mtime": 1784501309.8629203,
+    "ast_hash": "7a8e49de254f682e58d0b2835acf85ec",
     "semantic_hash": ""
   },
   "core/conversation_repair.py": {
@@ -125,14 +125,14 @@
     "semantic_hash": "58332a225e3d86032d7f2d6af71fa61b"
   },
   "core/stt_enhancer.py": {
-    "mtime": 1784355155.47061,
-    "ast_hash": "15f790169561441c58df0d331d564c6b",
-    "semantic_hash": "15f790169561441c58df0d331d564c6b"
+    "mtime": 1784522913.886582,
+    "ast_hash": "64d94c6ef7f8d648b6345bb42add1206",
+    "semantic_hash": ""
   },
   "core/voice_engine.py": {
-    "mtime": 1779994869.3723662,
-    "ast_hash": "87dac422007e3206d4a5c64ce689c539",
-    "semantic_hash": "87dac422007e3206d4a5c64ce689c539"
+    "mtime": 1784500016.5424082,
+    "ast_hash": "9b890e407e0288c88d16f757ec00bd81",
+    "semantic_hash": ""
   },
   "main.py": {
     "mtime": 1784355155.5050733,
@@ -285,13 +285,13 @@
     "semantic_hash": "3a078402a28eec8e6b296885bd3e80ac"
   },
   "ARCHITECTURE.md": {
-    "mtime": 1784453032.6946006,
-    "ast_hash": "a7bcfef8ef54a3cbdd2fa89babecc04d",
+    "mtime": 1784501535.732831,
+    "ast_hash": "34ed7f1dd42c690fe56155e013466755",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1784452960.3647826,
-    "ast_hash": "b1a2e33cd214450346bb0b6f9187dbb8",
+    "mtime": 1784501546.3899083,
+    "ast_hash": "d9f09feb0e1b06e66376bc6c083fc656",
     "semantic_hash": ""
   },
   "projects/intellitaxi.yaml": {
@@ -300,9 +300,9 @@
     "semantic_hash": "54bfdb0932401f1ff10d3c71c6c6f341"
   },
   "projects/nexiservice.yaml": {
-    "mtime": 1779904016.4607198,
-    "ast_hash": "546329e49f4b703f390d72606961ac2c",
-    "semantic_hash": "546329e49f4b703f390d72606961ac2c"
+    "mtime": 1784500043.518605,
+    "ast_hash": "f0cd38716b0b8b28ab28468883a70348",
+    "semantic_hash": ""
   },
   "projects/personalities.yaml": {
     "mtime": 1779904016.4617217,
@@ -325,9 +325,9 @@
     "semantic_hash": "35ef1fbd146c65b7a6f42f3b9bdf5e8e"
   },
   "projects/schoolsena.yaml": {
-    "mtime": 1779904016.4637218,
-    "ast_hash": "4b59dba9a2608c8997c2b85ca1655958",
-    "semantic_hash": "4b59dba9a2608c8997c2b85ca1655958"
+    "mtime": 1784500048.6424863,
+    "ast_hash": "82ce100a10c93f168c6b9fa219e2e1d3",
+    "semantic_hash": ""
   },
   "requirements.txt": {
     "mtime": 1784452449.0193675,
@@ -355,8 +355,8 @@
     "semantic_hash": "61674c3d108c2e42e8ce758506973177"
   },
   "api/routers/freeswitch.py": {
-    "mtime": 1784452312.4597292,
-    "ast_hash": "a49cdc930ae4550caa8eda0107ed6fe2",
+    "mtime": 1784501448.3264544,
+    "ast_hash": "b7ac3d81ea4d855ac2c5fd606974a0b2",
     "semantic_hash": ""
   },
   "services/telephony/__init__.py": {
@@ -370,9 +370,9 @@
     "semantic_hash": "5f27ddad4303387808cb473115b14495"
   },
   "services/telephony/esl_client.py": {
-    "mtime": 1781980523.9532146,
-    "ast_hash": "3c4445d9e64c7b9aeacd14faf623ae71",
-    "semantic_hash": "3c4445d9e64c7b9aeacd14faf623ae71"
+    "mtime": 1784491929.3077912,
+    "ast_hash": "f56cc4661acf8f75531df86ae2928156",
+    "semantic_hash": ""
   },
   "services/telephony/ffmpeg_bin.py": {
     "mtime": 1781980523.9537568,
@@ -395,8 +395,8 @@
     "semantic_hash": "7af2eeeb93c4ad4a92d365b8c0a4ede4"
   },
   "docs/freeswitch/VPS_DEPLOY.md": {
-    "mtime": 1784452918.470181,
-    "ast_hash": "c0ff2edaca07f931aa2d2a3a9789cd0e",
+    "mtime": 1784501516.1837642,
+    "ast_hash": "7a0ceeef8a1b8a6fab2c21a1ced2d526",
     "semantic_hash": ""
   },
   "scripts/diagnose_lowprec_cache.py": {
@@ -405,18 +405,13 @@
     "semantic_hash": "0f03fe9ccc5a12c475d9373f970a19ab"
   },
   "docs/freeswitch/lyra_stream.lua": {
-    "mtime": 1784452326.034942,
-    "ast_hash": "51355f47369b683404ee43bd30d86ab0",
+    "mtime": 1784490898.397669,
+    "ast_hash": "f1aa4e4cd363638b4c205cc58b8f04be",
     "semantic_hash": ""
   },
   "services/voice/__init__.py": {
-    "mtime": 1784451545.5231392,
-    "ast_hash": "4395f92d14ac7feccd7e99bad04ad540",
-    "semantic_hash": ""
-  },
-  "services/voice/aec.py": {
-    "mtime": 1784451700.3664012,
-    "ast_hash": "4aac834e4f1c44c969306e2ed557c635",
+    "mtime": 1784501346.654327,
+    "ast_hash": "679b060f5e366b5233e9f0d264f5fb9f",
     "semantic_hash": ""
   },
   "services/voice/barge_in.py": {
@@ -425,8 +420,8 @@
     "semantic_hash": ""
   },
   "services/voice/endpointing.py": {
-    "mtime": 1784451830.5355616,
-    "ast_hash": "b3f92ca0996b87b4403bf55c19931f5b",
+    "mtime": 1784501341.07438,
+    "ast_hash": "db4c4fac658461e962a456a46855902c",
     "semantic_hash": ""
   },
   "services/voice/filters.py": {
@@ -440,8 +435,8 @@
     "semantic_hash": ""
   },
   "services/voice/orchestrator.py": {
-    "mtime": 1784452758.3830976,
-    "ast_hash": "8622e179ec6100b669cece7038591646",
+    "mtime": 1784522799.9809687,
+    "ast_hash": "3a1f69780247774f006d572022d36aa9",
     "semantic_hash": ""
   },
   "services/voice/recorder.py": {
@@ -450,13 +445,13 @@
     "semantic_hash": ""
   },
   "services/voice/runtime.py": {
-    "mtime": 1784452997.3629153,
-    "ast_hash": "8adf7c1eca20f8fead3704954a20318d",
+    "mtime": 1784504937.9325538,
+    "ast_hash": "6838038c433412ab114535df2e822dc0",
     "semantic_hash": ""
   },
   "services/voice/stt_stream.py": {
-    "mtime": 1784451779.5266867,
-    "ast_hash": "c5dbf4bcfda1dccdc8f6dd8b99033c22",
+    "mtime": 1784503342.5017614,
+    "ast_hash": "208f77dc2d7a0cff4dd5ad48a33434d1",
     "semantic_hash": ""
   },
   "services/voice/text_normalize.py": {
@@ -465,23 +460,18 @@
     "semantic_hash": ""
   },
   "services/voice/transport.py": {
-    "mtime": 1784452100.4925,
-    "ast_hash": "c85ca23d7571fa4a4834201372de5b0e",
+    "mtime": 1784491980.1546614,
+    "ast_hash": "f2fb4da825bbe4658ef504afb7486a91",
     "semantic_hash": ""
   },
   "services/voice/tts_stream.py": {
-    "mtime": 1784451619.2659237,
-    "ast_hash": "23ccdffe0e39da1d81457a5cb3bfa46a",
+    "mtime": 1784491464.4298148,
+    "ast_hash": "9707594c526733cc83fd6262aa6f76c9",
     "semantic_hash": ""
   },
   "tests/__init__.py": {
     "mtime": 1784452515.1550972,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
-  },
-  "tests/test_aec.py": {
-    "mtime": 1784452575.2743878,
-    "ast_hash": "315a56fd48a330168c07a6772c17a969",
     "semantic_hash": ""
   },
   "tests/test_barge_in.py": {
@@ -515,13 +505,13 @@
     "semantic_hash": ""
   },
   "tests/test_runtime_flow.py": {
-    "mtime": 1784452816.9710605,
-    "ast_hash": "843f01bf6881bf775bf328642c88b4f3",
+    "mtime": 1784501364.8563418,
+    "ast_hash": "89ed758bc4737976404fce0fb974526c",
     "semantic_hash": ""
   },
   "tests/test_stt_stream.py": {
-    "mtime": 1784452678.816382,
-    "ast_hash": "89ecc2db8b35dcfa8cc766b104bb9092",
+    "mtime": 1784503222.7210286,
+    "ast_hash": "8c5e83e5208e760f8346a71c8eb414c8",
     "semantic_hash": ""
   },
   "tests/test_text_normalize.py": {
@@ -530,8 +520,8 @@
     "semantic_hash": ""
   },
   "tests/test_transport.py": {
-    "mtime": 1784452593.623881,
-    "ast_hash": "aa3c522105283ff88a153e024fb67633",
+    "mtime": 1784492120.7251124,
+    "ast_hash": "8b49e60e746393084ad1f30496217338",
     "semantic_hash": ""
   },
   "tests/test_tts_stream.py": {
@@ -540,18 +530,18 @@
     "semantic_hash": ""
   },
   "docs/freeswitch/FREESWITCH_MIGRATION.md": {
-    "mtime": 1784452892.628553,
-    "ast_hash": "f244279d504a5d04fd016e23b3ce9ae3",
+    "mtime": 1784501557.4881861,
+    "ast_hash": "53e4ec062540935517da78c1406fab43",
     "semantic_hash": ""
   },
   "docs/freeswitch/STREAMING_DEPLOY.md": {
-    "mtime": 1784452352.570665,
-    "ast_hash": "0eee6aaab2b1909f77580f65745b3670",
+    "mtime": 1784501486.8139145,
+    "ast_hash": "17d65480c531f9fafc9c53d5c540eed7",
     "semantic_hash": ""
   },
   "docs/freeswitch/freeswitch_audio_config.md": {
-    "mtime": 1784452934.976167,
-    "ast_hash": "708bc6442338018cdb1e0dc38e5e644b",
+    "mtime": 1784501561.8801842,
+    "ast_hash": "147fd25551ccb7d35d5bb5a858fed4df",
     "semantic_hash": ""
   },
   "docs/voice/audit_2026-07-18/LYRA_VOICE_V2_SPEC.md": {
@@ -572,6 +562,76 @@
   "docs/voice/audit_2026-07-18/STT_TRACE_VERIFICADO.md": {
     "mtime": 1784430111.3000484,
     "ast_hash": "a2836b628b772edb3223003d01afc8f9",
+    "semantic_hash": ""
+  },
+  "core/co_address_parser.py": {
+    "mtime": 1784522547.3892634,
+    "ast_hash": "31d636fa055eb88883811a8fa47e3f08",
+    "semantic_hash": ""
+  },
+  "services/voice/audio_file_store.py": {
+    "mtime": 1784491946.089777,
+    "ast_hash": "0e1c8efa4c99bfe218f6cf54178bd5c9",
+    "semantic_hash": ""
+  },
+  "tests/test_audio_file_store.py": {
+    "mtime": 1784492130.9980013,
+    "ast_hash": "ed07df28cb40f1c68fdfac9c2ed18cdd",
+    "semantic_hash": ""
+  },
+  "tests/test_co_address_parser.py": {
+    "mtime": 1784522767.1936314,
+    "ast_hash": "5b3d01fd81ce6eadf75be7cf2517b6c7",
+    "semantic_hash": ""
+  },
+  "tests/test_runtime_hangup_race.py": {
+    "mtime": 1784493756.1110957,
+    "ast_hash": "2a039a35755cc13b958ca29d1890a914",
+    "semantic_hash": ""
+  },
+  "tests/test_voice_engine_stt.py": {
+    "mtime": 1784500088.2307222,
+    "ast_hash": "2cce0117fec87c4c08676ee19ac629c6",
+    "semantic_hash": ""
+  },
+  "docs/geocoding/CO_ADDRESS_NOMENCLATURE_REFERENCE.md": {
+    "mtime": 1784508877.332638,
+    "ast_hash": "afb832c9e4924570a815a6cfd8307aff",
+    "semantic_hash": ""
+  },
+  "docs/geocoding/GOOGLE_GEOCODING_FORMAT.md": {
+    "mtime": 1784509699.9793174,
+    "ast_hash": "ea286dabc6317d75dd324baf7f00c944",
+    "semantic_hash": ""
+  },
+  "docs/geocoding/PIPELINE_AUDIT.md": {
+    "mtime": 1784509867.6438327,
+    "ast_hash": "d2673c5ee4b1f4ec4557f3acf2920409",
+    "semantic_hash": ""
+  },
+  "docs/geocoding/POPAYAN_CATALOG.md": {
+    "mtime": 1784521175.7117078,
+    "ast_hash": "8392db693a77049dc0d61f65da13f8fd",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/colombian_address_parser_design.md": {
+    "mtime": 1784522978.5604942,
+    "ast_hash": "9442df2bb9fa5b3f358ee9469d7e25fc",
+    "semantic_hash": ""
+  },
+  "docs/voice/HANDOFF_2026-07-19.md": {
+    "mtime": 1784495388.1854556,
+    "ast_hash": "7ae77222e3df147884258478238e0e20",
+    "semantic_hash": ""
+  },
+  "docs/voice/HANDOFF_2026-07-19_stt-openai-migration.md": {
+    "mtime": 1784505757.892953,
+    "ast_hash": "5b63fa14e0ac4908e9c9f89d8cc57b6b",
+    "semantic_hash": ""
+  },
+  "docs/voice/LYRA_VOICE_V2_IMPLEMENTATION.md": {
+    "mtime": 1784501573.1672797,
+    "ast_hash": "199a80292ff37ff3637c5d5e7c2f1ea2",
     "semantic_hash": ""
   }
 }

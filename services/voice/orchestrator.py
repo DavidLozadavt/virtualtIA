@@ -34,6 +34,7 @@ from core.address_utils import (
     normalize_colombian_address,
     reattach_address_details,
 )
+from core.co_address_parser import AddressState, parse_co_address
 from core.conversation_repair import (
     ConversationMemory,
     get_progressive_retry_message,
@@ -291,13 +292,12 @@ class TurnOrchestrator:
         elif not looks_like_place(origen) and not looks_like_place(raw_text):
             return
         origen = reattach_address_details(raw_text, origen) or origen
-        col_norm = normalize_colombian_address(origen)
-        if col_norm and len(col_norm) >= 3:
-            origen = col_norm
-        else:
-            norm = normalize_address(origen)
-            if norm and len(norm) > len(origen) * 0.4:
-                origen = norm
+        parsed = parse_co_address(origen)
+        # Estructura de vía inválida → no especular geocoding (spec §5).
+        if parsed.state == AddressState.INVALID_ADDRESS_STRUCTURE:
+            return
+        if parsed.canonical:
+            origen = parsed.canonical
         self.geocoder.prewarm(origen, attempt=1)
 
     # ── turno principal ──
@@ -562,13 +562,28 @@ class TurnOrchestrator:
         if origen:
             origen = reattach_address_details(raw_text, origen)
         if origen:
-            col_norm = normalize_colombian_address(origen)
-            if col_norm and len(col_norm) >= 3:
-                origen = col_norm
-            else:
-                norm = normalize_address(origen)
-                if norm and len(norm) > len(origen) * 0.4:
-                    origen = norm
+            parsed = parse_co_address(origen)
+            # Nomenclatura de vía pero estructura inválida → NUNCA se geocodifica;
+            # se vuelve a pedir la dirección (spec §5, estado
+            # INVALID_ADDRESS_STRUCTURE). Barrios/landmarks/lugares no entran aquí.
+            if parsed.state == AddressState.INVALID_ADDRESS_STRUCTURE:
+                session.retry_count += 1
+                logger.info(
+                    "[orchestrator] invalid address structure call_uuid=%s "
+                    "reason=%s query=%r → re-ask",
+                    session.call_uuid, parsed.invalid_reason, origen,
+                )
+                msg = get_progressive_retry_message(session.retry_count) or (
+                    get_repair_message(
+                        clean_text, confidence, session.state, self._memory(session)
+                    )
+                )
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN, session=session
+                )
+            if parsed.canonical:
+                origen = parsed.canonical
 
         session.origen_text = origen
         self._memory(session).add_location_mention(origen or "")

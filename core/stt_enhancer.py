@@ -942,61 +942,12 @@ _STREET_LETTER_BLACKLIST = frozenset({
 })
 
 
-def repair_mangled_street_address(text: str) -> str:
-    """
-    Repara direcciones callejeras mangled por STT.
-    'carrera 4 a eb 1728' → 'carrera 4a # 17b 28'
-    'calle 5 a 12 34' → 'calle 5a # 12 34'
-    Detecta: (calle|carrera) + número + letra(s) cortas + número(s) mangled
-    NO aplica si la "letra" es una palabra española común (número, norte, etc.)
-    """
-    t = text.strip()
-
-    # Patrón: (calle|carrera) + número + espacio? + letra(s) + espacio + número(s) mangled
-    pattern = r'((?:calle|carrera|cl|cra|cr|kr|kra|k)\s+\d+)\s+([a-záéíóú]+(?:\s+[a-záéíóú]+)*)\s+(\d+)'
-    match = re.search(pattern, t, re.IGNORECASE)
-
-    if match:
-        letters_raw = match.group(2).strip().lower()
-        # Si la "letra" es una palabra española, no es código de nomenclatura — ignorar
-        if letters_raw in _STREET_LETTER_BLACKLIST or len(letters_raw) > 4:
-            return t
-
-        prefix = match.group(1)
-        letters = match.group(2)
-        numbers = match.group(3)
-
-        # Limpiar letras: "a eb" → "ae", "a e b" → "ae"
-        # "eb" es STT mangling de "b" (letra del apartamento) o parte de "ae"
-        # Primero: unir espacios → "aeb"
-        clean_letters = re.sub(r'\s+', '', letters.lower())
-        # Si es "aeb" → "ae" (STT separó "ae" en "a eb")
-        if clean_letters == "aeb":
-            clean_letters = "ae"
-        elif clean_letters.endswith("eb"):
-            # "xeb" → "xb" (eb es mangling de b)
-            clean_letters = clean_letters[:-2] + "b"
-        elif clean_letters.startswith("e"):
-            # "eb" → "b"
-            clean_letters = clean_letters[1:]
-
-        # Intentar separar números mangled: "1728" → "17b 28" o "17 28"
-        # Si hay 4+ dígitos, probablemente son 2 números
-        if len(numbers) >= 4:
-            # Dividir a la mitad: "1728" → "17" y "28"
-            mid = len(numbers) // 2
-            num1 = numbers[:mid]
-            num2 = numbers[mid:]
-            repaired = f"{prefix}{clean_letters} # {num1}b {num2}"
-        elif len(numbers) == 3:
-            # "172" → "17" y "2"
-            repaired = f"{prefix}{clean_letters} # {numbers[:2]} {numbers[2:]}"
-        else:
-            repaired = f"{prefix}{clean_letters} # {numbers}"
-
-        t = t[:match.start()] + repaired + t[match.end():]
-
-    return t
+# repair_mangled_street_address — RETIRADO (F9, spec §3.3).
+# La reconstrucción estructural de direcciones colombianas es responsabilidad
+# ÚNICA de core.co_address_parser.parse_co_address. Esta heurística la duplicaba
+# (adivinaba la letra y la división de dígitos: "1728"→"17b 28") y fue eliminada
+# para que no exista un segundo normalizador de direcciones en el árbol.
+# La corrección de mishears de ASR (correct_stt_errors) permanece intacta.
 
 
 # ── Detección de calidad de audio ─────────────────────────────────────────────
@@ -1211,8 +1162,10 @@ def preprocess_stt(text: str, confidence: float = 1.0) -> str:
     # 4. Números-palabra en contexto de calle: "calle quince" → "calle 15"
     t = expand_number_words_in_streets(t)
 
-    # 4b. Reparar direcciones mangled: "carrera 4 a eb 1728" → "carrera 4a # 17b 28"
-    t = repair_mangled_street_address(t)
+    # 4b. RETIRADO (F9). La reconstrucción estructural de direcciones es autoridad
+    #     EXCLUSIVA de core.co_address_parser (spec §3.3). Este paso duplicaba esa
+    #     responsabilidad y adivinaba divisiones ("1728"→"17b 28"); ya no corre.
+    #     La corrección de mishears de ASR (paso 5) permanece.
 
     # 5. Correcciones STT específicas de Popayán (dict curado)
     t = correct_stt_errors(t)
