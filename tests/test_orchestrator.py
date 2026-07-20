@@ -411,3 +411,67 @@ def test_geo_context_no_candidates_keeps_legacy_flow():
     run(orch.process_turn(s, text="la esmeralda",
                           nlu=_nlu("provide_pickup", pickup="la esmeralda")))
     assert geo.calls  # el flujo legacy SÍ geocodifica (comportamiento sin cambios)
+
+
+def _ambiguous_session(**kw):
+    base = dict(
+        state=STATE_WAITING_GEO_CONTEXT,
+        geo_original_query="Cl. 17 #6E-12",
+        origen_text="Cl. 17 #6E-12",
+        geo_attempt=1,
+        geo_candidates=[
+            {"neighborhood": "Santa Teresa", "display_name": "Santa Teresa",
+             "lat": 2.4310, "lng": -76.6010, "confidence": 0.5},
+            {"neighborhood": "Prados del Norte", "display_name": "Prados del Norte",
+             "lat": 2.4830, "lng": -76.5620, "confidence": 0.5},
+        ],
+    )
+    base.update(kw)
+    return _session(**base)
+
+
+def test_geo_context_persists_auditable_decision_trace():
+    geo = FakeGeocoder()  # NO debe llamarse
+    orch = _orch(geo=geo)
+    s = _ambiguous_session()
+    run(orch.process_turn(
+        s, text="María Oriente segundo puente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente segundo puente")))
+    assert geo.calls == []
+    assert s.geo_candidates is None                 # universo cerrado tras selección
+    assert isinstance(s.geo_decision_trace, dict)   # traza persistida en sesión
+    tr = s.geo_decision_trace
+    assert tr["method"] == "proximity"
+    assert tr["neighborhood"] == "Santa Teresa"
+    assert tr["discarded"] == ["Prados del Norte"]
+    assert tr["distances"] and tr["reason"]
+
+
+def test_geo_context_inconclusive_reasks_between_names_no_geocode():
+    geo = FakeGeocoder()  # NO debe llamarse (universo cerrado)
+    orch = _orch(geo=geo)
+    s = _ambiguous_session(geo_attempt=1)
+    turn = run(orch.process_turn(
+        s, text="por la iglesia",  # no resuelve a un candidato → inconcluso
+        nlu=_nlu("provide_pickup", pickup="por la iglesia")))
+    assert geo.calls == []                           # nunca abrió búsqueda nueva
+    assert s.state == STATE_WAITING_GEO_CONTEXT       # sigue desambiguando
+    assert len(s.geo_candidates) == 2                 # universo intacto
+    assert s.origen_text == "Cl. 17 #6E-12"           # dirección intacta
+    assert "Santa Teresa" in turn.speak_text and "Prados del Norte" in turn.speak_text
+    assert "por la iglesia" not in turn.speak_text    # sin contaminación
+
+
+def test_geo_context_exhausted_attempts_handoff_address_intact():
+    geo = FakeGeocoder()  # NO debe llamarse
+    orch = _orch(geo=geo)
+    s = _ambiguous_session(geo_attempt=3)  # siguiente intento supera el máximo
+    turn = run(orch.process_turn(
+        s, text="por la iglesia",
+        nlu=_nlu("provide_pickup", pickup="por la iglesia")))
+    assert geo.calls == []
+    assert s.state == STATE_CREATING_SERVICE
+    assert turn.action == VoiceAction.CREATE_SERVICE
+    assert s.origen_text == "Cl. 17 #6E-12"           # dirección inmutable
+    assert s.origen_barrio in {"Santa Teresa", "Prados del Norte"}
+    assert s.geo_candidates is None                   # universo cerrado (terminal)

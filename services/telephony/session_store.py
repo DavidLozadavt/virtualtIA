@@ -56,6 +56,18 @@ class CallSession:
     pending_disambiguation: Optional[dict] = None
     geo_original_query: Optional[str] = None
     geo_attempt: int = 0
+    # Universo CERRADO e inmutable de candidatos de la primera resolución exitosa
+    # de una dirección VÁLIDA con múltiples barrios compatibles. Única fuente de
+    # verdad del Geographic Context Resolver (core.geo_context_resolver). Lista de
+    # dicts serializables. Se fija UNA vez al entrar a WAITING_GEO_CONTEXT y solo
+    # se limpia (=None) en los cuatro eventos terminales: selección definitiva,
+    # cancelación, handoff o descarte de la sesión.
+    geo_candidates: Optional[list] = None
+    # Traza auditable de la selección ganadora (estrategia, candidato elegido,
+    # descartados, score, confidence, distancias, márgenes, evidencia, motivo).
+    # Permite reproducir la decisión usando SOLO datos de la sesión. Se limpia en
+    # los mismos cuatro eventos terminales que geo_candidates.
+    geo_decision_trace: Optional[dict] = None
 
     def touch(self) -> None:
         self.updated_at = time.time()
