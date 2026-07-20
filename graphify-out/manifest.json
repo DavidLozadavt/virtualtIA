@@ -365,9 +365,9 @@
     "semantic_hash": ""
   },
   "services/telephony/backend_client.py": {
-    "mtime": 1781980523.95154,
-    "ast_hash": "5f27ddad4303387808cb473115b14495",
-    "semantic_hash": "5f27ddad4303387808cb473115b14495"
+    "mtime": 1784571968.86364,
+    "ast_hash": "caa7043febf20ea84954512bc76ff9df",
+    "semantic_hash": ""
   },
   "services/telephony/esl_client.py": {
     "mtime": 1784491929.3077912,
@@ -390,8 +390,8 @@
     "semantic_hash": "80c842967b10f13b15e0e2f02aa35b13"
   },
   "services/telephony/session_store.py": {
-    "mtime": 1784530467.7166831,
-    "ast_hash": "34622ae16dea6bfefd056cffc17d0579",
+    "mtime": 1784571900.4083138,
+    "ast_hash": "d262258000116b60ddb2047afbf906f1",
     "semantic_hash": ""
   },
   "docs/freeswitch/VPS_DEPLOY.md": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "services/voice/orchestrator.py": {
-    "mtime": 1784530622.9557445,
-    "ast_hash": "b50f5eae51521451cf7410fcdf246aeb",
+    "mtime": 1784571956.0473678,
+    "ast_hash": "9fb0a989afac07a0e622e7fc96a630e7",
     "semantic_hash": ""
   },
   "services/voice/recorder.py": {
@@ -495,8 +495,8 @@
     "semantic_hash": ""
   },
   "tests/test_orchestrator.py": {
-    "mtime": 1784564229.2708583,
-    "ast_hash": "e49f43a7e8960209ae62ea4bbe05f437",
+    "mtime": 1784572073.3778112,
+    "ast_hash": "9bbfd394703aa5b88829076d6ff8830c",
     "semantic_hash": ""
   },
   "tests/test_recorder.py": {
@@ -652,6 +652,16 @@
   "docs/superpowers/specs/2026-07-20-geo-context-resolver-restore-design.md": {
     "mtime": 1784530301.305753,
     "ast_hash": "8e1184cd1a5c0ac16c8f5cfcedfd8375",
+    "semantic_hash": ""
+  },
+  "tests/test_backend_client_resolved_origin.py": {
+    "mtime": 1784572041.7855282,
+    "ast_hash": "8ba5bd92692c4d7954194c72cb535450",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/HANDOFF_2026-07-20_geo-context-resolver-v2.md": {
+    "mtime": 1784571562.864138,
+    "ast_hash": "77cf45331551439291e03c5d82790b4a",
     "semantic_hash": ""
   }
 }

@@ -46,6 +46,15 @@ class CallSession:
     state: str = STATE_WAITING_ORIGIN
     origen_text: Optional[str] = None
     origen_barrio: Optional[str] = None
+    # Coordenadas AUTORITATIVAS del origen ya resuelto. Se fijan SOLO cuando el
+    # Geographic Context Resolver escoge un candidato del universo cerrado (una
+    # dirección válida cuya ambigüedad de barrio ya quedó resuelta con la
+    # evidencia del usuario). Una vez fijadas, la creación del servicio las
+    # consume DIRECTAMENTE y NUNCA vuelve a geocodificar ese origen: la
+    # ambigüedad no se reabre. Se limpian (=None) en cualquier recaptura o
+    # corrección del origen (deja de ser la verdad ya confirmada).
+    origen_lat: Optional[float] = None
+    origen_lng: Optional[float] = None
     destino_text: Optional[str] = None
     service_created: bool = False
     silence_count: int = 0

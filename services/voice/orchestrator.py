@@ -394,6 +394,7 @@ class TurnOrchestrator:
             if canonical:
                 session.origen_text = canonical
                 session.origen_barrio = None
+                session.origen_lat = session.origen_lng = None
                 session.state = STATE_CONFIRMING_ORIGIN
                 msg = f"Perfecto, {canonical}. ¿Te recogemos ahí? Di sí para confirmar."
                 session.last_message = msg
@@ -475,12 +476,17 @@ class TurnOrchestrator:
             use_freeswitch_channel=True,
             http_client=http_client,
             origen_barrio=session.origen_barrio,
+            # Origen ya resuelto y confirmado: se pasan las coords autoritativas
+            # para que el backend NO vuelva a geocodificar ni reabra la ambigüedad.
+            origen_lat=session.origen_lat,
+            origen_lng=session.origen_lng,
         )
 
         if not ok:
             session.state = STATE_WAITING_ORIGIN
             session.origen_text = None
             session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
             session.last_message = msg
             return VoiceTurnResult(
                 speak_text=msg,
@@ -625,6 +631,8 @@ class TurnOrchestrator:
                 origen = parsed.canonical
 
         session.origen_text = origen
+        # Origen nuevo desde captura: cualquier coord resuelta previa es obsoleta.
+        session.origen_lat = session.origen_lng = None
         self._memory(session).add_location_mention(origen or "")
         is_street = bool(
             re.search(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", (origen or "").lower())
@@ -734,9 +742,14 @@ class TurnOrchestrator:
         if len(candidates) >= 2:
             sel = select_candidate(context_text, candidates)
             if sel is not None:
-                # Selección definitiva → dirección intacta + barrio oficial.
+                # Selección definitiva → dirección intacta + barrio oficial +
+                # coordenadas del candidato elegido. La ambigüedad queda RESUELTA:
+                # se congelan las coords para que la creación del servicio las use
+                # tal cual y NUNCA vuelva a geocodificar (no se reabre el universo).
                 session.origen_text = orig_q                # dirección congelada
                 session.origen_barrio = sel.neighborhood    # barrio oficial elegido
+                session.origen_lat = sel.lat                # coords autoritativas
+                session.origen_lng = sel.lng
                 session.geo_decision_trace = sel.to_trace()  # traza auditable
                 session.geo_candidates = None                # universo cerrado
                 session.state = STATE_CONFIRMING_ORIGIN
@@ -890,6 +903,7 @@ class TurnOrchestrator:
             session.state = STATE_WAITING_ORIGIN
             session.origen_text = None
             session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
             msg = "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección."
             session.last_message = msg
             return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
@@ -911,6 +925,7 @@ class TurnOrchestrator:
                     )
             session.origen_text = local
             session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
             session.state = STATE_CONFIRMING_ORIGIN
             msg = f"Ah, {local}. ¿Te recogemos ahí? Di sí para confirmar."
             session.last_message = msg
@@ -924,6 +939,7 @@ class TurnOrchestrator:
         if span and nlu.intent in ("correction", "provide_pickup"):
             session.origen_text = span
             session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
             session.state = STATE_CONFIRMING_ORIGIN
             msg = f"Ah, {span}. ¿Te recogemos ahí? Di sí para confirmar."
             session.last_message = msg

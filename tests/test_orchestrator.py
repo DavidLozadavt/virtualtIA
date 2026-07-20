@@ -475,3 +475,52 @@ def test_geo_context_exhausted_attempts_handoff_address_intact():
     assert s.origen_text == "Cl. 17 #6E-12"           # dirección inmutable
     assert s.origen_barrio in {"Santa Teresa", "Prados del Norte"}
     assert s.geo_candidates is None                   # universo cerrado (terminal)
+
+
+def test_resolved_origin_persists_coords_no_second_disambiguation():
+    # Bug de propagación de estado: tras resolver + confirmar, la creación del
+    # servicio debe consumir las coords ya resueltas y NUNCA reabrir la ambigüedad.
+    geo = FakeGeocoder()   # NO debe llamarse en ningún turno (universo cerrado)
+    backend = FakeBackend()
+    orch = _orch(geo=geo, backend=backend)
+    s = _ambiguous_session()
+
+    # 1) Respuesta natural → resolver escoge Santa Teresa y CONGELA sus coords.
+    run(orch.process_turn(
+        s, text="María Oriente segundo puente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente segundo puente")))
+    assert s.state == STATE_CONFIRMING_ORIGIN
+    assert s.origen_barrio == "Santa Teresa"
+    assert s.origen_lat == 2.4310 and s.origen_lng == -76.6010   # coords autoritativas
+
+    # 2) Usuario confirma "sí" → pasa a crear servicio (sin re-preguntar barrio).
+    run(orch.process_turn(s, text="sí", nlu=_nlu("confirm_yes")))
+    assert s.state == STATE_CREATING_SERVICE
+
+    # 3) Turno de creación: consume las coords resueltas, sin segundo geocoding.
+    run(orch.process_turn(s, text="", nlu=_nlu("silence")))
+    assert geo.calls == []                            # jamás reabrió la desambiguación
+    assert len(backend.calls) == 1
+    kw = backend.calls[0]
+    assert kw["origen"] == "Cl. 17 #6E-12"            # dirección intacta
+    assert kw["origen_barrio"] == "Santa Teresa"      # barrio resuelto adjunto
+    assert kw["origen_lat"] == 2.4310                 # coords resueltas propagadas
+    assert kw["origen_lng"] == -76.6010
+
+
+def test_correction_after_resolution_clears_stale_coords():
+    # Si el usuario CORRIGE el origen tras una resolución, las coords congeladas
+    # dejan de ser válidas y no deben propagarse a la creación del servicio.
+    geo = FakeGeocoder()
+    orch = _orch(geo=geo)
+    s = _ambiguous_session()
+    run(orch.process_turn(
+        s, text="María Oriente segundo puente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente segundo puente")))
+    assert s.origen_lat is not None                   # coords fijadas por el resolver
+
+    # Corrección explícita en la confirmación → nuevo origen, coords invalidadas.
+    run(orch.process_turn(
+        s, text="no, mejor el Centro",
+        nlu=_nlu("correction", pickup="el Centro")))
+    assert s.origen_lat is None and s.origen_lng is None
