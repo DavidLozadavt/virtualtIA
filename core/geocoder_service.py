@@ -729,6 +729,112 @@ async def _google_places_search(query: str) -> list[GeoCandidate]:
         return []
 
 
+# ── Reverse Geocoding (coordenadas → dirección completa) ──────────────────────
+#
+# Usado por canales que entregan coordenadas exactas (ubicación compartida de
+# WhatsApp). Convierte lat/lng en la DIRECCIÓN POSTAL COMPLETA vía Google Maps,
+# NO en el nombre de un POI cercano.
+#
+# Regla de prioridad (item 3 correcciones): si Google devuelve tanto una
+# dirección de vía (street_address / premise / subpremise / route) como puntos
+# de interés (CAI Terminal, centro comercial, hospital, parque…), SIEMPRE gana
+# la dirección de vía. El POI nunca reemplaza la dirección: a lo sumo es
+# información complementaria. La dirección es la fuente de verdad.
+
+# Tipos de resultado que representan una dirección de vía real, en orden de
+# preferencia (más específico primero).
+_REVERSE_ADDRESS_PRIORITY = (
+    "subpremise",
+    "premise",
+    "street_address",
+    "route",
+    "intersection",
+)
+
+
+def _reverse_pick_address(results: list[dict]) -> Optional[str]:
+    """Elige la dirección postal completa de los resultados de reverse geocoding.
+
+    Prioriza una dirección de vía (street_address / premise / subpremise / route)
+    sobre cualquier punto de interés. Devuelve el `formatted_address` elegido.
+    """
+    if not results:
+        return None
+
+    def _is_pure_poi(types: set[str]) -> bool:
+        # POI puro: es establecimiento/POI y NO tiene ningún tipo de dirección de vía.
+        poi = types & {"point_of_interest", "establishment", "park",
+                       "natural_feature", "transit_station", "bus_station"}
+        addr = types & set(_REVERSE_ADDRESS_PRIORITY)
+        return bool(poi) and not bool(addr)
+
+    # 1. Mejor coincidencia por prioridad de dirección de vía.
+    for target in _REVERSE_ADDRESS_PRIORITY:
+        for r in results:
+            types = set(r.get("types", []))
+            if target in types and not _is_pure_poi(types):
+                fa = r.get("formatted_address")
+                if fa:
+                    return fa
+
+    # 2. Sin dirección de vía explícita: primer resultado que NO sea POI puro.
+    for r in results:
+        if not _is_pure_poi(set(r.get("types", []))):
+            fa = r.get("formatted_address")
+            if fa:
+                return fa
+
+    # 3. Último recurso: el formatted_address del primer resultado.
+    return results[0].get("formatted_address")
+
+
+async def reverse_geocode_address(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocoding vía Google Maps: coordenadas → dirección postal completa.
+
+    Devuelve la dirección de vía completa (no un POI). Fallback a Nominatim si no
+    hay API key de Google o Google no responde. Retorna None solo si ningún
+    proveedor resuelve.
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if api_key:
+        params = {
+            "latlng": f"{lat},{lng}",
+            "key": api_key,
+            "language": "es",
+            "region": "co",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                resp = await client.get(_GOOGLE_URL, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "OK":
+                    address = _reverse_pick_address(data.get("results", []))
+                    if address:
+                        logger.info(
+                            f"[REVERSE] ({lat:.5f},{lng:.5f}) → {address!r}"
+                        )
+                        return address
+                else:
+                    logger.info(f"[REVERSE] Google status={data.get('status')}")
+            else:
+                logger.warning(f"[REVERSE] Google HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"[REVERSE] Google error: {e}")
+
+    # Fallback: Nominatim reverse (mismo motor de fallback que el forward).
+    try:
+        from core.address_utils import _nominatim_reverse_geocode_async
+        address = await _nominatim_reverse_geocode_async(lat, lng)
+        if address:
+            logger.info(f"[REVERSE] Nominatim ({lat:.5f},{lng:.5f}) → {address!r}")
+            return address
+    except Exception as e:
+        logger.error(f"[REVERSE] Nominatim error: {e}")
+
+    return None
+
+
 # ── Nominatim ─────────────────────────────────────────────────────────────────
 
 async def _nominatim_get_candidates(query: str) -> list[GeoCandidate]:

@@ -370,6 +370,67 @@ def reset_wp_session(phone: str):
 # (Using extract_datetime_with_llm from core.address_utils)
 
 
+# ✅ RESOLUCIÓN GEOGRÁFICA UNIFICADA (mismo pipeline que la llamada telefónica)
+async def _resolve_wp_location(raw: str) -> tuple[float, float, str]:
+    """Resuelve una ubicación de WhatsApp con el MISMO motor que las llamadas.
+
+    Único pipeline compartido: core.geocoder_service (Cache → Google → Nominatim,
+    con sus reglas de normalización, ranking y validación). No existe un motor
+    geográfico distinto para WhatsApp.
+
+    Dos entradas posibles:
+      1. Ubicación compartida ("Ubicación en mapa: lat,lng | nombre"): se ejecuta
+         Reverse Geocoding vía Google Maps sobre las coordenadas exactas para
+         obtener la DIRECCIÓN POSTAL COMPLETA (no un POI cercano), y esa dirección
+         se resuelve con el pipeline compartido. Las coordenadas ORIGINALES se
+         conservan como fuente de verdad exacta durante todo el flujo.
+      2. Texto libre (dirección escrita): se resuelve con el pipeline compartido,
+         idéntico al de la llamada.
+
+    Retorna (lat, lng, texto_dirección). lat/lng = 0.0 solo si no se resolvió.
+    """
+    from core.geocoder_service import run_pipeline, reverse_geocode_address
+
+    map_match = re.search(
+        r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", raw or ""
+    )
+    if map_match:
+        olat, olng, _shared_name = map_match.groups()
+        olat, olng = float(olat), float(olng)
+
+        # Coordenadas exactas → dirección postal completa (nunca un POI).
+        full_address = await reverse_geocode_address(olat, olng)
+
+        origen_text = None
+        if full_address:
+            # Misma resolución que la llamada: normaliza y etiqueta el barrio.
+            res = await run_pipeline(full_address)
+            if res.resolved and res.selected:
+                origen_text = res.selected.display_name
+            else:
+                origen_text = clean_map_location(full_address)
+
+        if not origen_text:
+            # Sin reverse geocoding: enlace GPS con las coordenadas exactas.
+            origen_text = (
+                f"Ubicación compartida GPS "
+                f"(Enlace: https://maps.google.com/?q={olat},{olng})"
+            )
+
+        # Las coordenadas ORIGINALES son la fuente de verdad exacta.
+        return olat, olng, origen_text
+
+    # Texto libre → mismo pipeline que la llamada telefónica.
+    text = (raw or "").strip()
+    res = await run_pipeline(text)
+    if res.resolved and res.selected:
+        c = res.selected
+        return c.lat, c.lng, c.display_name
+
+    # No resolvió con coordenadas: conservar el texto normalizado.
+    return 0.0, 0.0, (normalize_address(text) or text)
+
+
 # ✅ CREAR SERVICIO (ADAPTADO WHATSAPP)
 async def _create_wp_service(
     celular: Optional[str],
@@ -381,75 +442,17 @@ async def _create_wp_service(
     observacion: Optional[str] = None
 ) -> tuple[bool, str]:
     import re
-    from tools.popayan_geodata import get_nearby_landmarks, get_nearby_barrios
-    
-    map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", origen)
-    if map_match_o:
-        olat, olng, explicit_name = map_match_o.groups()
-        if explicit_name:
-            origen = clean_map_location(explicit_name)
-        else:
-            l_info = get_nearby_landmarks(float(olat), float(olng), radius_km=0.3)
-            if l_info:
-                origen = f"{l_info[0]['name']}"
-            else:
-                b_info = get_nearby_barrios(float(olat), float(olng), radius_km=2.0)
-                if b_info:
-                    origen = f"Barrio {b_info[0]['name']}"
-                else:
-                    origen = f"Ubicación compartida GPS (Enlace: https://maps.google.com/?q={olat},{olng})"
-        
-        # Check if the location is Maria Oriente to override coords
-        is_maria_oriente = False
-        if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
-            is_maria_oriente = True
-        else:
-            b_info = get_nearby_barrios(float(olat), float(olng), radius_km=1.5)
-            if b_info and b_info[0]["name"] == "María Oriente":
-                is_maria_oriente = True
-                origen = "Barrio María Oriente"
 
-        if is_maria_oriente:
-            olat, olng = 2.4307, -76.6012
-
-        g_o = (olat, olng, origen)
-    else:
-        origen = normalize_address(origen) or origen
-        olat, olng = 0.0, 0.0
+    # Resolución geográfica UNIFICADA: WhatsApp usa exactamente el mismo pipeline
+    # que la llamada telefónica (core.geocoder_service). Una ubicación compartida
+    # se convierte primero en dirección completa vía Reverse Geocoding, y las
+    # coordenadas exactas se conservan como fuente de verdad.
+    olat, olng, origen = await _resolve_wp_location(origen)
 
     # Solo el domicilio lleva destino (dirección de entrega). Taxi ahora/programado → destino=None.
     dlat, dlng = 0.0, 0.0
     if destino:
-        map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
-        if map_match_d:
-            dlat, dlng, explicit_name = map_match_d.groups()
-            if explicit_name:
-                destino = clean_map_location(explicit_name)
-            else:
-                l_info = get_nearby_landmarks(float(dlat), float(dlng), radius_km=0.3)
-                if l_info:
-                    destino = f"{l_info[0]['name']}"
-                else:
-                    b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=2.0)
-                    if b_info:
-                        destino = f"Barrio {b_info[0]['name']}"
-                    else:
-                        destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
-
-            is_maria_oriente_d = False
-            if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
-                is_maria_oriente_d = True
-            else:
-                b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=1.5)
-                if b_info and b_info[0]["name"] == "María Oriente":
-                    is_maria_oriente_d = True
-                    destino = "Barrio María Oriente"
-
-            if is_maria_oriente_d:
-                dlat, dlng = 2.4307, -76.6012
-        else:
-            destino = normalize_address(destino) or destino
-            dlat, dlng = 0.0, 0.0
+        dlat, dlng, destino = await _resolve_wp_location(destino)
 
     clase_v = "TAXI"
     service_type = "TAXI AHORA"
