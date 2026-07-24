@@ -584,6 +584,53 @@ def test_address_with_barrio_ref_resolves_ambiguity_in_utterance():
     assert len(geo.calls) == 1                           # una sola búsqueda
 
 
+# ── corrección parcial de placa (task 4) ──
+
+def test_placa_correction_applies_to_stored_address():
+    orch = _orch()
+    s = _session(state=STATE_CONFIRMING_ORIGIN, origen_text="Cl. 8C #17-28")
+    turn = run(orch.process_turn(s, text="No, 17-25", nlu=_nlu("confirm_no")))
+    assert s.origen_text == "Cl. 8C #17-25"       # corrección aplicada sobre la vía
+    assert s.state == STATE_CONFIRMING_ORIGIN
+    assert "17-25" in turn.speak_text
+
+
+def test_placa_correction_with_letter_and_preamble():
+    orch = _orch()
+    s = _session(state=STATE_CONFIRMING_ORIGIN, origen_text="Cl. 8C #17-28")
+    run(orch.process_turn(
+        s, text="Quise decir 17B-40", nlu=_nlu("correction", pickup="17B-40")))
+    assert s.origen_text == "Cl. 8C #17B-40"
+
+
+def test_placa_correction_recovers_glued_stored_then_corrects():
+    orch = _orch()
+    # La dirección previa quedó pegada por STT (#1728); el usuario corrige la placa.
+    s = _session(state=STATE_CONFIRMING_ORIGIN, origen_text="Cl. 8C #1728")
+    run(orch.process_turn(s, text="No, es 17-25", nlu=_nlu("confirm_no")))
+    assert s.origen_text == "Cl. 8C #17-25"
+
+
+def test_placa_correction_ignored_without_prior_via():
+    # Sin dirección de vía previa (un barrio) no hay placa que corregir.
+    geo = FakeGeocoder([_geo(ResolutionStatus.FAILED)])
+    orch = _orch(geo=geo)
+    s = _session(state=STATE_CONFIRMING_ORIGIN, origen_text="Pubenza",
+                 origen_barrio="Pubenza")
+    run(orch.process_turn(s, text="No, 17-25", nlu=_nlu("confirm_no")))
+    assert "#17-25" not in (s.origen_text or "")   # no se fabricó una dirección
+
+
+def test_placa_correction_not_hijacking_new_address():
+    # Un turno con vía nueva NO es corrección de placa: sigue el flujo normal.
+    orch = _orch(geo=FakeGeocoder())
+    s = _session(state=STATE_CONFIRMING_ORIGIN, origen_text="Cl. 8C #17-28")
+    run(orch.process_turn(
+        s, text="mejor carrera 5 con calle 4",
+        nlu=_nlu("correction", pickup="carrera 5 con calle 4")))
+    assert s.origen_text != "Cl. 8C #17-25"        # no se aplicó como corrección
+
+
 def test_pure_address_without_barrio_ref_unchanged():
     # No-regresión: una dirección de vía SIN referencia de barrio sigue yendo a
     # WAITING_GEO_CONTEXT con la pregunta del geocoder (comportamiento previo).

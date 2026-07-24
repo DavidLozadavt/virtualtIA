@@ -161,6 +161,15 @@ def test_full_call_flow(fast_settings, monkeypatch):
         ws, store=store, orchestrator=orch, tts=tts, nlu=nlu
     )
 
+    async def _wait_mic_open():
+        # La escucha se reabre solo cuando Lyra terminó su respuesta y volvemos a
+        # esperar el siguiente turno. Inyectar audio antes se descarta (mic cerrado).
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if runtime._mic_open:
+                return
+        raise AssertionError("el micrófono nunca se reabrió")
+
     async def scenario():
         run_task = asyncio.create_task(runtime.run())
         # Espera a que el saludo se reproduzca (uuid_broadcast disparado).
@@ -170,13 +179,14 @@ def test_full_call_flow(fast_settings, monkeypatch):
                 break
         assert fake_esl.broadcasts, "el saludo nunca se reprodujo"
         stt = FakeSTT.instances[0]
+        await _wait_mic_open()   # micrófono reabierto tras el saludo
 
         # Turno 1: el usuario da el barrio envuelto en cortesía.
         stt.queue.put_nowait(_final("buenas estoy en pubenza por favor"))
-        for _ in range(200):
+        for _ in range(300):
             await asyncio.sleep(0.02)
             sess = store.get("e2e-uuid")
-            if sess and sess.state == "confirming_origin":
+            if sess and sess.state == "confirming_origin" and runtime._mic_open:
                 break
         sess = store.get("e2e-uuid")
         assert sess is not None and sess.state == "confirming_origin"
@@ -259,14 +269,58 @@ def test_filler_matches_process_state_and_never_repeats():
     assert msg in _FILLER_MESSAGES["geo_context"]
 
 
-def test_slow_processing_emits_continuity_filler(fast_settings, monkeypatch):
-    """Si `process_turn` tarda más que el umbral, se emite un relleno mientras el
-    procesamiento continúa: aparece un uuid_broadcast extra antes de la respuesta."""
+def test_closed_mic_drops_turns_and_audio():
+    """Con la escucha cerrada: ni se encolan turnos, ni se envía audio al STT,
+    ni se evalúa barge-in. Al reabrir, la escucha se reanuda."""
+    from services.voice.endpointing import TurnReady
+    from services.voice.runtime import VoiceCallRuntime
+
+    rt = VoiceCallRuntime(FakeWebSocket())
+
+    class _Rec:
+        def __init__(self):
+            self.user = 0
+
+        def add_user_audio(self, pcm):
+            self.user += len(pcm)
+
+    class _STT:
+        def __init__(self):
+            self.sent = 0
+
+        async def send_audio(self, pcm):
+            self.sent += len(pcm)
+
+    rt.recorder = _Rec()
+    rt.stt = _STT()
+
+    rt._close_mic()
+    assert rt._mic_open is False
+
+    # TurnReady no encola nada mientras la escucha está cerrada.
+    asyncio.run(rt._dispatch_signal(TurnReady(text="calle 5 numero 3 45", confidence=0.9)))
+    assert rt._turn_queue.empty()
+
+    # El audio entrante se graba a disco pero NO llega al STT (sin escucha).
+    asyncio.run(rt._on_audio(b"\x00\x01" * 100))
+    assert rt.recorder.user > 0
+    assert rt.stt.sent == 0
+
+    # Reabrir reanuda el envío al STT.
+    rt._open_mic()
+    assert rt._mic_open is True
+    asyncio.run(rt._on_audio(b"\x00\x01" * 100))
+    assert rt.stt.sent > 0
+
+
+def test_costly_turn_emits_message_before_processing(fast_settings, monkeypatch):
+    """Un turno costoso emite el mensaje de espera ANTES de procesar: aparece un
+    uuid_broadcast (el mensaje) mientras el pipeline lento aún corre, y luego la
+    respuesta — al menos 2 broadcasts nuevos tras el saludo."""
     import services.voice.runtime as rt
 
     FakeSTT.instances.clear()
     monkeypatch.setattr(rt, "OpenAIRealtimeSTT", FakeSTT)
-    monkeypatch.setattr(rt, "_FILLER_DELAY_SEC", 0.05)
 
     fake_esl = FakeESLClient()
     monkeypatch.setattr(rt, "get_esl_client", lambda: fake_esl)
@@ -305,15 +359,25 @@ def test_slow_processing_emits_continuity_filler(fast_settings, monkeypatch):
             await asyncio.sleep(0.02)
             if fake_esl.broadcasts:
                 break
+        # Micrófono reabierto tras el saludo antes de inyectar el turno.
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if runtime._mic_open:
+                break
         greeting_count = len(fake_esl.broadcasts)
         stt = FakeSTT.instances[0]
         stt.queue.put_nowait(_final("buenas estoy en pubenza por favor"))
-        # Saludo + relleno de continuidad + respuesta → ≥2 broadcasts nuevos.
+        # Mensaje de espera + respuesta → ≥2 broadcasts nuevos tras el saludo.
         for _ in range(300):
             await asyncio.sleep(0.02)
             if len(fake_esl.broadcasts) - greeting_count >= 2:
                 break
         assert len(fake_esl.broadcasts) - greeting_count >= 2
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            sess = store.get("e2e-uuid")
+            if sess and sess.state == "confirming_origin" and runtime._mic_open:
+                break
         sess = store.get("e2e-uuid")
         assert sess is not None and sess.state == "confirming_origin"
         ws.push_disconnect()

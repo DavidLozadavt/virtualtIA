@@ -340,6 +340,41 @@ def _select_barrio_by_proximity(
     return best[0]
 
 
+# Placa de corrección: "17-25", "17A-25", "18-25"… (cruce[letra]-distancia).
+_PLACA_TOKEN_RE = re.compile(r"\b(\d{1,3}[A-Za-z]?)\s*-\s*(\d{1,4})\b")
+
+# Preámbulos de corrección / relleno que suelen preceder a la placa corregida.
+_PLACA_PREAMBLE_RE = re.compile(
+    r"\b(?:no|nop|nel|perdon|disculpa|disculpe|es|era|seria|mejor|digo|osea|"
+    r"o\s*sea|mas\s*bien|quise\s*decir|queria\s*decir|el|la|numero|nro)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_placa_correction(text: str) -> Optional[str]:
+    """Placa de una corrección PARCIAL ("No, 17-25" → "17-25"), o None.
+
+    Solo devuelve algo cuando el turno es exclusivamente una placa (más
+    preámbulos de corrección/relleno): sin nomenclatura de vía ni otro contenido
+    significativo. Así "17-25 en el centro" o "cra 5 #17-25" NO se tratan como
+    corrección de placa."""
+    if not text:
+        return None
+    t = strip_accents(text.strip().lower()).replace("#", " ")
+    if _looks_like_street(t):
+        return None                       # trae vía → dirección nueva, no corrección
+    m = _PLACA_TOKEN_RE.search(t)
+    if not m:
+        return None
+    remainder = _PLACA_TOKEN_RE.sub(" ", t)
+    remainder = _PLACA_PREAMBLE_RE.sub(" ", remainder)
+    remainder = re.sub(r"[^\w]+", " ", remainder)
+    remainder = " ".join(remainder.split()).strip()
+    if len(remainder) > 2:
+        return None                       # queda contenido → no es corrección pura
+    return f"{m.group(1).upper()}-{m.group(2)}"
+
+
 class TurnOrchestrator:
     """Procesa turnos de conversación telefónica (control-loop V2)."""
 
@@ -542,6 +577,20 @@ class TurnOrchestrator:
 
         session.silence_count = 0
 
+        # ── Corrección parcial de placa sobre la última dirección (task 4) ──
+        # Mientras seguimos capturando la MISMA dirección, un turno que solo trae
+        # una placa ("No, 17-25") corrige el último componente de la dirección ya
+        # almacenada — NO se interpreta como una dirección nueva. Fuera del flujo
+        # de captura de dirección (otro contexto) esta lógica no aplica.
+        if session.state in (
+            STATE_WAITING_ORIGIN,
+            STATE_CONFIRMING_ORIGIN,
+            STATE_WAITING_GEO_CONTEXT,
+        ):
+            corrected = self._maybe_placa_correction(session, text)
+            if corrected is not None:
+                return corrected
+
         # ── waiting_origin ──
         if session.state == STATE_WAITING_ORIGIN:
             return await self._handle_waiting_origin(session, text, nlu, confidence)
@@ -557,6 +606,54 @@ class TurnOrchestrator:
         msg = "¿En qué puedo ayudarte?"
         session.last_message = msg
         return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+    # ── corrección parcial de placa (task 4) ──
+
+    def _maybe_placa_correction(
+        self, session: CallSession, text: str
+    ) -> Optional[VoiceTurnResult]:
+        """Aplica una corrección de placa ("No, 17-25") sobre la última dirección
+        capturada, conservando la vía. Devuelve el turno de re-confirmación, o
+        None si el turno no es una corrección de placa pura o no hay una dirección
+        de vía previa que corregir."""
+        stored = session.origen_text
+        if not stored:
+            return None
+        placa = _extract_placa_correction(text)
+        if not placa:
+            return None
+        # Solo si la dirección previa es una vía con número (algo que corregir).
+        stored_parsed = parse_co_address(stored)
+        ast = stored_parsed.ast
+        if ast is None or ast.via is None or ast.via.numero is None:
+            return None
+        # Reconstruir con la placa corregida, conservando la vía previa. Se pasa
+        # por el parser (única autoridad) para canonicalizar y validar.
+        base = re.sub(r"#.*$", "", stored).strip()
+        new_parsed = parse_co_address(f"{base} #{placa}")
+        if new_parsed.state != AddressState.STREET_ADDRESS or not new_parsed.canonical:
+            return None
+        origen = new_parsed.canonical
+        logger.info(
+            "[orchestrator] placa correction call_uuid=%s %r + %r -> %r",
+            session.call_uuid, stored, placa, origen,
+        )
+        # La dirección cambió de placa: cualquier resolución previa queda obsoleta.
+        session.origen_text = origen
+        session.origen_barrio = None
+        session.origen_lat = session.origen_lng = None
+        session.geo_candidates = None
+        session.geo_decision_trace = None
+        session.pending_disambiguation = None
+        session.state = STATE_CONFIRMING_ORIGIN
+        msg = f"Corrijo, {origen}. ¿Es correcto?"
+        session.last_message = msg
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            short_answer=True,
+            session=session,
+        )
 
     # ── creación de servicio (bucket A: contrato intacto) ──
 

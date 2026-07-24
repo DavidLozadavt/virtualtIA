@@ -36,6 +36,7 @@ from typing import Optional
 import httpx
 from fastapi import WebSocket
 
+from core.address_utils import looks_like_place
 from core.config import settings
 from services.telephony.esl_client import get_esl_client
 from services.telephony.session_store import (
@@ -80,12 +81,6 @@ _TTS_FAILURE_APOLOGY = (
 _STT_FAILURE_APOLOGY = (
     "Estamos presentando una falla técnica. Por favor llámanos de nuevo en unos minutos."
 )
-
-# Umbral (seg) para considerar el procesamiento interno una pausa PERCEPTIBLE. Si
-# `process_turn` (normalización, geocodificación, validaciones, resolver,
-# proximidad…) no termina dentro de este tiempo, Lyra emite un mensaje corto de
-# continuidad mientras el procesamiento sigue — sin interrumpirlo.
-_FILLER_DELAY_SEC = 0.9
 
 # Mensajes de continuidad por PROCESO realmente en ejecución (nunca se usa uno que
 # no corresponda al estado actual). Solo mantienen viva la conversación.
@@ -165,6 +160,14 @@ class VoiceCallRuntime:
 
         # Último relleno hablado — para no repetir el mismo consecutivamente.
         self._last_filler: Optional[str] = None
+
+        # Canal de escucha (micrófono). Se CIERRA por completo desde que el turno
+        # del usuario termina y arranca el procesamiento, hasta que Lyra terminó
+        # su respuesta y volvemos a esperar el siguiente turno. Cerrado ⇒ no se
+        # envía audio al STT, no hay endpointing ni barge-in, y ningún turno nuevo
+        # entra a la cola. Nunca hay una ventana donde Lyra se escuche a sí misma
+        # ni donde una palabra suelta cancele un procesamiento ya iniciado.
+        self._mic_open = True
 
     # ── ciclo de vida ──
 
@@ -249,6 +252,10 @@ class VoiceCallRuntime:
         if self._ending or self.recorder is None:
             return
         self.recorder.add_user_audio(pcm)
+        # Canal de escucha cerrado durante procesamiento/respuesta: no se acepta
+        # audio nuevo (ni STT ni barge-in). Solo se conserva la grabación a disco.
+        if not self._mic_open:
+            return
         if self.stt is not None:
             await self.stt.send_audio(pcm)
         if self._playing:
@@ -263,6 +270,10 @@ class VoiceCallRuntime:
         loop = asyncio.get_running_loop()
         try:
             async for event in self.stt.events():
+                # Escucha cerrada: se drena el evento pero NO se procesa —
+                # sin endpointing, sin barge-in, sin encolar turnos.
+                if not self._mic_open:
+                    continue
                 now = loop.time()
                 if isinstance(event, SpeechStartedEvent):
                     self._silence_deadline = None
@@ -286,6 +297,8 @@ class VoiceCallRuntime:
             )
 
     async def _dispatch_signal(self, signal: object) -> None:
+        if not self._mic_open:
+            return  # escucha cerrada: no se generan turnos ni especulación
         if isinstance(signal, StablePartial):
             self._on_stable_partial(signal)
         elif isinstance(signal, TurnReady):
@@ -322,6 +335,11 @@ class VoiceCallRuntime:
                 await asyncio.sleep(_WATCHDOG_TICK_SEC)
                 now = loop.time()
 
+                # Escucha cerrada: sin endpointing por temporizador ni prompts de
+                # silencio (no se evalúa nada del canal de entrada).
+                if not self._mic_open:
+                    continue
+
                 deadline = self.endpointer.pending_deadline
                 if deadline is not None and now >= deadline:
                     for signal in self.endpointer.on_timer(now):
@@ -345,6 +363,10 @@ class VoiceCallRuntime:
         try:
             while not self._ending:
                 kind, text, confidence = await self._turn_queue.get()
+                # El turno arranca: se CIERRA la escucha antes de cualquier
+                # procesamiento o audio de Lyra, y solo se reabre al terminar la
+                # respuesta (regla de micrófono cerrado durante el turno).
+                self._close_mic()
                 try:
                     if kind == "greeting":
                         await self._do_greeting()
@@ -365,8 +387,34 @@ class VoiceCallRuntime:
                     logger.exception(
                         "[runtime] turn error call_uuid=%s", self.transport.call_uuid
                     )
+                finally:
+                    # Respuesta terminada y de vuelta a espera: reabrir la escucha.
+                    self._open_mic()
         except asyncio.CancelledError:
             raise
+
+    # ── control del canal de escucha (micrófono) ──
+
+    def _close_mic(self) -> None:
+        """Cierra la escucha: descarta audio/eventos entrantes, sin STT,
+        endpointing ni barge-in. No cancela el procesamiento en curso."""
+        self._mic_open = False
+        self._silence_deadline = None
+        self.classifier.reset()
+
+    def _open_mic(self) -> None:
+        """Reabre la escucha una vez terminada la respuesta. Descarta cualquier
+        estado parcial acumulado para no arrastrar audio previo al nuevo turno."""
+        if self._ending:
+            return
+        self.classifier.reset()
+        reset = getattr(self.endpointer, "reset", None)
+        if callable(reset):
+            try:
+                reset()
+            except Exception:  # pragma: no cover - defensivo
+                pass
+        self._mic_open = True
 
     async def _do_greeting(self) -> None:
         assert self.session is not None
@@ -438,34 +486,63 @@ class VoiceCallRuntime:
     async def _process_turn_with_filler(
         self, session: CallSession, norm: str, nlu_result, confidence: float
     ):
-        """Ejecuta `process_turn` y, si el procesamiento interno tarda lo
-        suficiente para una pausa perceptible, emite un relleno acorde al proceso
-        en curso mientras el procesamiento CONTINÚA (nunca lo interrumpe).
+        """Emite el mensaje de espera ANTES de cualquier procesamiento pesado y,
+        con el mensaje ya iniciado, arranca el pipeline en paralelo con su audio.
 
-        Solo cambia la experiencia del usuario: la lógica de negocio y el pipeline
-        (normalización, geocodificación, validaciones, resolver, proximidad) se
-        ejecutan exactamente igual, en `proc`."""
+        Orden garantizado: (1) el turno del usuario terminó y la escucha ya está
+        cerrada; (2) si el turno hará trabajo costoso, Lyra emite de inmediato el
+        mensaje correspondiente al proceso; (3) recién entonces comienza el
+        procesamiento interno, que corre igual que siempre en `proc` mientras el
+        mensaje suena. No hay procesamiento pesado antes del mensaje ni una pausa
+        silenciosa previa. Solo cambia la experiencia del usuario."""
         state_at_entry = session.state
-        proc = asyncio.create_task(
-            self.orchestrator.process_turn(
-                session,
-                text=norm,
-                nlu=nlu_result,
-                confidence=confidence,
-                http_client=self.http_client,
-            )
-        )
-        # Espera corta: la mayoría de turnos terminan aquí sin relleno.
-        done, _ = await asyncio.wait({proc}, timeout=_FILLER_DELAY_SEC)
-        if proc not in done and not self._ending:
+        filler_task: Optional[asyncio.Task] = None
+        if self._should_announce(session, norm, nlu_result) and not self._ending:
             filler = self._pick_filler(state_at_entry, norm, nlu_result)
             if filler:
                 logger.info(
-                    "[runtime] continuity filler call_uuid=%s state=%s msg=%r",
+                    "[runtime] pre-processing message call_uuid=%s state=%s msg=%r",
                     session.call_uuid, state_at_entry, filler,
                 )
-                await self._speak_safe(filler)   # el procesamiento sigue en `proc`
-        return await proc
+                # Mensaje emitido YA (antes de arrancar el pipeline).
+                filler_task = asyncio.create_task(self._speak_safe(filler))
+                await asyncio.sleep(0)   # ceder para que el mensaje empiece a sonar
+
+        # Con el mensaje ya iniciado, arranca todo el procesamiento interno.
+        turn = await self.orchestrator.process_turn(
+            session,
+            text=norm,
+            nlu=nlu_result,
+            confidence=confidence,
+            http_client=self.http_client,
+        )
+        if filler_task is not None:
+            await filler_task   # deja terminar el audio del mensaje antes de responder
+        return turn
+
+    def _should_announce(self, session: CallSession, norm: str, nlu_result) -> bool:
+        """True si el turno hará trabajo costoso (geocodificación/resolución) y por
+        tanto debe anunciarse antes de procesar. Turnos triviales (saludo, repetir,
+        confirmar sí/no) no anuncian nada."""
+        state = session.state
+        if state == STATE_WAITING_GEO_CONTEXT:
+            # Universo cerrado (≥2 candidatos) ⇒ resolución local rápida, sin red;
+            # sin él se re-geocodifica (costoso) ⇒ anunciar.
+            cands = getattr(session, "geo_candidates", None) or []
+            return len(cands) < 2
+        if state == STATE_WAITING_ORIGIN:
+            intent = getattr(nlu_result, "intent", "") or ""
+            if intent in (
+                "greeting", "chitchat_only", "repeat_request",
+                "confirm_yes", "confirm_no",
+            ):
+                return False
+            return (
+                _is_street_text(norm)
+                or bool(getattr(nlu_result, "best_pickup", None))
+                or looks_like_place(norm)
+            )
+        return False
 
     def _pick_filler(self, state: str, norm: str, nlu_result) -> Optional[str]:
         """Escoge un mensaje de continuidad acorde al PROCESO real en ejecución,

@@ -56,6 +56,7 @@ class RepairKind(str, Enum):
     NORMALIZED_SEPARATOR       = "NORMALIZED_SEPARATOR"
     ABBREVIATION_NORMALIZATION = "ABBREVIATION_NORMALIZATION"
     STREET_ORDER_REBUILD       = "STREET_ORDER_REBUILD"
+    PLACA_SEPARATOR_RECOVERY   = "PLACA_SEPARATOR_RECOVERY"
 
 
 class TokenKind(str, Enum):
@@ -504,6 +505,33 @@ def _parse(toks: list, repairs: list) -> AddressAST:
     else:
         distancia = placa_cores[1] if len(placa_cores) >= 2 else None
 
+    # ── Recuperación de placa pegada por STT (task 3) ──
+    # "#1725" → "#17-25": el STT eliminó el separador. Alta confianza: hay '#',
+    # una placa cruce numérica de 4 dígitos SIN letra/bis/cardinal y SIN
+    # distancia, y no se vio otro separador. Una placa colombiana válida SIEMPRE
+    # lleva separador; "#NNNN" no es una placa válida → se restaura partiendo 2-2.
+    # Solo placas numéricas: letras (17A-25, 67E-20) y los casos ya con separador
+    # NUNCA se tocan (llegan con distancia ya definida o vía _split_glued).
+    if (
+        seen_hash
+        and cruce is not None
+        and distancia is None
+        and cruce.letter is None
+        and cruce.bis is None
+        and cruce.cardinal is None
+    ):
+        _digs = str(cruce.digits)
+        if len(_digs) == 4:
+            new_cruce = NumeroCore(digits=int(_digs[:2]))
+            new_dist = NumeroCore(digits=int(_digs[2:]))
+            repairs.append(Repair(
+                RepairKind.PLACA_SEPARATOR_RECOVERY,
+                f"#{cruce.render()}",
+                f"#{new_cruce.render()}-{new_dist.render()}",
+                "glued numeric placa split (STT dropped '-')",
+            ))
+            cruce, distancia = new_cruce, new_dist
+
     if cruce is not None and distancia is not None:
         if not seen_hash:
             repairs.append(Repair(RepairKind.NUMBER_ATTACHMENT,
@@ -675,6 +703,7 @@ _REPAIR_COST = {
     RepairKind.STREET_ORDER_REBUILD: 0.05,
     RepairKind.TOKEN_MERGE: 0.10,
     RepairKind.TOKEN_SPLIT: 0.15,
+    RepairKind.PLACA_SEPARATOR_RECOVERY: 0.10,
 }
 
 

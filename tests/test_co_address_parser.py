@@ -15,6 +15,38 @@ from core.co_address_parser import (
 )
 
 
+# ── recuperación de placa pegada por STT (task 3) ─────────────────────────────
+
+def test_glued_numeric_placa_recovered():
+    r = parse_co_address("Calle 8C #1725")
+    assert r.state == AddressState.STREET_ADDRESS
+    assert r.canonical == "Cl. 8C #17-25"
+    assert any(rp.kind == RepairKind.PLACA_SEPARATOR_RECOVERY for rp in r.repairs)
+
+
+def test_glued_numeric_placa_recovered_variant():
+    assert parse_co_address("Calle 8C #1728").canonical == "Cl. 8C #17-28"
+
+
+def test_glued_placa_preserves_letters():
+    # Placas con letra NO se tocan (17A-25, 6E-20).
+    assert parse_co_address("Cl 4 #17A-25").canonical == "Cl. 4 #17A-25"
+    assert parse_co_address("Cra 17 #6E-20").canonical == "Cra. 17 #6E-20"
+
+
+def test_dashed_placa_not_altered():
+    r = parse_co_address("Calle 8C #17-25")
+    assert r.canonical == "Cl. 8C #17-25"
+    assert r.confidence == 1.0
+    assert not any(rp.kind == RepairKind.PLACA_SEPARATOR_RECOVERY for rp in r.repairs)
+
+
+def test_short_glued_not_over_recovered():
+    # 2-3 dígitos: baja confianza → NO se inventa separador.
+    assert parse_co_address("Cl 4 #100").state == AddressState.INVALID_ADDRESS_STRUCTURE
+    assert parse_co_address("Cl 4 #10").state == AddressState.INVALID_ADDRESS_STRUCTURE
+
+
 # ── §10.1 valid door addresses ────────────────────────────────────────────────
 
 VALID_DOORS = [
