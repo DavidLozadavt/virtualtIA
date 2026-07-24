@@ -220,3 +220,103 @@ def test_full_call_flow(fast_settings, monkeypatch):
     # Los WAV de playback quedaron en el directorio compartido.
     shared = list((fast_settings / "tts_shared").glob("*.wav"))
     assert len(shared) >= 2
+
+
+# ── mensajes de continuidad ("un momento por favor") mientras se procesa ──
+
+def test_filler_matches_process_state_and_never_repeats():
+    from types import SimpleNamespace
+
+    from services.telephony.session_store import (
+        STATE_WAITING_GEO_CONTEXT,
+        STATE_WAITING_ORIGIN,
+    )
+    from services.voice.runtime import VoiceCallRuntime, _FILLER_MESSAGES
+
+    rt = VoiceCallRuntime(FakeWebSocket())
+
+    # Dirección de vía → categoría 'address'; nunca se repite consecutivamente.
+    prev = None
+    for _ in range(20):
+        msg = rt._pick_filler(
+            STATE_WAITING_ORIGIN, "cra 17 #6e-20",
+            SimpleNamespace(best_pickup="cra 17 #6e-20"),
+        )
+        assert msg in _FILLER_MESSAGES["address"]
+        assert msg != prev
+        prev = msg
+
+    # Nombre propio de lugar → categoría 'place'.
+    msg = rt._pick_filler(
+        STATE_WAITING_ORIGIN, "el campanario",
+        SimpleNamespace(best_pickup="el campanario"),
+    )
+    assert msg in _FILLER_MESSAGES["place"]
+
+    # Contexto geográfico → categoría 'geo_context'.
+    msg = rt._pick_filler(STATE_WAITING_GEO_CONTEXT, "por la iglesia",
+                          SimpleNamespace(best_pickup="por la iglesia"))
+    assert msg in _FILLER_MESSAGES["geo_context"]
+
+
+def test_slow_processing_emits_continuity_filler(fast_settings, monkeypatch):
+    """Si `process_turn` tarda más que el umbral, se emite un relleno mientras el
+    procesamiento continúa: aparece un uuid_broadcast extra antes de la respuesta."""
+    import services.voice.runtime as rt
+
+    FakeSTT.instances.clear()
+    monkeypatch.setattr(rt, "OpenAIRealtimeSTT", FakeSTT)
+    monkeypatch.setattr(rt, "_FILLER_DELAY_SEC", 0.05)
+
+    fake_esl = FakeESLClient()
+    monkeypatch.setattr(rt, "get_esl_client", lambda: fake_esl)
+
+    tts = StreamingTTS()
+
+    async def fake_synth(norm_text):
+        yield b"\x00\x01" * 800
+
+    monkeypatch.setattr(tts, "_synthesize_stream", fake_synth)
+
+    nlu = TurnNLU()
+    nlu._client = None
+
+    class SlowGeocoder:
+        def prewarm(self, query, attempt=1):
+            pass
+
+        async def resolve(self, query, attempt=1):
+            await asyncio.sleep(0.3)   # procesamiento perceptiblemente lento
+            return SimpleNamespace(
+                status=ResolutionStatus.RESOLVED,
+                selected=SimpleNamespace(neighborhood="Pubenza"),
+                attempt=attempt,
+                disambiguation_question=None,
+            )
+
+    store = SessionStore()
+    orch = TurnOrchestrator(backend=FakeBackend(), geocoder=SlowGeocoder())
+    ws = FakeWebSocket()
+    runtime = VoiceCallRuntime(ws, store=store, orchestrator=orch, tts=tts, nlu=nlu)
+
+    async def scenario():
+        run_task = asyncio.create_task(runtime.run())
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if fake_esl.broadcasts:
+                break
+        greeting_count = len(fake_esl.broadcasts)
+        stt = FakeSTT.instances[0]
+        stt.queue.put_nowait(_final("buenas estoy en pubenza por favor"))
+        # Saludo + relleno de continuidad + respuesta → ≥2 broadcasts nuevos.
+        for _ in range(300):
+            await asyncio.sleep(0.02)
+            if len(fake_esl.broadcasts) - greeting_count >= 2:
+                break
+        assert len(fake_esl.broadcasts) - greeting_count >= 2
+        sess = store.get("e2e-uuid")
+        assert sess is not None and sess.state == "confirming_origin"
+        ws.push_disconnect()
+        await asyncio.wait_for(run_task, timeout=5)
+
+    asyncio.run(scenario())

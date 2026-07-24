@@ -233,6 +233,113 @@ def _join_options(names: list) -> str:
     return ", ".join(names[:-1]) + f" o {names[-1]}"
 
 
+# Patrón de vía con número: distingue una dirección de calle de un nombre propio.
+_STREET_RE = re.compile(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", re.IGNORECASE)
+
+
+def _looks_like_street(text: str) -> bool:
+    return bool(_STREET_RE.search((text or "").lower()))
+
+
+# Nomenclatura de vía + números + separadores. Se elimina para AISLAR la
+# referencia de barrio cuando dirección y barrio vienen en la misma frase. NO se
+# eliminan cardinales (norte/sur/oriente/occidente): son parte de nombres de
+# barrio reales (María Oriente, María Occidente, Prados del Norte…).
+_ADDR_VIA_WORDS_RE = re.compile(
+    r"\b(?:calle|carrera|cra|cr|cll|cl|kra|kr|avenida|av|avda|ave|diagonal|diag|"
+    r"dg|transversal|transv|tr|tv|manzana|mz|numero|numeral|nro|no|bis|con)\b",
+    re.IGNORECASE,
+)
+
+
+def _barrio_ref_from_text(raw_text: str) -> Optional[str]:
+    """Aísla y resuelve la referencia de barrio/sector de una frase que también
+    contiene una dirección de vía ("Cr 17 #6E-20 María Oriente" → "María
+    Oriente"). Quita la nomenclatura de vía, números y separadores, y matchea el
+    resto contra el catálogo local. Devuelve el canónico o None."""
+    if not raw_text:
+        return None
+    t = strip_accents(raw_text.lower())
+    t = re.sub(r"[#\-]", " ", t)
+    t = re.sub(r"\d+[a-z]*", " ", t)     # 17, 6e, 20, 3c…
+    t = _ADDR_VIA_WORDS_RE.sub(" ", t)
+    t = " ".join(t.split()).strip()
+    if len(t) < 3:
+        return None
+    try:
+        return _try_local_match(t)
+    except Exception:
+        return None
+
+
+def _canonical_barrio(name: Optional[str]) -> Optional[str]:
+    """Nombre OFICIAL de un barrio a partir de una referencia en lenguaje natural.
+
+    Muchos usuarios usan nombres populares (María Oriente, Los Sauces Viejo, El
+    Terminal, La Galería…) y no el nombre oficial. Se resuelve al canónico del
+    catálogo local; si no matchea, se devuelve tal cual (puede seguir siendo un
+    barrio válido devuelto por Google)."""
+    if not name or not name.strip():
+        return None
+    try:
+        canon = _try_local_match(name)
+    except Exception:
+        canon = None
+    return canon or name.strip()
+
+
+def _select_barrio_by_proximity(
+    lat: Optional[float],
+    lng: Optional[float],
+    *,
+    hint: Optional[str] = None,
+    google_barrio: Optional[str] = None,
+) -> Optional[str]:
+    """Elige el barrio OFICIAL geográficamente más cercano a una dirección ya
+    geocodificada, desambiguando entre las alternativas disponibles.
+
+    La dirección (lat,lng) es la FUENTE DE VERDAD. El `hint` (barrio/sector que el
+    usuario mencionó en lenguaje natural) y el barrio que dio Google solo aportan
+    candidatos; gana el más cercano a las coordenadas ya resueltas. Nunca
+    reemplaza la dirección — solo devuelve la etiqueta de barrio a asociarle.
+
+    El nombre popular no se asume oficial: se resuelve por proximidad usando la
+    dirección previamente geocodificada, nunca al revés."""
+    if lat is None or lng is None:
+        return None
+    try:
+        from tools.popayan_geodata import (
+            ALL_BARRIOS,
+            _haversine,
+            get_nearby_barrios,
+            infer_barrio_from_coords,
+        )
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+    alternatives: dict = {}   # canónico -> (blat, blng)
+
+    def _add(name: Optional[str]) -> None:
+        canon = _canonical_barrio(name)
+        if canon and canon in ALL_BARRIOS:
+            alternatives[canon] = ALL_BARRIOS[canon]
+
+    _add(hint)
+    _add(google_barrio)
+    for b in get_nearby_barrios(lat, lng, radius_km=1.5):
+        alternatives.setdefault(b["name"], (b["lat"], b["lng"]))
+
+    if not alternatives:
+        b = infer_barrio_from_coords(lat, lng)
+        return b["name"] if b else None
+
+    best = min(
+        alternatives.items(),
+        key=lambda kv: _haversine(lat, lng, kv[1][0], kv[1][1]),
+    )
+    return best[0]
+
+
 class TurnOrchestrator:
     """Procesa turnos de conversación telefónica (control-loop V2)."""
 
@@ -630,19 +737,65 @@ class TurnOrchestrator:
             if parsed.canonical:
                 origen = parsed.canonical
 
+        # ── Garantía dura (task 3): una dirección de vía COMPLETA en el texto
+        # original NUNCA se descarta por una referencia de barrio en la misma
+        # frase. Si el texto trae una dirección (vía o intersección) y el
+        # candidato extraído no es esa vía, se recupera la dirección; el barrio
+        # quedará solo como contexto (barrio_hint, abajo). Nunca se reemplaza una
+        # dirección válida por un nombre de barrio.
+        raw_parsed = parse_co_address(raw_text)
+        raw_is_addr = raw_parsed.state in (
+            AddressState.STREET_ADDRESS,
+            AddressState.INTERSECTION,
+        )
+        if origen and raw_is_addr and raw_parsed.canonical and not _looks_like_street(origen):
+            logger.info(
+                "[orchestrator] address preserved over barrio ref call_uuid=%s "
+                "%r → %r",
+                session.call_uuid, origen, raw_parsed.canonical,
+            )
+            origen = raw_parsed.canonical
+
         session.origen_text = origen
         # Origen nuevo desde captura: cualquier coord resuelta previa es obsoleta.
         session.origen_lat = session.origen_lng = None
         self._memory(session).add_location_mention(origen or "")
-        is_street = bool(
-            re.search(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", (origen or "").lower())
-        )
+        is_street = _looks_like_street(origen)
+
+        # ── Referencia de barrio/sector mencionada JUNTO a la dirección (tasks 3
+        # y 4). Cuando una misma frase trae dirección completa + referencia de
+        # barrio ("Cr 17 #6E-20 María Oriente"), la dirección es la fuente de
+        # verdad y se conserva íntegra; el barrio se guarda aparte como contexto
+        # para desambiguar por PROXIMIDAD sobre la dirección ya geocodificada. El
+        # nombre popular no se asume oficial: solo desambigua, nunca reemplaza.
+        barrio_hint: Optional[str] = None
+        if is_street:
+            hinted = _barrio_ref_from_text(raw_text)
+            if hinted and strip_accents(hinted.lower().strip()) not in strip_accents(
+                (origen or "").lower()
+            ):
+                barrio_hint = hinted
 
         if is_street:
             try:
                 geo_result = await self.geocoder.resolve(origen, attempt=1)
                 if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
-                    barrio = geo_result.selected.neighborhood
+                    sel = geo_result.selected
+                    lat = getattr(sel, "lat", None)
+                    lng = getattr(sel, "lng", None)
+                    barrio = sel.neighborhood
+                    # Task 4: barrio OFICIAL por proximidad a la dirección ya
+                    # geocodificada. Se aplica cuando el usuario mencionó un
+                    # barrio/sector junto a la dirección, o cuando Google no lo
+                    # dio. La dirección (origen) se conserva intacta.
+                    if lat is not None and lng is not None and (barrio_hint or not barrio):
+                        picked = _select_barrio_by_proximity(
+                            lat, lng, hint=barrio_hint, google_barrio=barrio
+                        )
+                        if picked:
+                            barrio = picked
+                            session.origen_lat = lat
+                            session.origen_lng = lng
                     if barrio:
                         session.origen_barrio = barrio
                         session.state = STATE_CONFIRMING_ORIGIN
@@ -658,9 +811,37 @@ class TurnOrchestrator:
                     ResolutionStatus.CONTEXT_GATHERING,
                     ResolutionStatus.NEEDS_DISAMBIGUATION,
                 ):
+                    candidates = _serialize_geo_candidates(geo_result)
+                    # Task 3+4: si el usuario YA mencionó el barrio junto a la
+                    # dirección, la ambigüedad se resuelve AHORA por proximidad
+                    # sobre el universo CERRADO de candidatos, sin re-preguntar ni
+                    # descartar la dirección (que se conserva intacta).
+                    if barrio_hint and len(candidates) >= 2:
+                        sel = select_candidate(barrio_hint, candidates)
+                        if sel is not None:
+                            session.origen_text = origen           # dirección intacta
+                            session.origen_barrio = sel.neighborhood
+                            session.origen_lat = sel.lat
+                            session.origen_lng = sel.lng
+                            session.geo_decision_trace = sel.to_trace()
+                            session.geo_candidates = None
+                            session.state = STATE_CONFIRMING_ORIGIN
+                            logger.info(
+                                "[orchestrator] barrio ref resolved in-utterance via %s "
+                                "call_uuid=%s barrio=%r hint=%r",
+                                sel.method, session.call_uuid, sel.neighborhood, barrio_hint,
+                            )
+                            msg = f"¿{origen}, barrio {sel.neighborhood}, es correcto?"
+                            session.last_message = msg
+                            return VoiceTurnResult(
+                                speak_text=msg,
+                                action=VoiceAction.LISTEN,
+                                short_answer=True,
+                                session=session,
+                            )
                     session.geo_original_query = origen
                     session.geo_attempt = 1
-                    session.geo_candidates = _serialize_geo_candidates(geo_result)
+                    session.geo_candidates = candidates
                     session.geo_decision_trace = None
                     session.state = STATE_WAITING_GEO_CONTEXT
                     msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"

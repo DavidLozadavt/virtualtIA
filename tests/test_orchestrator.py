@@ -524,3 +524,76 @@ def test_correction_after_resolution_clears_stale_coords():
         s, text="no, mejor el Centro",
         nlu=_nlu("correction", pickup="el Centro")))
     assert s.origen_lat is None and s.origen_lng is None
+
+
+# ── dirección + referencia de barrio en la MISMA frase (tasks 3 y 4) ──
+
+def _geo_coords(status, barrio=None, lat=None, lng=None, attempt=1,
+                question=None, candidates=None):
+    selected = (
+        SimpleNamespace(neighborhood=barrio, lat=lat, lng=lng)
+        if (barrio or lat is not None) else None
+    )
+    return SimpleNamespace(
+        status=status, selected=selected, attempt=attempt,
+        disambiguation_question=question, candidates=candidates or [],
+    )
+
+
+def test_address_with_barrio_ref_preserves_address_and_proximity_barrio():
+    # "Cr 17 #6E-20 María Oriente": el NLU dejó solo el barrio, pero la dirección
+    # NUNCA se descarta y el barrio se asocia por PROXIMIDAD a la dirección ya
+    # geocodificada (tasks 3 y 4). Se geocodifica la DIRECCIÓN, no el barrio.
+    geo = FakeGeocoder([
+        _geo_coords(ResolutionStatus.RESOLVED, barrio=None, lat=2.4307, lng=-76.6012)
+    ])
+    orch = _orch(geo=geo)
+    s = _session()
+    turn = run(orch.process_turn(
+        s, text="Cr 17 #6E-20 María Oriente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente")))
+    assert s.state == STATE_CONFIRMING_ORIGIN
+    assert s.origen_text == "Cra. 17 #6E-20"                 # dirección íntegra
+    assert s.origen_barrio                                   # barrio por proximidad
+    assert geo.calls and geo.calls[0][0] == "Cra. 17 #6E-20"  # geocodifica la vía
+
+
+def test_address_with_barrio_ref_resolves_ambiguity_in_utterance():
+    # La dirección es ambigua (2 barrios) pero el usuario YA dijo el barrio en la
+    # misma frase → se resuelve de inmediato por proximidad, sin re-preguntar y
+    # sin abrir una segunda búsqueda; la dirección queda intacta.
+    geo = FakeGeocoder([
+        _geo_coords(
+            ResolutionStatus.NEEDS_DISAMBIGUATION,
+            candidates=[
+                SimpleNamespace(neighborhood="María Oriente", display_name="María Oriente",
+                                lat=2.4307, lng=-76.6012, confidence=0.5),
+                SimpleNamespace(neighborhood="Prados del Norte", display_name="Prados del Norte",
+                                lat=2.4830, lng=-76.5620, confidence=0.5),
+            ],
+        )
+    ])
+    orch = _orch(geo=geo)
+    s = _session()
+    run(orch.process_turn(
+        s, text="Cr 17 #6E-20 María Oriente",
+        nlu=_nlu("provide_pickup", pickup="María Oriente")))
+    assert s.state == STATE_CONFIRMING_ORIGIN            # resuelto ya, sin re-preguntar
+    assert s.origen_text == "Cra. 17 #6E-20"             # dirección intacta
+    assert s.origen_barrio == "María Oriente"            # candidato por proximidad
+    assert len(geo.calls) == 1                           # una sola búsqueda
+
+
+def test_pure_address_without_barrio_ref_unchanged():
+    # No-regresión: una dirección de vía SIN referencia de barrio sigue yendo a
+    # WAITING_GEO_CONTEXT con la pregunta del geocoder (comportamiento previo).
+    geo = FakeGeocoder([
+        _geo(ResolutionStatus.CONTEXT_GATHERING, question="¿En qué barrio queda?")
+    ])
+    orch = _orch(geo=geo)
+    s = _session()
+    turn = run(orch.process_turn(
+        s, text="estoy en la calle 16 numero 3 45",
+        nlu=_nlu("provide_pickup", pickup="calle 16 numero 3 45")))
+    assert s.state == STATE_WAITING_GEO_CONTEXT
+    assert turn.speak_text == "¿En qué barrio queda?"

@@ -223,6 +223,47 @@ def _barrio_from_query(query: str) -> Optional[str]:
     return best[1] if best else None
 
 
+# Marcadores de "lugar conocido" (POI): centro comercial, hospital, universidad,
+# terminal, parque, iglesia, etc. Para estos el barrio debe salir de la UBICACIÓN
+# REAL del lugar (consistencia geográfica), nunca de una coincidencia léxica en su
+# nombre — p.ej. "Centro Comercial Campanario" NO está en el barrio Centro solo
+# porque su nombre contenga la palabra "centro".
+_KNOWN_PLACE_MARKERS = (
+    "centro comercial", "cc ", "universidad", "unicauca", "hospital", "clinica",
+    "clínica", "colegio", "institucion educativa", "institución educativa",
+    "terminal", "aeropuerto", "sena", "parque", "iglesia", "catedral", "capilla",
+    "santuario", "estadio", "coliseo", "biblioteca", "museo", "plaza de",
+    "gobernacion", "gobernación", "alcaldia", "alcaldía",
+)
+
+
+def _is_known_place(query: str) -> bool:
+    """True si la consulta nombra un lugar conocido (POI) y no una dirección de vía."""
+    if not query:
+        return False
+    from core.stt_enhancer import strip_accents
+
+    low = strip_accents(query.lower())
+    return any(mk in low for mk in _KNOWN_PLACE_MARKERS)
+
+
+def _barrio_by_proximity(lat: Optional[float], lng: Optional[float]) -> Optional[str]:
+    """Barrio oficial geográficamente más cercano a unas coordenadas ya resueltas.
+
+    Fuente de verdad GEOGRÁFICA (no léxica): usa los centroides del catálogo local
+    (popayan_geodata) — así un POI se etiqueta con el barrio donde realmente está,
+    priorizando consistencia geográfica sobre similitud de nombres.
+    """
+    if lat is None or lng is None:
+        return None
+    try:
+        from tools.popayan_geodata import infer_barrio_from_coords
+    except Exception:  # pragma: no cover - defensive
+        return None
+    b = infer_barrio_from_coords(lat, lng)
+    return b.get("name") if b else None
+
+
 def _resolved(
     query: str,
     attempt: int,
@@ -231,24 +272,50 @@ def _resolved(
 ) -> "GeoResolution":
     """Factory de GeoResolution RESOLVED que corrige la etiqueta de barrio.
 
-    Si el usuario nombró un barrio conocido en la consulta y Google no lo dio
-    (None) o lo dio como una calle / otro barrio, la intención del usuario manda.
+    Dos caminos, según la naturaleza de la consulta:
+
+    - Lugar conocido (POI: centro comercial, hospital, universidad, terminal,
+      parque, iglesia…): se resuelve primero la entidad geográfica real y el
+      barrio se toma de su UBICACIÓN, nunca de una coincidencia léxica en el
+      nombre. Nunca se asocia a un barrio distinto solo porque el nombre se
+      parezca ("Centro Comercial Campanario" ≠ barrio Centro).
+
+    - Dirección de vía: si el usuario nombró un barrio conocido en la consulta y
+      Google no lo dio (None) o lo dio como una calle / otro barrio, la intención
+      del usuario manda.
     """
     if selected is not None:
-        stated = _barrio_from_query(query)
-        if stated:
-            from core.stt_enhancer import strip_accents
-
-            cur = strip_accents((selected.neighborhood or "").lower().strip())
-            if not cur or cur != strip_accents(stated.lower().strip()):
-                if selected.neighborhood != stated:
+        if _is_known_place(query):
+            # Consistencia geográfica sobre similitud léxica: NO se etiqueta con
+            # una palabra del propio nombre del lugar. Se conserva el barrio que
+            # Google derivó de las coordenadas (address_components) y, si falta,
+            # se infiere el más cercano a la ubicación REAL del lugar.
+            if not selected.neighborhood:
+                inferred = _barrio_by_proximity(
+                    getattr(selected, "lat", None), getattr(selected, "lng", None)
+                )
+                if inferred:
                     logger.info(
-                        "[PIPELINE] barrio label override: %r → %r (query=%r)",
-                        selected.neighborhood,
-                        stated,
+                        "[PIPELINE] known-place barrio by proximity: %r (query=%r)",
+                        inferred,
                         query,
                     )
-                    selected.neighborhood = stated
+                    selected.neighborhood = inferred
+        else:
+            stated = _barrio_from_query(query)
+            if stated:
+                from core.stt_enhancer import strip_accents
+
+                cur = strip_accents((selected.neighborhood or "").lower().strip())
+                if not cur or cur != strip_accents(stated.lower().strip()):
+                    if selected.neighborhood != stated:
+                        logger.info(
+                            "[PIPELINE] barrio label override: %r → %r (query=%r)",
+                            selected.neighborhood,
+                            stated,
+                            query,
+                        )
+                        selected.neighborhood = stated
     return GeoResolution(
         status=ResolutionStatus.RESOLVED,
         query=query,

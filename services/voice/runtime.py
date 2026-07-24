@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import re
 from typing import Optional
 
 import httpx
@@ -39,6 +41,8 @@ from services.telephony.esl_client import get_esl_client
 from services.telephony.session_store import (
     CallSession,
     STATE_FINISHED,
+    STATE_WAITING_GEO_CONTEXT,
+    STATE_WAITING_ORIGIN,
     SessionStore,
     get_session_store,
 )
@@ -76,6 +80,44 @@ _TTS_FAILURE_APOLOGY = (
 _STT_FAILURE_APOLOGY = (
     "Estamos presentando una falla técnica. Por favor llámanos de nuevo en unos minutos."
 )
+
+# Umbral (seg) para considerar el procesamiento interno una pausa PERCEPTIBLE. Si
+# `process_turn` (normalización, geocodificación, validaciones, resolver,
+# proximidad…) no termina dentro de este tiempo, Lyra emite un mensaje corto de
+# continuidad mientras el procesamiento sigue — sin interrumpirlo.
+_FILLER_DELAY_SEC = 0.9
+
+# Mensajes de continuidad por PROCESO realmente en ejecución (nunca se usa uno que
+# no corresponda al estado actual). Solo mantienen viva la conversación.
+_FILLER_MESSAGES = {
+    # Dirección de vía (geocodificando/validando una dirección concreta).
+    "address": [
+        "Estoy validando la ubicación.",
+        "Estoy verificando esa dirección.",
+        "Permíteme validar esa información.",
+    ],
+    # Nombre propio de lugar / barrio (verificando el lugar mencionado).
+    "place": [
+        "Estoy verificando esa dirección.",
+        "Estoy revisando los datos que me indicaste.",
+        "Un momento por favor.",
+    ],
+    # Contexto geográfico adicional (desambiguando barrio/sector).
+    "geo_context": [
+        "Permíteme validar esa información.",
+        "Estoy revisando los datos que me indicaste.",
+        "Estoy verificando esa ubicación.",
+    ],
+    "generic": [
+        "Un momento por favor.",
+    ],
+}
+
+_STREET_TEXT_RE = re.compile(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", re.IGNORECASE)
+
+
+def _is_street_text(text: str) -> bool:
+    return bool(_STREET_TEXT_RE.search((text or "").lower()))
 
 
 class VoiceCallRuntime:
@@ -120,6 +162,9 @@ class VoiceCallRuntime:
         self._playing = False
 
         self._silence_deadline: Optional[float] = None
+
+        # Último relleno hablado — para no repetir el mismo consecutivamente.
+        self._last_filler: Optional[str] = None
 
     # ── ciclo de vida ──
 
@@ -385,16 +430,59 @@ class VoiceCallRuntime:
         )
 
         nlu_result = await self.nlu.extract(norm, session.state, session.last_message)
-        turn = await self.orchestrator.process_turn(
-            session,
-            text=norm,
-            nlu=nlu_result,
-            confidence=confidence,
-            http_client=self.http_client,
-        )
+        turn = await self._process_turn_with_filler(session, norm, nlu_result, confidence)
         self.store.save(session)
         self._turns_done += 1
         await self._finish_turn(turn)
+
+    async def _process_turn_with_filler(
+        self, session: CallSession, norm: str, nlu_result, confidence: float
+    ):
+        """Ejecuta `process_turn` y, si el procesamiento interno tarda lo
+        suficiente para una pausa perceptible, emite un relleno acorde al proceso
+        en curso mientras el procesamiento CONTINÚA (nunca lo interrumpe).
+
+        Solo cambia la experiencia del usuario: la lógica de negocio y el pipeline
+        (normalización, geocodificación, validaciones, resolver, proximidad) se
+        ejecutan exactamente igual, en `proc`."""
+        state_at_entry = session.state
+        proc = asyncio.create_task(
+            self.orchestrator.process_turn(
+                session,
+                text=norm,
+                nlu=nlu_result,
+                confidence=confidence,
+                http_client=self.http_client,
+            )
+        )
+        # Espera corta: la mayoría de turnos terminan aquí sin relleno.
+        done, _ = await asyncio.wait({proc}, timeout=_FILLER_DELAY_SEC)
+        if proc not in done and not self._ending:
+            filler = self._pick_filler(state_at_entry, norm, nlu_result)
+            if filler:
+                logger.info(
+                    "[runtime] continuity filler call_uuid=%s state=%s msg=%r",
+                    session.call_uuid, state_at_entry, filler,
+                )
+                await self._speak_safe(filler)   # el procesamiento sigue en `proc`
+        return await proc
+
+    def _pick_filler(self, state: str, norm: str, nlu_result) -> Optional[str]:
+        """Escoge un mensaje de continuidad acorde al PROCESO real en ejecución,
+        sin repetir el anterior de forma consecutiva."""
+        if state == STATE_WAITING_GEO_CONTEXT:
+            category = "geo_context"
+        elif state == STATE_WAITING_ORIGIN:
+            span = getattr(nlu_result, "best_pickup", None) or norm
+            category = "address" if _is_street_text(span) or _is_street_text(norm) else "place"
+        else:
+            category = "generic"
+        options = _FILLER_MESSAGES.get(category, _FILLER_MESSAGES["generic"])
+        # Nunca repetir consecutivamente el mismo mensaje.
+        choices = [m for m in options if m != self._last_filler] or options
+        msg = random.choice(choices)
+        self._last_filler = msg
+        return msg
 
     async def _finish_turn(self, turn: VoiceTurnResult) -> None:
         """Habla el resultado y ejecuta la acción (create/hangup/listen)."""
