@@ -6,6 +6,9 @@ detectores y supresores de prueba, para que la lógica quede verificada sin
 depender de binarios externos.
 """
 
+import asyncio
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +34,7 @@ from services.audio.stages import (
     NormalizeStage,
     PreprocessStage,
     SpeakerFocusStage,
+    VoiceFocusStage,
     VoiceGateStage,
 )
 
@@ -722,7 +726,8 @@ def test_disabled_enhancer_is_a_passthrough():
     assert out == pcm
     assert ctx is None
     assert enhancer.latency_ms == 0.0
-    assert enhancer.stats() == {"enabled": False}
+    assert enhancer.stats()["enabled"] is False
+    assert enhancer.stats()["built"] is False
     enhancer.reset()  # sin pipeline no debe fallar
 
 
@@ -850,17 +855,373 @@ def test_onnx_denoiser_reduces_noise_and_measures_its_own_delay():
 def test_default_pipeline_reports_every_configured_stage():
     enhancer = CaptureEnhancer(rate=RATE, enabled=True)
     assert enhancer.pipeline is not None
+    # La puerta va ANTES del supresor: el detector ve la señal natural y el
+    # supresor no gasta CPU con el canal cerrado.
     expected = [
         "preprocess",
         "echo_control",
         "dereverb",
-        "denoise",
         "speaker_focus",
         "voice_gate",
+        "denoise",
+        "voice_focus",
         "normalize",
     ]
     assert enhancer.pipeline.stage_names == expected
     assert 0.0 < enhancer.latency_ms < 400.0
+
+
+# ── post-filtro de voz objetivo ──
+
+
+def _voice_focus(**overrides):
+    params = dict(
+        rate=RATE,
+        frame_size=256,
+        hop_size=128,
+        f0_min=70.0,
+        f0_max=320.0,
+        voicing_threshold=0.30,
+        harmonic_strength=3.0,
+        harmonic_limit_hz=2000.0,
+        harmonic_width_hz=60.0,
+        modulation_strength=1.0,
+        modulation_fast_ms=30.0,
+        modulation_slow_ms=500.0,
+        modulation_target=0.35,
+        floor=0.05,
+        smoothing=0.6,
+    )
+    params.update(overrides)
+    return VoiceFocusStage(**params)
+
+
+def _harmonic_voice(samples: int, f0: float = 120.0, amp: float = 0.3) -> np.ndarray:
+    """Señal con estructura de voz: fundamental + armónicos + ritmo silábico."""
+    t = np.arange(samples) / RATE
+    signal = np.zeros(samples, dtype=np.float64)
+    for harmonic in range(1, 12):
+        signal += (1.0 / harmonic) * np.sin(2 * np.pi * f0 * harmonic * t)
+    signal *= 0.5 + 0.5 * np.sin(2 * np.pi * 4.0 * t)  # sílabas a 4 Hz
+    signal /= max(np.max(np.abs(signal)), 1e-9)
+    return (amp * signal).astype(np.float32)
+
+
+def test_voice_focus_keeps_a_harmonic_voice():
+    stage = _voice_focus()
+    signal = _harmonic_voice(RATE * 2)
+    out = _feed(AudioPipeline([stage], input_rate=RATE), signal)
+    assert rms(out) > rms(signal) * 0.5
+    assert stage.stats()["voiced_ratio"] > 0.5
+    assert 100.0 < stage.stats()["f0_mean_hz"] < 140.0
+
+
+def test_voice_focus_attenuates_a_sustained_chord_more_than_a_voice():
+    """Un acorde sostenido (varias fundamentales, sin ritmo silábico) debe perder
+    más energía que una voz: es el criterio que ataca la música de fondo."""
+    t = np.arange(RATE * 2) / RATE
+    chord = np.zeros(t.size, dtype=np.float64)
+    for root in (220.0, 277.2, 329.6):
+        for harmonic in (1, 2, 3):
+            chord += np.sin(2 * np.pi * root * harmonic * t) / harmonic
+    chord = (0.3 * chord / np.max(np.abs(chord))).astype(np.float32)
+
+    voice = _harmonic_voice(RATE * 2)
+    chord_out = _feed(AudioPipeline([_voice_focus()], input_rate=RATE), chord)
+    voice_out = _feed(AudioPipeline([_voice_focus()], input_rate=RATE), voice)
+    chord_loss = rms(chord_out) / max(rms(chord), 1e-9)
+    voice_loss = rms(voice_out) / max(rms(voice), 1e-9)
+    assert chord_loss < voice_loss
+
+
+def test_voice_focus_attenuates_a_pure_tone():
+    stage = _voice_focus()
+    tone = _tone(RATE * 2, freq=1000.0, amp=0.3)
+    out = _feed(AudioPipeline([stage], input_rate=RATE), tone)
+    assert rms(out) < rms(tone) * 0.6
+
+
+def test_voice_focus_can_be_disabled_per_criterion():
+    signal = _harmonic_voice(RATE)
+    neutral = _voice_focus(harmonic_strength=0.0, modulation_strength=0.0)
+    out = _feed(AudioPipeline([neutral], input_rate=RATE), signal)
+    delay = 128
+    usable = min(out.size - delay, signal.size)
+    assert np.abs(out[delay : delay + usable] - signal[:usable]).max() < 1e-4
+
+
+def test_voice_focus_publishes_pitch_and_resets():
+    stage = _voice_focus()
+    ctx = FrameContext(timestamp=0.02, input_rate=RATE)
+    for _ in range(8):
+        stage.process(_harmonic_voice(BLOCK), ctx)
+    assert "voice_focus_f0" in ctx.notes
+    stage.reset()
+    assert stage.latency_ms == pytest.approx(16.0, abs=1.0)
+
+
+# ── concurrencia y aislamiento entre llamadas ──
+
+
+def test_onnx_sessions_are_shared_across_calls():
+    """Los pesos se cargan una vez por proceso, no una por llamada: con una sesión
+    por llamada, cuarenta llamadas serían cientos de MB de copias idénticas."""
+    from services.audio.runtime_pool import session_count
+
+    enhancers = [CaptureEnhancer(rate=RATE, enabled=True) for _ in range(6)]
+    for enhancer in enhancers:
+        enhancer.process(float_to_pcm16(_tone(BLOCK)), timestamp=0.02)
+    # Con modelos presentes son 2 sesiones (VAD + supresor); sin modelos, 0.
+    assert session_count() <= 2
+
+
+def test_calls_do_not_share_state():
+    """Dos llamadas con la misma entrada dan la misma salida, y lo que pasa en una
+    no altera a la otra."""
+    first = CaptureEnhancer(rate=RATE, enabled=True)
+    second = CaptureEnhancer(rate=RATE, enabled=True)
+    signal = _harmonic_voice(RATE)
+
+    out_a, _ = first.process(float_to_pcm16(signal[:BLOCK]), timestamp=0.02)
+    out_b, _ = second.process(float_to_pcm16(signal[:BLOCK]), timestamp=0.02)
+    assert out_a == out_b  # mismo punto de partida, ningún estado compartido
+
+    # La segunda llamada procesa silencio; la primera debe seguir su curso igual
+    # que si la otra no existiera.
+    reference = CaptureEnhancer(rate=RATE, enabled=True)
+    reference.process(float_to_pcm16(signal[:BLOCK]), timestamp=0.02)
+    for index in range(1, 12):
+        chunk = signal[index * BLOCK : (index + 1) * BLOCK]
+        second.process(float_to_pcm16(np.zeros(BLOCK, dtype=np.float32)), timestamp=index * 0.02)
+        out_first, _ = first.process(float_to_pcm16(chunk), timestamp=index * 0.02)
+        out_ref, _ = reference.process(float_to_pcm16(chunk), timestamp=index * 0.02)
+    assert out_first == out_ref
+
+
+def test_pipeline_is_built_off_the_constructor():
+    """La construcción (carga de modelos, ~1 s la primera vez) no ocurre en el
+    constructor: si ocurriera, bloquearía el bucle de eventos al entrar la llamada."""
+    enhancer = CaptureEnhancer(rate=RATE, enabled=True)
+    assert enhancer.stats()["built"] is False
+    enhancer.process(float_to_pcm16(_tone(BLOCK)), timestamp=0.02)
+    assert enhancer.stats()["built"] is True
+
+
+def test_process_async_runs_outside_the_event_loop():
+    enhancer = CaptureEnhancer(rate=RATE, enabled=True)
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    original = enhancer._process_locked
+
+    def spy(*args, **kwargs):
+        seen.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    enhancer._process_locked = spy
+
+    async def scenario():
+        await enhancer.process_async(float_to_pcm16(_tone(BLOCK)), timestamp=0.02)
+
+    asyncio.run(scenario())
+    assert seen and all(ident != loop_thread for ident in seen)
+
+
+def test_process_async_degrades_instead_of_queueing_when_saturated(monkeypatch):
+    """Saturado, el pipeline entrega el PCM sin procesar en vez de acumular
+    retardo: el atraso de una llamada en tiempo real no se recupera nunca."""
+    enhancer = CaptureEnhancer(rate=RATE, enabled=True)
+    enhancer._block_timeout = 0.001
+
+    def slow(*args, **kwargs):
+        time.sleep(0.05)
+        return b"", None
+
+    enhancer._process_locked = slow
+    pcm = float_to_pcm16(_tone(BLOCK))
+
+    async def scenario():
+        return await enhancer.process_async(pcm, timestamp=0.02)
+
+    out, ctx = asyncio.run(scenario())
+    assert out == pcm and ctx is None
+    assert enhancer.blocks_degraded == 1
+    assert enhancer.stats()["blocks_degraded"] == 1
+
+
+def test_only_one_block_per_call_is_ever_in_flight():
+    """Saturado, la llamada NO encola: un bloque abandonado sigue corriendo en su
+    hilo y hasta que termine no se admite otro. Es lo que garantiza que el estado
+    recurrente nunca se muta desde dos hilos a la vez."""
+    enhancer = CaptureEnhancer(rate=RATE, enabled=True)
+    enhancer._block_timeout = 0.005
+    concurrent = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def slow(*args, **kwargs):
+        nonlocal concurrent, peak
+        with lock:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        time.sleep(0.05)
+        with lock:
+            concurrent -= 1
+        return b"", None
+
+    enhancer._process_locked = slow
+    pcm = float_to_pcm16(_tone(BLOCK))
+
+    async def scenario():
+        for _ in range(10):
+            await enhancer.process_async(pcm, timestamp=0.02)
+            await asyncio.sleep(0.001)
+
+    asyncio.run(scenario())
+    assert peak == 1
+    assert enhancer.blocks_degraded > 0
+
+
+def test_worker_pool_and_call_limit_are_bounded():
+    from services.audio.runtime_pool import (
+        available_cpus,
+        default_worker_threads,
+        get_audio_executor,
+        max_concurrent_calls,
+    )
+
+    assert available_cpus() >= 1
+    assert default_worker_threads() >= 1
+    assert get_audio_executor() is get_audio_executor()  # uno por proceso
+    assert max_concurrent_calls() >= 1
+
+
+def test_concurrent_calls_stay_isolated_under_threads():
+    """Varias llamadas procesando a la vez en el pool: cada una debe producir el
+    mismo resultado que si estuviera sola."""
+    signal = _harmonic_voice(RATE)
+    blocks = [signal[i * BLOCK : (i + 1) * BLOCK] for i in range(20)]
+
+    solo = CaptureEnhancer(rate=RATE, enabled=True)
+    expected = b"".join(
+        solo.process(float_to_pcm16(block), timestamp=(index + 1) * 0.02)[0]
+        for index, block in enumerate(blocks)
+    )
+
+    async def one_call():
+        enhancer = CaptureEnhancer(rate=RATE, enabled=True)
+        chunks = []
+        for index, block in enumerate(blocks):
+            out, _ = await enhancer.process_async(
+                float_to_pcm16(block), timestamp=(index + 1) * 0.02
+            )
+            chunks.append(out)
+        return b"".join(chunks)
+
+    async def scenario():
+        return await asyncio.gather(*[one_call() for _ in range(6)])
+
+    results = asyncio.run(scenario())
+    assert all(result == expected for result in results)
+
+
+# ── ahorro de CPU con el canal cerrado ──
+
+
+class _CountingEnhancer:
+    """Supresor de prueba que cuenta cuántas veces se ejecuta de verdad."""
+
+    def __init__(self):
+        self.output_delay_samples = 0
+        self.calls = 0
+        self.bypassed = 0
+
+    def enhance(self, block):
+        self.calls += 1
+        return block
+
+    def advance_silent(self, block):
+        self.bypassed += 1
+        return np.zeros(block.size, dtype=np.float32)
+
+    def reset(self):
+        pass
+
+
+def test_denoise_skips_inference_after_sustained_silence():
+    enhancer = _CountingEnhancer()
+    stage = DenoiseStage(
+        enhancer,
+        rate=RATE,
+        attn_limit_db=None,
+        bypass_on_speech_absent=True,
+        bypass_hold_ms=100.0,
+    )
+    silence = np.zeros(BLOCK, dtype=np.float32)
+    for index in range(20):
+        stage.process(silence, FrameContext(timestamp=index * 0.02, input_rate=RATE))
+    assert enhancer.bypassed > 10          # dejó de inferir
+    assert enhancer.calls <= 6            # solo durante la retención inicial
+    assert stage.stats()["bypass_ratio"] > 0.5
+
+
+def test_denoise_resumes_inference_as_soon_as_speech_returns():
+    enhancer = _CountingEnhancer()
+    stage = DenoiseStage(
+        enhancer,
+        rate=RATE,
+        attn_limit_db=None,
+        bypass_on_speech_absent=True,
+        bypass_hold_ms=100.0,
+    )
+    silence = np.zeros(BLOCK, dtype=np.float32)
+    for index in range(20):
+        stage.process(silence, FrameContext(timestamp=index * 0.02, input_rate=RATE))
+    before = enhancer.calls
+    speech_ctx = FrameContext(timestamp=0.42, input_rate=RATE, speech_active=True)
+    stage.process(_tone(BLOCK), speech_ctx)
+    assert enhancer.calls == before + 1
+
+
+def test_denoise_bypass_preserves_the_sample_timeline():
+    """El ahorro no debe desplazar la línea de tiempo: con y sin bypass la etapa
+    entrega el mismo número de muestras."""
+    signal = np.concatenate([_tone(BLOCK * 10, amp=0.0), _tone(BLOCK * 10)])
+    counts = {}
+    for bypass in (False, True):
+        stage = DenoiseStage(
+            _CountingEnhancer(),
+            rate=RATE,
+            attn_limit_db=None,
+            bypass_on_speech_absent=bypass,
+            bypass_hold_ms=40.0,
+        )
+        total = 0
+        for index in range(0, signal.size, BLOCK):
+            ctx = FrameContext(timestamp=index / RATE, input_rate=RATE)
+            total += stage.process(signal[index : index + BLOCK], ctx).size
+        counts[bypass] = total
+    assert counts[False] == counts[True]
+
+
+@pytest.mark.skipif(
+    _model_missing("models/dpdfnet2_8khz.onnx"),
+    reason="modelo de supresión ausente (python scripts/fetch_audio_models.py)",
+)
+def test_onnx_enhancer_advance_silent_matches_the_frame_accounting():
+    from services.audio.stages.denoise import OnnxStreamEnhancer
+
+    reference = OnnxStreamEnhancer("models/dpdfnet2_8khz.onnx", RATE)
+    bypassed = OnnxStreamEnhancer("models/dpdfnet2_8khz.onnx", RATE)
+    signal = _noise(BLOCK * 12, amp=0.05)
+    produced_real = sum(
+        reference.enhance(signal[i : i + BLOCK]).size
+        for i in range(0, signal.size, BLOCK)
+    )
+    produced_skip = sum(
+        bypassed.advance_silent(signal[i : i + BLOCK]).size
+        for i in range(0, signal.size, BLOCK)
+    )
+    assert produced_real == produced_skip
 
 
 def test_stage_fallbacks_work_without_any_model(monkeypatch):

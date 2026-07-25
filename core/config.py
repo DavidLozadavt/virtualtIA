@@ -103,12 +103,34 @@ class Settings(BaseSettings):
     # cada una desactivable y sustituible; el orden lo fija AUDIO_PIPELINE_STAGES.
     # Ninguna constante vive en el código: todo se ajusta desde aquí / .env.
     AUDIO_PIPELINE_ENABLED: bool = True
+    # La puerta de voz va ANTES del supresor, por dos razones medidas: el detector
+    # ve la señal natural (los artefactos de supresión lo hacen abrir con ruido de
+    # fondo) y el supresor no gasta CPU con el canal cerrado.
     AUDIO_PIPELINE_STAGES: str = (
-        "preprocess,echo_control,dereverb,denoise,speaker_focus,voice_gate,normalize"
+        "preprocess,echo_control,dereverb,speaker_focus,voice_gate,"
+        "denoise,voice_focus,normalize"
     )
     # strict=True propaga el error de una etapa (solo para pruebas); en producción
     # la etapa se desactiva y la llamada continúa.
     AUDIO_PIPELINE_STRICT: bool = False
+    # Hilos del ejecutor donde corre el procesamiento de audio de TODAS las
+    # llamadas (fuera del bucle de eventos). 0 = núcleos disponibles. El trabajo
+    # está limitado por CPU: más hilos que núcleos solo añaden cambios de contexto.
+    AUDIO_WORKER_THREADS: int = 0
+    # Coste medido de una llamada en núcleos, para derivar el tope de llamadas
+    # simultáneas del proceso. Con el supresor neuronal y bypass en silencio el
+    # consumo es ~0.25, pero el tope se fija en 0.4 para dejar margen de latencia:
+    # medido en 8 núcleos, 20 llamadas dan p95 de 94 ms por bloque y 24 ya suben a
+    # 108 ms. Sin bypass el coste real es ~0.6. Medir en el servidor y ajustar.
+    AUDIO_CORES_PER_CALL: float = 0.4
+    # Tope explícito de llamadas simultáneas (0 = derivarlo del coste por llamada).
+    AUDIO_MAX_CONCURRENT_CALLS: int = 0
+    # Presupuesto por bloque: si el pipeline no responde en este tiempo el sistema
+    # está saturado y se entrega el PCM sin procesar en vez de acumular retardo.
+    # Es una válvula de seguridad contra la deriva, no un planificador: se pone
+    # holgada a propósito. Con el pipeline caliente ningún bloque se acerca a esto;
+    # si se degradan bloques con carga normal, sobra concurrencia, no timeout.
+    AUDIO_BLOCK_TIMEOUT_MS: float = 150.0
 
     # Preacondicionamiento: paso-alto contra viento/retumbe/motor y límite de picos.
     AUDIO_HIGHPASS_HZ: float = 90.0
@@ -148,13 +170,31 @@ class Settings(BaseSettings):
     # firma (spec, state) → (spec, state), no hay que tocar código.
     AUDIO_DENOISE_BACKEND: str = "onnx"        # onnx | spectral | none
     AUDIO_DENOISE_MODEL_PATH: str = "models/dpdfnet2_8khz.onnx"
+    # Hilos internos de ONNX Runtime. DEJAR EN 1: medido, con 4 hilos el modelo
+    # consume 3.4 núcleos para hacer 0.5 núcleos de trabajo (espera activa del
+    # pool de ORT). El paralelismo del sistema viene de atender varias llamadas,
+    # no de repartir la inferencia de una trama de 20 ms.
     AUDIO_DENOISE_THREADS: int = 1
+    # Salta la inferencia mientras la puerta de voz lleva cerrada
+    # AUDIO_DENOISE_BYPASS_HOLD_MS. Es la mayor economía de CPU del pipeline (el
+    # supresor es ~90 % del coste y la mayoría de los bloques de una conversación
+    # son no-habla). Requiere que voice_gate vaya antes que denoise.
+    AUDIO_DENOISE_BYPASS_ON_SILENCE: bool = True
+    AUDIO_DENOISE_BYPASS_HOLD_MS: float = 400.0
     # Tasa a la que trabaja el supresor; 0 = la del pipeline. Un modelo de 16 kHz
     # se conecta poniendo 16000: el pipeline remuestrea a su alrededor.
     AUDIO_DENOISE_RATE: int = 0
-    # Límite de atenuación en dB: acota cuánto puede borrar el modelo para que no
-    # se lleve fonemas (0 = sin supresión; negativo = sin límite).
-    AUDIO_DENOISE_ATTN_LIMIT_DB: float = 12.0
+    # Límite GLOBAL de atenuación en dB: mezcla la señal original entera unos dB
+    # por debajo. Desactivado por defecto (negativo = sin límite) porque con música
+    # de fondo devuelve la música completa a -límite dB, y vuelve a filtrarse hacia
+    # el STT justo cuando el usuario habla (medido: cuesta 5.4 dB de supresión).
+    # La protección de fonemas la hace AUDIO_DENOISE_PROTECT_*, que es selectiva.
+    AUDIO_DENOISE_ATTN_LIMIT_DB: float = -1.0
+    # Protección selectiva: ganancia mínima garantizada SOLO en las bandas donde el
+    # modelo conservó señal (las que considera voz). Evita que una supresión
+    # agresiva se lleve fricativas sin reinyectar la escena acústica completa.
+    AUDIO_DENOISE_PROTECT_FLOOR_DB: float = 12.0   # 0 = sin protección
+    AUDIO_DENOISE_PROTECT_MIN_GAIN: float = 0.3    # ganancia del modelo que marca "hay voz"
     # Retardo entrada→salida del modelo, necesario para alinear la mezcla del
     # límite de atenuación. -1 = medirlo automáticamente al cargar el modelo.
     AUDIO_DENOISE_DELAY_SAMPLES: int = -1
@@ -167,6 +207,23 @@ class Settings(BaseSettings):
     AUDIO_FOCUS_MARGIN_DB: float = 18.0       # dB por debajo del dominante = fondo
     AUDIO_FOCUS_SILENCE_DBFS: float = -55.0
     AUDIO_FOCUS_MIN_FRAMES: int = 40          # ventana mínima antes de marcar fondo
+
+    # Post-filtro de voz objetivo: atenúa lo que no encaja con una voz humana
+    # (acordes, notas sostenidas, zumbidos) por estructura armónica del tono
+    # dominante y por modulación silábica. Ataca la música, que el supresor
+    # neuronal no está entrenado para quitar.
+    AUDIO_FOCUS_F0_MIN_HZ: float = 70.0
+    AUDIO_FOCUS_F0_MAX_HZ: float = 320.0
+    AUDIO_FOCUS_VOICING_THRESHOLD: float = 0.30   # confianza de sonoridad para aplicar el criterio armónico
+    AUDIO_FOCUS_HARMONIC_STRENGTH: float = 3.0    # 0 = desactivado (3.0 = mejor medido)
+    AUDIO_FOCUS_HARMONIC_LIMIT_HZ: float = 2000.0 # por encima manda solo la modulación
+    AUDIO_FOCUS_HARMONIC_WIDTH_HZ: float = 60.0   # anchura admitida alrededor de cada armónico
+    AUDIO_FOCUS_MODULATION_STRENGTH: float = 1.0  # 0 = desactivado
+    AUDIO_FOCUS_MODULATION_FAST_MS: float = 30.0
+    AUDIO_FOCUS_MODULATION_SLOW_MS: float = 500.0
+    AUDIO_FOCUS_MODULATION_TARGET: float = 0.35   # profundidad de modulación considerada "voz"
+    AUDIO_FOCUS_POST_FLOOR: float = 0.05
+    AUDIO_FOCUS_POST_SMOOTHING: float = 0.6
 
     # Puerta de voz (Silero VAD sobre ONNX, 8 kHz nativo).
     AUDIO_VAD_BACKEND: str = "silero"         # silero | energy
