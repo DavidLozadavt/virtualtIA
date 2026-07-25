@@ -272,6 +272,7 @@ def test_filler_matches_process_state_and_never_repeats():
 def test_closed_mic_drops_turns_and_audio():
     """Con la escucha cerrada: ni se encolan turnos, ni se envía audio al STT,
     ni se evalúa barge-in. Al reabrir, la escucha se reanuda."""
+    from services.audio import CaptureEnhancer
     from services.voice.endpointing import TurnReady
     from services.voice.runtime import VoiceCallRuntime
 
@@ -293,6 +294,11 @@ def test_closed_mic_drops_turns_and_audio():
 
     rt.recorder = _Rec()
     rt.stt = _STT()
+    # Este test aísla la compuerta de escucha: el pipeline de audio se apaga para
+    # que el resultado no dependa de si la señal de prueba es voz reconocible
+    # (con el pipeline activo, un patrón sintético sin voz se silencia a propósito
+    # — eso se prueba aparte, en tests/test_audio_pipeline.py).
+    rt.enhancer = CaptureEnhancer(rate=8000, enabled=False)
 
     rt._close_mic()
     assert rt._mic_open is False

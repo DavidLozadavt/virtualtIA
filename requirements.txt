@@ -14,3 +14,8 @@ pusher>=3.3.1
 redis>=5.0.0
 numpy>=1.24.0
 scipy>=1.11.0
+
+# Pipeline de mejora de audio (services/audio): inferencia CPU de los modelos de
+# supresión de ruido (DPDFNet 8 kHz) y de detección de voz (Silero VAD). Los pesos
+# NO van en el repo: se descargan con `python scripts/fetch_audio_models.py`.
+onnxruntime>=1.20.0

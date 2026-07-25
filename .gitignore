@@ -7,5 +7,7 @@ logs/*
 !logs/.gitkeep
 scratch/*
 !scratch/.gitkeep
+# Pesos de los modelos de audio (se descargan con scripts/fetch_audio_models.py)
+models/*.onnx
 .claude/*
 CLAUDE.md
