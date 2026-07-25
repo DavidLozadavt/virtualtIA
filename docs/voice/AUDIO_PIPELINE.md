@@ -22,17 +22,24 @@ echo_control    alineación GCC-PHAT + filtro adaptativo MDF + supresión residu
   ▼
 dereverb        supresión estadística de cola tardía de sala (Lebart)
   ▼
-denoise         DPDFNet 8 kHz nativo (ONNX/CPU) con atenuación acotada
-  ▼
 speaker_focus   marca voz de fondo por dominancia de nivel (TV, oficina, terceros)
   ▼
 voice_gate      Silero VAD v6 + puerta retroactiva con pre-roll e histéresis
+  ▼
+denoise         DPDFNet 8 kHz nativo (ONNX/CPU); se salta con el canal cerrado
+  ▼
+voice_focus     post-filtro de voz objetivo: armónicos del tono dominante + modulación
   ▼
 normalize       ganancia lenta a nivel objetivo + limitador suave
   │
   ▼
 PCM16 8 kHz → OpenAI Realtime STT
 ```
+
+**La puerta va antes del supresor**, y eso está medido, no supuesto: el detector
+ve la señal natural (los artefactos de supresión lo hacían abrir con ruido de
+fondo: fuga de −16 dB durante el silencio, frente a silencio absoluto con este
+orden), y el supresor no gasta CPU mientras el canal está cerrado.
 
 Referencia de eco: el PCM del TTS que Lyra reproduce se publica en
 `FarEndReference` (`runtime._play_text`), anclado al instante del
@@ -118,21 +125,66 @@ Lo que sí es correcto y está implementado aquí, en el orden en que hace falta
 4. **Detección de doble habla** por coherencia captura/eco estimado: si el usuario
    habla mientras suena el eco, el filtro **se congela pero sigue filtrando**.
 
-### Voces de fondo: dominancia de nivel
+### Voces de fondo y música: dos mecanismos distintos
 
 Ni el mejor VAD resuelve la televisión encendida: **eso es voz humana** y la
-acepta con razón. Lo que distingue al interlocutor es la distancia al micrófono.
-`speaker_focus` mantiene una ventana deslizante de niveles **integrados por
-sílaba (~200 ms)**, toma el percentil 85 como nivel del hablante principal y
-marca como fondo lo que quede 18 dB por debajo. Integrar por sílaba es lo que
-hace que funcione: el habla normal tiene 15-20 dB de rango dinámico *dentro* de
-una misma palabra, así que comparar tramas de 20 ms marcaría como "fondo" media
-conversación del propio usuario (medido: 209 tramas falsas de 383 antes de
-integrar, 21 después).
+acepta con razón. Y un supresor de ruido no resuelve la música: la familia
+DeepFilterNet —a la que pertenece DPDFNet— está entrenada con ruido como
+adversario, y su propia documentación reconoce que no sirve para reducir música.
+Se atacan por separado:
 
-Se descartó enrolar la voz del usuario (Personal VAD, extracción de hablante
-objetivo): en una llamada entrante nunca se oyó antes a esa persona, y los
-*embeddings* de hablante se degradan mucho en banda telefónica de 8 kHz.
+**1. `speaker_focus` — distancia al micrófono.** Quien habla al teléfono domina el
+nivel; la televisión y los terceros llegan sistemáticamente más abajo. Se mantiene
+una ventana deslizante de niveles **integrados por sílaba (~200 ms)**, se toma el
+percentil 85 como nivel del hablante principal y se marca como fondo lo que quede
+18 dB por debajo. Integrar por sílaba es lo que hace que funcione: el habla normal
+tiene 15-20 dB de rango dinámico *dentro* de una misma palabra, así que comparar
+tramas de 20 ms marcaría como "fondo" media conversación del propio usuario
+(medido: 209 tramas falsas de 383 antes de integrar, 21 después).
+
+**2. `voice_focus` — estructura de voz.** Post-filtro con dos criterios ortogonales
+al supresor neuronal, ambos sin modelo y de coste marginal:
+
+- *Armónicos del tono dominante.* Una voz tiene una fundamental con sus armónicos;
+  la música tiene varias fundamentales a la vez (un acorde) y el ruido ninguna. Se
+  estima el tono de la trama por autocorrelación (reutilizando la FFT ya hecha) y
+  se atenúa la energía que no encaja en su rejilla de armónicos. Solo por debajo de
+  2 kHz y solo en tramas sonorizadas: las consonantes sordas son inarmónicas a
+  propósito y borrarlas costaría palabras.
+- *Modulación silábica.* El habla varía de nivel 4-8 veces por segundo; una nota
+  sostenida, un ventilador o un motor no. Por banda se compara la envolvente rápida
+  con la lenta.
+
+Medido: mejora en **los seis tipos de fondo probados**, con un coste de 0.5-0.7 dB
+sobre el nivel de la voz y sin cambiar la fidelidad de forma de onda sobre voz
+limpia (0.856 con y sin la etapa).
+
+### Extracción de hablante objetivo: por qué no
+
+Sería la solución ideal ("quédate solo con esta voz"), y se investigó a fondo. No
+es desplegable hoy, y conviene dejar escrito por qué para no repetir el análisis:
+
+- **Ningún modelo abierto de TSE sirve**: los buenos (VoiceFilter, SpeakerBeam-SS,
+  TEA-PSE, TargetVoice) no publicaron pesos; los que sí (USEF-TSE, SEF-PNet) no son
+  causales; `AV_MossFormer2_TSE` necesita **vídeo de la cara**; el único TSE causal
+  abierto del reto REAL-TSE 2026 quedó **último de 13**.
+- **Todos exigen un audio de enrolamiento de 5-10 s del usuario**, que en una
+  llamada entrante no existe. La literatura de 2026 que intenta obtenerlo del
+  propio comienzo de la llamada concluye que **ninguno de los modelos probados
+  mejora la tasa de error frente a no procesar nada**.
+- **`weya-ai/hush`** (Apache-2.0) es el único modelo abierto de aislamiento de voz
+  principal *sin* enrolamiento, y se descartó con una prueba propia: su ONNX no
+  expone el estado recurrente, así que **no puede ejecutarse trama a trama**
+  (procesado por tramas, el error contra el procesado por secuencia completa es del
+  36 % de la escala de la señal). Solo serviría por bloques de cientos de ms, que es
+  latencia inaceptable para conversación.
+- Lo que la industria vende para esto (Krisp BVC, ai-coustics Voice Focus) es
+  licencia comercial con clave en el camino de la llamada.
+
+También se probó y descartó, con medición propia: **`dpdfnet8_8khz`** (el modelo
+grande) da *peor* resultado sobre música que el mediano (−13.5 dB frente a
+−14.8 dB) al doble de CPU; y **encadenar el supresor dos o tres veces** solo aporta
+0.4 dB por cada pasada completa de coste.
 
 ---
 
@@ -170,45 +222,123 @@ Por eso, en este pipeline:
 
 ## 4. Comportamiento medido
 
-Medido con voz real en español (TTS es-CO decodificado a 8 kHz, 12.3 s), bloques
-de 20 ms, configuración por defecto, en un portátil Windows (Python 3.14,
-ONNX Runtime 1.28, 1 hilo).
+Voz real en español (TTS es-CO decodificada a 8 kHz), bloques de 20 ms,
+configuración por defecto, portátil Windows (Python 3.14, ONNX Runtime 1.28,
+1 hilo por inferencia). Las cifras de fondo se obtienen descomponiendo la salida
+en voz + fondo por mínimos cuadrados, con alineación por correlación.
 
-| Escenario | Energía que llega al STT | Tramas de voz abiertas | Notas |
+### Supresión de fondo **mientras el usuario habla** (el fallo reportado)
+
+| Fondo | Antes | Ahora | Voz |
 |---|---|---|---|
-| Voz limpia | 81 % | 91 % | fidelidad de forma de onda 0.85 |
-| Voz + ruido de motor (SNR ≈ 6 dB) | 50 % | 90 % | el ruido se va, la voz se mantiene |
-| **Ruido de motor solo** | **0.000 %** | **0 %** | silencio digital absoluto |
-| **Ruido de cafetería / blanco solo** | prob. VAD máx. **0.00** | — | 0 de 383 tramas clasificadas como voz |
-| Eco de altavoz solo (retardos 50-625 ms) | 0-33 % | 15-22 % | ERLE medio **19-27 dB** |
-| Doble habla (eco + usuario) | — | 58 % | voz del usuario preservada (corr. 0.74) |
+| Música (SNR 7.8 dB) | −12.4 dB | **−20.7 dB** | −3.2 dB |
+| Otra persona hablando | −4.5 dB | **−8.5 dB** | −2.7 dB |
+| Cafetería / varias voces | −10.2 dB | **−19.6 dB** | −3.3 dB |
+| Motor | −14.6 dB | **−25.2 dB** | −3.3 dB |
 
-Estimación de retardo de eco: **exacta** (error 0 muestras) para retardos de 400,
-1400, 2400, 3200 y 5000 muestras (50 a 625 ms).
+Relación voz/fondo en la salida: música 17.6 → **25.4 dB**, cafetería 9.6 →
+**18.1 dB**, motor 12.7 → **22.7 dB**.
 
-**Latencia estructural: 168 ms** con la configuración por defecto
-(`CaptureEnhancer.latency_ms` lo reporta y `AudioPipeline.stats()` lo desglosa):
+De dónde sale la mejora, por partes:
 
-| Etapa | Latencia |
+1. **Retirar el colchón global de atenuación (+5.4 dB).** Era el defecto de la
+   versión anterior (`attn_limit_db=12`) y la causa directa de "la música vuelve
+   cuando el usuario habla": mezclaba la señal original entera 12 dB por debajo, así
+   que garantizaba un lecho musical perfectamente transcribible en cuanto la puerta
+   abría. La protección de fonemas ahora es **selectiva por banda** (solo donde el
+   modelo conservó señal, es decir donde hay voz), y por eso no reinyecta escena.
+2. **Puerta antes del supresor.** Elimina la fuga durante el silencio que aparecía
+   al quitar el colchón (los artefactos de supresión hacían abrir al detector):
+   −16.3 dB → silencio absoluto.
+3. **`voice_focus` (+2.0 a +10.3 dB según el fondo).** Mejora en los seis fondos
+   probados: música −3.5, otra persona −2.2, cafetería −2.0, motor −2.0, ruido
+   blanco −7.7, impulsos −10.3 dB.
+
+### Otros comportamientos
+
+| Escenario | Resultado |
 |---|---|
-| `echo_control` (STFT 256/128) | 16 ms |
-| `dereverb` (STFT 256/128) | 16 ms |
-| `denoise` (retardo del modelo, medido) | 40 ms |
-| `voice_gate` (pre-roll retroactivo) | 96 ms |
+| Ruido solo (motor, cafetería, blanco) | **silencio digital**, 0 de 383 tramas clasificadas como voz |
+| Voz limpia | 91 % de tramas abiertas, fidelidad de onda 0.85 |
+| Eco de altavoz (retardos 50-625 ms) | ERLE medio **19-27 dB**, retardo estimado con **error 0 muestras** |
+| Doble habla (eco + usuario) | voz del usuario preservada (correlación 0.74) |
 
-El pre-roll es la única latencia deliberada y es lo que evita decapitar la
-consonante inicial de cada palabra: el detector confirma la voz unas tramas
-después de que empezó, así que la puerta retiene esas tramas y **abre hacia
-atrás**. Se ajusta con `AUDIO_GATE_PRE_ROLL_MS`.
+**Latencia estructural: 184 ms** (`CaptureEnhancer.latency_ms` lo reporta):
+echo_control 16 ms + dereverb 16 ms + voice_gate 96 ms (pre-roll retroactivo) +
+denoise 40 ms (retardo propio del modelo, medido) + voice_focus 16 ms.
 
-**Coste de CPU: RTF ≈ 0.47 por llamada** (≈ 2 llamadas concurrentes por núcleo),
-de las cuales 0.39 son del supresor neuronal. Para reducirlo:
-`AUDIO_DENOISE_BACKEND=spectral` (respaldo DSP, coste marginal) o `none`.
+### Coste y concurrencia
+
+Llamada realista (40 % habla, 60 % silencio), 8 núcleos:
+
+| Configuración | CPU por bloque de 20 ms | RTF |
+|---|---|---|
+| Completo, con bypass en silencio | **5.0 ms** | 0.25 |
+| Completo, sin bypass | 9.0 ms | 0.45 |
+| `AUDIO_DENOISE_BACKEND=spectral` | 1.25 ms | 0.06 |
+
+Escalado real por el camino asíncrono, a ritmo de 20 ms por bloque, sin ningún
+bloque degradado hasta 24 llamadas:
+
+| Llamadas simultáneas | p50 por bloque | p95 | Bloques degradados |
+|---|---|---|---|
+| 4 | 7.8 ms | 26.8 ms | 0 |
+| 8 | 16.6 ms | 47.8 ms | 0 |
+| 12 | 27.6 ms | 66.3 ms | 0 |
+| 20 | 51.7 ms | 93.6 ms | 0 |
+| 24 | 64.2 ms | 107.8 ms | 0 |
+
+**Memoria: ~17 MB de modelos por proceso** (compartidos, no por llamada) y
+**~2.5 MB por llamada**. Las sesiones ONNX son 2 con una llamada y 2 con cuarenta —
+`stats()["onnx_sessions"]` lo expone precisamente para detectar una fuga.
+
+Recomendación de dimensionado: **~1.5 llamadas por núcleo** para mantener p50 por
+debajo de 30 ms. `AUDIO_MAX_CONCURRENT_CALLS` (o `AUDIO_CORES_PER_CALL`) fija el
+tope que `max_concurrent_calls()` devuelve.
 
 > **El no-habla se silencia, no se descarta.** El flujo conserva su línea de
 > tiempo porque el detector de fin de enunciado de OpenAI mide *silencio* para
 > cerrar el turno: descartar tramas haría que nunca viera silencio y el turno no
-> cerraría nunca.
+> cerraría nunca. Por la misma razón el ahorro de CPU en silencio emite exactamente
+> tantas muestras como habría producido la inferencia.
+
+---
+
+## 4 bis. Aislamiento entre llamadas
+
+Requisito: ninguna llamada puede contaminar a otra. Cómo se cumple, elemento por
+elemento:
+
+| Recurso | Alcance |
+|---|---|
+| Buffers, colas, solapes, líneas de retardo | **por llamada** (instancia de etapa) |
+| Estado recurrente de los modelos (ONNX) | **por llamada** — viaja como tensor de entrada/salida, no vive en la sesión |
+| Referencia de eco (`FarEndReference`) | **por llamada**, con `threading.Lock` (el playback publica desde el bucle, la captura consume desde un hilo) |
+| Pesos de los modelos (`InferenceSession`) | **compartidos por proceso**, inmutables y seguros para `run()` concurrente |
+| Ejecutor de hilos | **compartido por proceso**, acotado a los núcleos disponibles |
+| Métricas | por llamada |
+
+Las sesiones se comparten a propósito: una por llamada cargaría una copia completa
+de los pesos (~14 MB) y tardaría ~175 ms en construirse, cada vez. Como el estado
+recurrente es explícito, compartir la sesión no comparte **nada mutable**, que es
+la única lectura de "modelos aislados" que además escala.
+
+Tres garantías que el código hace explícitas porque son fáciles de romper:
+
+1. **Un solo bloque en vuelo por llamada.** Si un bloque agota su presupuesto, el
+   siguiente **no** se procesa en paralelo: se entrega sin procesar. Sin esto, dos
+   hilos mutarían los mismos buffers y el resultado sería basura silenciosa.
+2. **El orden lo garantiza el `await` de `runtime._on_audio`.** El transporte no lee
+   el evento siguiente hasta que el actual termina. Convertirlo en `create_task()`
+   reordenaría los bloques entre hilos y corrompería el estado recurrente.
+3. **Nada de `reset()` desde el bucle mientras hay un bloque en vuelo.** El runtime
+   no lo hace; cualquier código nuevo que lo hiciera introduciría una carrera.
+
+Escalado horizontal: cada llamada es un WebSocket independiente y no comparte nada
+con las demás, así que varios procesos (workers de uvicorn) o varias instancias
+detrás de un balanceador funcionan sin estado compartido ni enrutado pegajoso. Al
+repartir en N workers, fijar `AUDIO_WORKER_THREADS = núcleos / N` para no
+sobre-suscribir.
 
 ---
 
@@ -262,6 +392,14 @@ mágicos en el código. Los más relevantes:
 | `AUDIO_GATE_ECHO_PENALTY` | `0.3` | Evidencia extra exigida con eco (≥ 1.0 = veto absoluto). |
 | `AUDIO_FOCUS_MARGIN_DB` | `18.0` | dB por debajo del hablante dominante para considerar fondo. |
 | `AUDIO_ECHO_SEARCH_MS` | `700.0` | Rango de búsqueda del retardo de ida y vuelta. |
+| `AUDIO_FOCUS_HARMONIC_STRENGTH` | `3.0` | Fuerza del criterio armónico de `voice_focus` (0 = desactivado). |
+| `AUDIO_FOCUS_MODULATION_STRENGTH` | `1.0` | Fuerza del criterio de modulación silábica. |
+| `AUDIO_DENOISE_PROTECT_FLOOR_DB` | `12.0` | Protección de fonemas selectiva por banda (sustituye al colchón global). |
+| `AUDIO_DENOISE_BYPASS_ON_SILENCE` | `True` | Salta la inferencia con el canal cerrado (mitad de CPU). |
+| `AUDIO_WORKER_THREADS` | `0` | Hilos del ejecutor de audio (0 = núcleos disponibles, con cuota de cgroup). |
+| `AUDIO_MAX_CONCURRENT_CALLS` | `0` | Tope de llamadas simultáneas (0 = derivarlo de `AUDIO_CORES_PER_CALL`). |
+| `AUDIO_BLOCK_TIMEOUT_MS` | `150.0` | Válvula contra la deriva: por encima, el bloque pasa sin procesar. |
+| `AUDIO_DENOISE_THREADS` | `1` | **No cambiar**: con 4 hilos el modelo consume 3.4 núcleos para 0.5 de trabajo. |
 
 ### Sustituir un modelo
 
@@ -278,20 +416,32 @@ mágicos en el código. Los más relevantes:
 
 ## 7. Límites conocidos y qué medir
 
-1. **El primer segundo de cada playback cancela peor.** Cualquier AEC necesita
-   converger; aquí la alineación se intenta en cuanto hay ~350 ms de audio con
-   energía real, pero antes de eso solo actúa la supresión espectral. Mitigado en
-   la práctica porque la escucha está cerrada durante el playback.
-2. **La medición que falta es la de verdad: WER sobre llamadas reales.** Todos los
-   números de §4 son de laboratorio. La varianza publicada entre "mejora un 84 %"
-   y "empeora 46 puntos" depende del audio, no del modelo. Antes de dar por bueno
-   un ajuste agresivo: grabar 100-200 llamadas reales (la grabadora ya guarda el
-   audio crudo), pasarlas por `services.audio.enhance_pcm_once` con distintas
-   configuraciones, y comparar WER separando inserciones de borrados — las mejoras
-   suelen venir de eliminar inserciones.
-3. **RTF 0.47 limita la concurrencia** a ~2 llamadas por núcleo. Medir en el VPS
-   real (AVX2 cambia el resultado) antes de dimensionar.
-4. **La voz de fondo se rechaza por nivel, no por identidad.** Un tercero que
-   hable *pegado* al micrófono con el mismo volumen que el usuario no se
-   distingue. La solución real (aislamiento de hablante sin enrolamiento) hoy solo
-   existe con licencia comercial.
+1. **La música se atenúa 20 dB, no se elimina.** Es el techo de lo desplegable hoy
+   sin licencia comercial ni entrenar un modelo propio: no existe extracción de
+   hablante objetivo abierta y utilizable (§2). Si la música resulta crítica para el
+   negocio, las dos únicas vías reales son licenciar ai-coustics Quail Voice Focus /
+   Krisp VIVA-tel, o entrenar un modelo causal a 8 kHz con música y voces
+   competidoras como interferencia a 0 dB de relación.
+2. **Otra persona hablando cerca y a volumen parecido no se distingue.** El rechazo
+   por dominancia de nivel funciona cuando el tercero está más lejos (lo normal);
+   un acompañante pegado al teléfono no. Sigue siendo el caso más difícil: −8.5 dB.
+3. **El primer segundo de cada playback cancela peor.** Cualquier AEC necesita
+   converger. Mitigado porque la escucha está cerrada durante el playback.
+4. **La medición que falta es la de verdad: WER sobre llamadas reales.** Todos los
+   números de §4 son de laboratorio con voz sintetizada y fondos sintéticos. La
+   varianza publicada entre "mejora un 84 %" y "empeora 46 puntos" depende del
+   audio, no del modelo. La grabadora ya guarda el audio crudo: pasar 100-200
+   llamadas reales por `services.audio.enhance_pcm_once` con varias configuraciones
+   y comparar WER separando inserciones de borrados.
+5. **`mod_audio_stream` en su edición comunitaria limita a 10 canales simultáneos.**
+   Verificar la licencia antes de dimensionar para 20-40 llamadas: puede ser el
+   techo antes que la CPU.
+6. **Precalentamiento opcional.** `services.audio.prewarm_async()` carga modelos y
+   calienta los caminos perezosos (~2.4 s). Sin llamarlo, la primera llamada del
+   proceso paga ese coste (repartido, sin bloquear el bucle, porque la construcción
+   está diferida al hilo de trabajo). Una línea en el arranque de la app lo elimina;
+   no se añadió para no tocar nada fuera de la capa de audio.
+7. **Control de admisión.** `max_concurrent_calls()` devuelve el tope calculado, pero
+   **rechazar la llamada N+1 exige tocar el router del WebSocket**, que queda fuera
+   del alcance de este cambio. Mientras no se haga, la protección es la válvula de
+   `AUDIO_BLOCK_TIMEOUT_MS` y la métrica `blocks_degraded`.

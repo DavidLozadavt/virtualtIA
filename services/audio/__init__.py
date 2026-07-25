@@ -6,11 +6,16 @@ Arquitectura (el orden lo fija `AUDIO_PIPELINE_STAGES`, no el código):
       ↓ preprocess      paso-alto + límite de picos (quita viento, retumbe, clics)
       ↓ echo_control    alineación GCC-PHAT + filtro MDF + supresión residual
       ↓ dereverb        supresión de cola tardía de sala
-      ↓ denoise         DPDFNet 8 kHz nativo (ONNX/CPU) con atenuación acotada
       ↓ speaker_focus   marca voz de fondo por dominancia de nivel (TV, oficina)
       ↓ voice_gate      Silero VAD + puerta retroactiva: solo voz humana sale
+      ↓ denoise         DPDFNet 8 kHz nativo (ONNX/CPU); se salta con el canal cerrado
+      ↓ voice_focus     post-filtro de voz objetivo: armónicos + modulación silábica
       ↓ normalize       ganancia lenta a nivel objetivo + limitador suave
     PCM16 8 kHz hacia el STT
+
+La puerta va **antes** del supresor a propósito: el detector ve la señal natural
+(los artefactos de supresión lo hacen abrir con ruido de fondo) y el supresor no
+gasta CPU con el canal cerrado.
 
 Cada etapa es independiente y se puede quitar, reordenar o sustituir desde
 configuración. Las etapas que necesitan otra tasa de muestreo la declaran y el
@@ -21,11 +26,20 @@ el PCM del usuario, recibe el PCM que Lyra reproduce (referencia para el eco) y
 devuelve PCM limpio. Si algo falta (modelo no descargado, dependencia ausente),
 degrada a la mejor alternativa disponible y lo registra: una llamada nunca se cae
 por el pipeline de audio.
+
+Concurrencia: una instancia por llamada, con **todo** su estado aislado (buffers,
+colas, estado recurrente de los modelos, referencia de eco, métricas). Lo único
+compartido entre llamadas son las sesiones ONNX —inmutables— y el ejecutor de
+hilos; ver `services/audio/runtime_pool.py`. El procesamiento sale del bucle de
+eventos con `process_async`, con un solo bloque en vuelo por llamada.
 """
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +49,13 @@ from core.config import settings
 from services.audio.frames import float_to_pcm16, pcm16_to_float
 from services.audio.pipeline import AudioPipeline, AudioStage, FrameContext
 from services.audio.reference import FarEndReference
+from services.audio.runtime_pool import (
+    get_audio_executor,
+    max_concurrent_calls,
+    prewarm_async,
+    session_count,
+    shutdown_audio_executor,
+)
 from services.audio.stages import (
     DenoiseStage,
     DereverbStage,
@@ -46,6 +67,7 @@ from services.audio.stages import (
     SileroOnnxDetector,
     SpeakerFocusStage,
     SpectralGateEnhancer,
+    VoiceFocusStage,
     VoiceGateStage,
 )
 
@@ -57,7 +79,10 @@ __all__ = [
     "FarEndReference",
     "FrameContext",
     "build_capture_pipeline",
+    "max_concurrent_calls",
+    "prewarm_async",
     "resolve_model_path",
+    "shutdown_audio_executor",
 ]
 
 
@@ -141,6 +166,8 @@ def _build_denoise(rate: int, _reference: FarEndReference) -> Optional[AudioStag
                     if int(settings.AUDIO_DENOISE_DELAY_SAMPLES) >= 0
                     else None
                 ),
+                protect_floor_db=settings.AUDIO_DENOISE_PROTECT_FLOOR_DB,
+                protect_min_gain=settings.AUDIO_DENOISE_PROTECT_MIN_GAIN,
             )
         except Exception as e:  # noqa: BLE001 — el modelo puede faltar en el host
             logger.warning(
@@ -163,6 +190,8 @@ def _build_denoise(rate: int, _reference: FarEndReference) -> Optional[AudioStag
         enhancer,
         rate=stage_rate,
         attn_limit_db=None if limit < 0.0 else limit,
+        bypass_on_speech_absent=bool(settings.AUDIO_DENOISE_BYPASS_ON_SILENCE),
+        bypass_hold_ms=settings.AUDIO_DENOISE_BYPASS_HOLD_MS,
     )
 
 
@@ -221,6 +250,26 @@ def _build_voice_gate(rate: int, _reference: FarEndReference) -> AudioStage:
     )
 
 
+def _build_voice_focus(rate: int, _reference: FarEndReference) -> AudioStage:
+    return VoiceFocusStage(
+        rate=rate,
+        frame_size=int(settings.AUDIO_STFT_FRAME),
+        hop_size=int(settings.AUDIO_STFT_HOP),
+        f0_min=settings.AUDIO_FOCUS_F0_MIN_HZ,
+        f0_max=settings.AUDIO_FOCUS_F0_MAX_HZ,
+        voicing_threshold=settings.AUDIO_FOCUS_VOICING_THRESHOLD,
+        harmonic_strength=settings.AUDIO_FOCUS_HARMONIC_STRENGTH,
+        harmonic_limit_hz=settings.AUDIO_FOCUS_HARMONIC_LIMIT_HZ,
+        harmonic_width_hz=settings.AUDIO_FOCUS_HARMONIC_WIDTH_HZ,
+        modulation_strength=settings.AUDIO_FOCUS_MODULATION_STRENGTH,
+        modulation_fast_ms=settings.AUDIO_FOCUS_MODULATION_FAST_MS,
+        modulation_slow_ms=settings.AUDIO_FOCUS_MODULATION_SLOW_MS,
+        modulation_target=settings.AUDIO_FOCUS_MODULATION_TARGET,
+        floor=settings.AUDIO_FOCUS_POST_FLOOR,
+        smoothing=settings.AUDIO_FOCUS_POST_SMOOTHING,
+    )
+
+
 def _build_normalize(rate: int, _reference: FarEndReference) -> AudioStage:
     return NormalizeStage(
         rate=rate,
@@ -242,6 +291,7 @@ STAGE_BUILDERS = {
     "denoise": _build_denoise,
     "speaker_focus": _build_speaker_focus,
     "voice_gate": _build_voice_gate,
+    "voice_focus": _build_voice_focus,
     "normalize": _build_normalize,
 }
 
@@ -298,30 +348,118 @@ class CaptureEnhancer:
             sample_rate=self.rate,
             window_sec=float(settings.AUDIO_ECHO_REFERENCE_WINDOW_SEC),
         )
-        self.pipeline: Optional[AudioPipeline] = None
-        if self.enabled:
-            self.pipeline = build_capture_pipeline(
-                rate=self.rate, reference=self.reference, stages=stages
-            )
-            logger.info(
-                "[audio] pipeline de captura activo etapas=%s latencia=%.0f ms",
-                ",".join(self.pipeline.active_stage_names),
-                self.pipeline.latency_ms,
-            )
-        else:
+        self._block_timeout = float(settings.AUDIO_BLOCK_TIMEOUT_MS) / 1000.0
+        self.blocks_degraded = 0
+        self._pending: Optional[asyncio.Future] = None
+        self._stages = stages
+        self._pipeline: Optional[AudioPipeline] = None
+        self._build_lock = threading.Lock()
+        if not self.enabled:
             logger.info("[audio] pipeline de captura desactivado (paso directo)")
+
+    # ── construcción diferida ──
+
+    @property
+    def pipeline(self) -> Optional[AudioPipeline]:
+        """Pipeline de esta llamada, construido en el primer uso.
+
+        La construcción no es gratis la primera vez del proceso: carga las
+        sesiones ONNX y mide el retardo del supresor (cerca de un segundo). Hacerlo
+        en el constructor significaría hacerlo en el bucle de eventos justo al
+        entrar la llamada, bloqueando a todas las demás. Al diferirlo, ocurre
+        dentro del hilo de trabajo que procesa el primer bloque — y una sola vez
+        por proceso, porque las sesiones quedan compartidas.
+        `runtime_pool.prewarm()` permite adelantarlo al arranque.
+        """
+        if self._pipeline is not None or not self.enabled:
+            return self._pipeline
+        with self._build_lock:
+            if self._pipeline is None:
+                self._pipeline = build_capture_pipeline(
+                    rate=self.rate, reference=self.reference, stages=self._stages
+                )
+                logger.info(
+                    "[audio] pipeline de captura activo etapas=%s latencia=%.0f ms",
+                    ",".join(self._pipeline.active_stage_names),
+                    self._pipeline.latency_ms,
+                )
+        return self._pipeline
 
     # ── captura ──
 
     def process(
         self, pcm: bytes, *, timestamp: float, playback_active: bool = False
     ) -> tuple[bytes, Optional[FrameContext]]:
-        """Devuelve (PCM procesado, contexto). Sin pipeline, el PCM va intacto."""
-        if self.pipeline is None:
+        """Devuelve (PCM procesado, contexto). Sin pipeline, el PCM va intacto.
+
+        Bloquea al llamante: úsala solo fuera del bucle de eventos (pruebas,
+        análisis offline). En una llamada real se usa `process_async`.
+        """
+        pipeline = self.pipeline
+        if pipeline is None:
             return pcm, None
-        return self.pipeline.process_pcm(
+        return pipeline.process_pcm(
             pcm, timestamp=timestamp, playback_active=playback_active
         )
+
+    async def process_async(
+        self, pcm: bytes, *, timestamp: float, playback_active: bool = False
+    ) -> tuple[bytes, Optional[FrameContext]]:
+        """Igual que `process`, pero ejecutándose fuera del bucle de eventos.
+
+        El cómputo se manda a un ejecutor de hilos compartido por el proceso.
+        ONNX Runtime, numpy y scipy liberan el GIL mientras calculan, así que
+        varias llamadas simultáneas aprovechan varios núcleos de verdad en vez de
+        serializarse en el bucle de asyncio. El orden dentro de una misma llamada
+        está garantizado: quien llama espera cada bloque antes de leer el
+        siguiente del transporte.
+        """
+        if not self.enabled:
+            return pcm, None
+
+        # Un solo bloque en vuelo por llamada, siempre. Es la garantía de que el
+        # estado recurrente del pipeline recibe el audio en orden: si un bloque
+        # que expiró siguiera corriendo mientras entra el siguiente, dos hilos
+        # mutarían los mismos buffers y el resultado sería basura silenciosa.
+        # Se comprueba el futuro pendiente directamente en vez de confiar en un
+        # callback del bucle: un llamante que no cediera el control nunca dejaría
+        # correr ese callback y la llamada quedaría degradada para siempre.
+        if self._pending is not None:
+            if not self._pending.done():
+                self.blocks_degraded += 1
+                return pcm, None
+            self._pending = None
+
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(
+            get_audio_executor(),
+            functools.partial(
+                self._process_locked,
+                pcm,
+                timestamp=timestamp,
+                playback_active=playback_active,
+            ),
+        )
+        if self._block_timeout <= 0.0:
+            return await future
+        try:
+            # `shield` deja claro el contrato: el trabajo ya lanzado no se
+            # cancela (un futuro de ejecutor tampoco podría), solo se deja de
+            # esperar por él.
+            result = await asyncio.wait_for(
+                asyncio.shield(future), timeout=self._block_timeout
+            )
+        except asyncio.TimeoutError:
+            # El proceso está saturado. Entregar el bloque sin procesar es peor
+            # señal para el reconocedor, pero acumular retardo es peor para la
+            # conversación entera: el atraso nunca se recupera. Se cuenta para
+            # que el operador lo vea y baje el tope de llamadas simultáneas. El
+            # bloque sigue terminando en su hilo; hasta entonces no se admite
+            # otro para esta llamada.
+            self.blocks_degraded += 1
+            self._pending = future
+            return pcm, None
+        return result
 
     # ── referencia de playback (eco) ──
 
@@ -342,24 +480,46 @@ class CaptureEnhancer:
 
     # ── ciclo de vida ──
 
+    def _process_locked(
+        self, pcm: bytes, *, timestamp: float, playback_active: bool
+    ) -> tuple[bytes, Optional[FrameContext]]:
+        """Cuerpo que corre en el hilo de trabajo (construye el pipeline si hace falta)."""
+        pipeline = self.pipeline
+        if pipeline is None:
+            return pcm, None
+        return pipeline.process_pcm(
+            pcm, timestamp=timestamp, playback_active=playback_active
+        )
+
     def reset(self) -> None:
         """Nuevo turno de escucha: limpia estados que no deben cruzar turnos."""
-        if self.pipeline is not None:
-            self.pipeline.reset()
+        if self._pipeline is not None:
+            self._pipeline.reset()
 
     def clear_reference(self) -> None:
         self.reference.clear()
 
     @property
     def latency_ms(self) -> float:
-        return self.pipeline.latency_ms if self.pipeline is not None else 0.0
+        pipeline = self.pipeline
+        return pipeline.latency_ms if pipeline is not None else 0.0
 
     def stats(self) -> dict:
-        if self.pipeline is None:
-            return {"enabled": False}
-        data = self.pipeline.stats()
-        data["enabled"] = True
-        for stage in self.pipeline._stages:  # noqa: SLF001 — métricas propias
+        pipeline = self._pipeline
+        data: dict = {
+            "enabled": self.enabled,
+            "built": pipeline is not None,
+            # Sesiones ONNX vivas en el proceso: debe ser una por modelo, nunca una
+            # por llamada (si crece con las llamadas, hay una fuga de recursos).
+            "onnx_sessions": session_count(),
+            # Bloques entregados sin procesar por saturación: cualquier valor > 0
+            # dice que el proceso atiende más llamadas de las que su CPU sostiene.
+            "blocks_degraded": self.blocks_degraded,
+        }
+        if pipeline is None:
+            return data
+        data.update(pipeline.stats())
+        for stage in pipeline._stages:  # noqa: SLF001 — métricas propias
             extra = getattr(stage, "stats", None)
             if callable(extra):
                 try:

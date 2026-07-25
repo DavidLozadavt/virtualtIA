@@ -52,6 +52,7 @@ import numpy as np
 
 from services.audio.frames import FrameSlicer, rms
 from services.audio.pipeline import BaseStage, FrameContext
+from services.audio.runtime_pool import get_session
 
 logger = logging.getLogger("lyra.audio.vad")
 
@@ -87,14 +88,9 @@ class SileroOnnxDetector:
             raise ValueError(
                 f"{path.name} es un modelo solo de 16 kHz; se pidió {rate} Hz"
             )
-        import onnxruntime
-
-        options = onnxruntime.SessionOptions()
-        options.inter_op_num_threads = threads
-        options.intra_op_num_threads = threads
-        self._session = onnxruntime.InferenceSession(
-            str(path), providers=["CPUExecutionProvider"], sess_options=options
-        )
+        # Sesión compartida por proceso: los pesos se cargan una vez y el estado
+        # recurrente es por instancia (ver services/audio/runtime_pool.py).
+        self._session = get_session(path, threads)
         self.rate = int(rate)
         self.frame_size = SILERO_FRAME_SIZES[rate]
         self._context_size = SILERO_CONTEXT_SIZES[rate]

@@ -40,6 +40,7 @@ espectro y en el tiempo son equivalentes porque la STFT es lineal.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -47,6 +48,7 @@ import numpy as np
 
 from services.audio.dsp import EPSILON, SpectralStream, smooth, vorbis_window
 from services.audio.pipeline import BaseStage, FrameContext
+from services.audio.runtime_pool import get_session
 
 logger = logging.getLogger("lyra.audio.denoise")
 
@@ -62,6 +64,10 @@ class SpeechEnhancer(Protocol):
 
 
 _DELAY_CACHE: dict[tuple[str, int], int] = {}
+# El cache es alcanzable desde varios hilos de trabajo a la vez (una llamada por
+# hilo): sin candado, dos llamadas simultáneas que arrancan a la par ejecutarían
+# ambas la medición de retardo.
+_DELAY_LOCK = threading.Lock()
 
 
 def _measure_output_delay(enhancer: "OnnxStreamEnhancer", key: str, rate: int) -> int:
@@ -80,6 +86,14 @@ def _measure_output_delay(enhancer: "OnnxStreamEnhancer", key: str, rate: int) -
     cached = _DELAY_CACHE.get((key, rate))
     if cached is not None:
         return cached
+    with _DELAY_LOCK:
+        cached = _DELAY_CACHE.get((key, rate))
+        if cached is not None:
+            return cached
+        return _probe_output_delay(enhancer, key, rate)
+
+
+def _probe_output_delay(enhancer: "OnnxStreamEnhancer", key: str, rate: int) -> int:
     length = rate // 2
     time_axis = np.arange(length, dtype=np.float64) / rate
     sweep_end = min(rate * 0.4, 3200.0)
@@ -151,22 +165,16 @@ class OnnxStreamEnhancer:
         rate: int,
         threads: int = 1,
         output_delay_samples: Optional[int] = None,
+        protect_floor_db: float = 0.0,
+        protect_min_gain: float = 0.3,
     ):
-        import onnxruntime
-
         path = Path(model_path)
         if not path.is_file():
             raise FileNotFoundError(f"modelo de supresión no encontrado: {path}")
-
-        options = onnxruntime.SessionOptions()
-        options.intra_op_num_threads = threads
-        options.inter_op_num_threads = threads
-        options.graph_optimization_level = (
-            onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        )
-        self._session = onnxruntime.InferenceSession(
-            str(path), sess_options=options, providers=["CPUExecutionProvider"]
-        )
+        # Sesión compartida por proceso: los pesos se cargan una vez para todas
+        # las llamadas y el estado recurrente viaja como tensor por instancia
+        # (ver services/audio/runtime_pool.py).
+        self._session = get_session(path, threads)
         inputs = self._session.get_inputs()
         outputs = self._session.get_outputs()
         if len(inputs) < 2 or len(outputs) < 2:
@@ -191,6 +199,17 @@ class OnnxStreamEnhancer:
                 "o ajusta AUDIO_DENOISE_RATE."
             )
         self._window = vorbis_window(self.win_len)
+        # Protección selectiva de fonemas: en las bandas donde el modelo conservó
+        # señal (las que considera voz) se garantiza un mínimo de ganancia; en las
+        # que rechazó de plano no se reinyecta nada. Es la diferencia con un
+        # colchón global, que devuelve el fondo entero atenuado y por tanto mete
+        # música de vuelta cada vez que el usuario habla.
+        self._protect_gain = (
+            0.0
+            if protect_floor_db <= 0.0
+            else float(10.0 ** (-float(protect_floor_db) / 20.0))
+        )
+        self._protect_min_gain = float(protect_min_gain)
         self._init_state = self._initial_state()
         self.reset()
         self.output_delay_samples = (
@@ -230,6 +249,47 @@ class OnnxStreamEnhancer:
         self._buffer = np.zeros(0, dtype=np.float32)
         self._ola = np.zeros(self.win_len, dtype=np.float32)
 
+    def _protect(self, noisy: np.ndarray, enhanced: np.ndarray) -> np.ndarray:
+        """Garantiza un mínimo de ganancia solo en las bandas que el modelo conservó.
+
+        Una supresión demasiado agresiva se lleva fricativas y consonantes sordas,
+        y eso cuesta palabras. La protección clásica —mezclar la señal original
+        atenuada— tiene un efecto colateral inaceptable con música de fondo: la
+        devuelve completa unos dB por debajo, así que vuelve a filtrarse cada vez
+        que el usuario habla. Aquí la reinyección ocurre únicamente donde la
+        ganancia del modelo indica presencia de voz (`protect_min_gain`), de modo
+        que lo que se recupera es voz, no la escena acústica.
+        """
+        gain = np.abs(enhanced) / (np.abs(noisy) + EPSILON)
+        deficit = np.where(
+            gain >= self._protect_min_gain,
+            np.maximum(0.0, self._protect_gain - gain),
+            0.0,
+        )
+        return enhanced + deficit * noisy
+
+    def advance_silent(self, block: np.ndarray) -> np.ndarray:
+        """Consume el bloque sin ejecutar el modelo y devuelve silencio.
+
+        Emite exactamente tantas muestras como habría producido la inferencia, de
+        modo que la línea de tiempo del pipeline no se desplaza al entrar y salir
+        del ahorro. El estado recurrente se conserva tal cual (congelado) y el
+        solape pendiente se descarta: quien llama solo activa esto tras cientos de
+        milisegundos de silencio sostenido, así que esa cola ya era silencio.
+        """
+        if block.size == 0:
+            return np.zeros(0, dtype=np.float32)
+        self._buffer = np.concatenate(
+            (self._buffer, block.astype(np.float32, copy=False))
+        )
+        produced = 0
+        while self._buffer.size >= self.win_len:
+            produced += self.hop_size
+            self._buffer = self._buffer[self.hop_size :]
+        if produced:
+            self._ola[:] = 0.0
+        return np.zeros(produced, dtype=np.float32)
+
     def enhance(self, block: np.ndarray) -> np.ndarray:
         if block.size == 0:
             return np.zeros(0, dtype=np.float32)
@@ -251,7 +311,10 @@ class OnnxStreamEnhancer:
                 {self._in_spec: spec_in, self._in_state: self._state},
             )
             pair = spec_out[0, 0]
-            frame = np.fft.irfft(pair[:, 0] + 1j * pair[:, 1], n=self.win_len)
+            enhanced = pair[:, 0] + 1j * pair[:, 1]
+            if self._protect_gain > 0.0:
+                enhanced = self._protect(spectrum, enhanced)
+            frame = np.fft.irfft(enhanced, n=self.win_len)
             self._ola += (frame * self._window).astype(np.float32)
             produced.append(self._ola[: self.hop_size].copy())
             self._ola = np.roll(self._ola, -self.hop_size)
@@ -329,6 +392,7 @@ class DenoiseStage(BaseStage):
         rate: int,
         attn_limit_db: Optional[float],
         bypass_on_speech_absent: bool = False,
+        bypass_hold_ms: float = 400.0,
     ):
         self.rate = int(rate)
         self.enhancer = enhancer
@@ -339,6 +403,13 @@ class DenoiseStage(BaseStage):
             else float(10.0 ** (-float(attn_limit_db) / 20.0))
         )
         self.bypass_on_speech_absent = bool(bypass_on_speech_absent)
+        self._bypass_hold_samples = max(0, int(bypass_hold_ms * rate / 1000.0))
+        self._silent_samples = 0
+        # Contadores sobre muestras de ENTRADA en ambos caminos: comparar muestras
+        # de entrada con muestras de salida daría una proporción sin sentido,
+        # porque la salida del modelo va cuantizada a su salto de trama.
+        self.samples_bypassed = 0
+        self.samples_inferred = 0
         # Retardo propio del supresor: la señal original se retiene otro tanto
         # para que la mezcla quede muestra a muestra en fase. Sin esto la mezcla
         # sumaría una copia adelantada 40 ms — un pre-eco audible y perjudicial.
@@ -351,16 +422,53 @@ class DenoiseStage(BaseStage):
     def latency_ms(self) -> float:
         return round(self._delay / float(self.rate) * 1000.0, 1)
 
+    def stats(self) -> dict:
+        total = self.samples_inferred + self.samples_bypassed
+        return {
+            "samples_bypassed": self.samples_bypassed,
+            "bypass_ratio": round(
+                self.samples_bypassed / total if total else 0.0, 3
+            ),
+        }
+
     def reset(self) -> None:
         self.enhancer.reset()
+        self._silent_samples = 0
         # El retardo del modelo se representa como silencio previo en la señal
         # original: así el primer bloque limpio se mezcla con lo que le toca.
         self._dry = np.zeros(self._delay, dtype=np.float32) if self._alpha > 0.0 else np.zeros(0, dtype=np.float32)
 
-    def process(self, block: np.ndarray, _ctx: FrameContext) -> np.ndarray:
+    def process(self, block: np.ndarray, ctx: FrameContext) -> np.ndarray:
         if block.size == 0:
             return block
-        wet = self.enhancer.enhance(block)
+
+        # Con la puerta de voz cerrada de forma sostenida no hay nada que limpiar:
+        # el bloque ya es silencio digital. Saltarse la inferencia ahí es la mayor
+        # economía de CPU del pipeline (el supresor es ~90 % del coste) y en una
+        # conversación real la mayoría de los bloques son no-habla. Se exige que el
+        # silencio se sostenga (`bypass_hold_ms`) porque el estado recurrente del
+        # modelo se queda congelado mientras no se ejecuta, y volver de golpe con
+        # el estado frío degradaría justo el arranque de la palabra.
+        if self.bypass_on_speech_absent and not ctx.speech_active:
+            self._silent_samples += int(block.size)
+            if self._silent_samples > self._bypass_hold_samples:
+                self.samples_bypassed += int(block.size)
+                return self._advance_without_inference(block)
+        else:
+            self._silent_samples = 0
+
+        self.samples_inferred += int(block.size)
+        return self._mix(block, self.enhancer.enhance(block))
+
+    def _advance_without_inference(self, block: np.ndarray) -> np.ndarray:
+        """Avanza los buffers del supresor sin ejecutar el modelo."""
+        advance = getattr(self.enhancer, "advance_silent", None)
+        if advance is None:  # el supresor no sabe saltarse la inferencia
+            return self._mix(block, self.enhancer.enhance(block))
+        return self._mix(block, advance(block))
+
+    def _mix(self, block: np.ndarray, wet: np.ndarray) -> np.ndarray:
+        """Mezcla la señal limpia con la original alineada, si hay límite global."""
         if self._alpha <= 0.0:
             self.samples_processed += int(wet.size)
             return wet

@@ -15,6 +15,7 @@ from services.audio.stages.vad import (
     SileroOnnxDetector,
     VoiceGateStage,
 )
+from services.audio.stages.voice_focus import VoiceFocusStage
 
 __all__ = [
     "DenoiseStage",
@@ -27,5 +28,6 @@ __all__ = [
     "SileroOnnxDetector",
     "SpeakerFocusStage",
     "SpectralGateEnhancer",
+    "VoiceFocusStage",
     "VoiceGateStage",
 ]

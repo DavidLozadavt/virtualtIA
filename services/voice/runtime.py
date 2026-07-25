@@ -273,7 +273,16 @@ class VoiceCallRuntime:
         # durante el playback cuando el cancelador de eco puede aprender el
         # camino acústico (es el único momento en que existe referencia), y
         # mantenerlo alimentado evita además huecos de estado al reabrir.
-        clean, _ctx = self.enhancer.process(
+        # Fuera del bucle de eventos: el pipeline consume varios ms de CPU por
+        # bloque y ejecutarlo aquí serializaría todas las llamadas del proceso.
+        #
+        # IMPORTANTE: este `await` es lo que garantiza el orden de los bloques de
+        # ESTA llamada. `run()` no lee el evento siguiente del transporte hasta
+        # que este termina, así que el estado recurrente del pipeline recibe el
+        # audio en secuencia. Convertir esto en `create_task()` o en un envío sin
+        # esperar reordenaría los bloques entre hilos del pool y corrompería ese
+        # estado en silencio: la llamada seguiría funcionando, pero peor.
+        clean, _ctx = await self.enhancer.process_async(
             pcm,
             timestamp=asyncio.get_running_loop().time(),
             playback_active=self._playing,
