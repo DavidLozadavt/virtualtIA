@@ -69,6 +69,12 @@ class NormalizeStage(BaseStage):
         # con estar por encima del silencio, para que la etapa siga siendo útil
         # de forma independiente.
         adapt = ctx.speech_active if self.speech_only else level > self.silence_level
+        # Una voz ajena ya atenuada no debe marcar el objetivo de ganancia: si lo
+        # hiciera, esta etapa la subiría de vuelta al nivel objetivo y desharía
+        # exactamente el trabajo del anclaje de hablante. Es el mismo argumento
+        # que impide adaptar en silencio, aplicado a la voz que no es del usuario.
+        if ctx.background_voice:
+            adapt = False
         if adapt and level > 0.0:
             desired = float(np.clip(self.target / level, self.min_gain, self.max_gain))
             # Bajar la ganancia es más urgente que subirla: una saturación daña

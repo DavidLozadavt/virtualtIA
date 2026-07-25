@@ -7,6 +7,7 @@ Arquitectura (el orden lo fija `AUDIO_PIPELINE_STAGES`, no el código):
       ↓ echo_control    alineación GCC-PHAT + filtro MDF + supresión residual
       ↓ dereverb        supresión de cola tardía de sala
       ↓ speaker_focus   marca voz de fondo por dominancia de nivel (TV, oficina)
+      ↓ speaker_lock    identidad del hablante: aprende al usuario y atenúa al resto
       ↓ voice_gate      Silero VAD + puerta retroactiva: solo voz humana sale
       ↓ denoise         DPDFNet 8 kHz nativo (ONNX/CPU); se salta con el canal cerrado
       ↓ voice_focus     post-filtro de voz objetivo: armónicos + modulación silábica
@@ -67,9 +68,11 @@ from services.audio.stages import (
     SileroOnnxDetector,
     SpeakerFocusStage,
     SpectralGateEnhancer,
+    TargetSpeakerStage,
     VoiceFocusStage,
     VoiceGateStage,
 )
+from services.audio.embedding import SpeakerEmbedder
 
 logger = logging.getLogger("lyra.audio")
 
@@ -208,6 +211,47 @@ def _build_speaker_focus(rate: int, _reference: FarEndReference) -> AudioStage:
     )
 
 
+def _build_speaker_lock(rate: int, _reference: FarEndReference) -> AudioStage:
+    model_path = resolve_model_path(settings.AUDIO_SPEAKER_MODEL_PATH)
+    embedder = None
+    if model_path is not None:
+        try:
+            embedder = SpeakerEmbedder(
+                str(model_path),
+                rate=rate,
+                threads=int(settings.AUDIO_SPEAKER_THREADS),
+            )
+        except Exception as e:  # noqa: BLE001 — el modelo puede faltar en el host
+            logger.warning(
+                "[audio] extractor de identidad de hablante no disponible (%s); las "
+                "voces de fondo solo se filtrarán por nivel, que no distingue una "
+                "voz de otra. Descarga el modelo con: "
+                "python scripts/fetch_audio_models.py",
+                e,
+            )
+    return TargetSpeakerStage(
+        embedder,
+        rate=rate,
+        frame_ms=settings.AUDIO_SPEAKER_FRAME_MS,
+        enroll_window_sec=settings.AUDIO_SPEAKER_ENROLL_WINDOW_SEC,
+        track_window_sec=settings.AUDIO_SPEAKER_TRACK_WINDOW_SEC,
+        hop_sec=settings.AUDIO_SPEAKER_HOP_SEC,
+        min_voiced_ratio=settings.AUDIO_SPEAKER_MIN_VOICED_RATIO,
+        enroll_windows=int(settings.AUDIO_SPEAKER_ENROLL_WINDOWS),
+        accept=settings.AUDIO_SPEAKER_ACCEPT,
+        reject=settings.AUDIO_SPEAKER_REJECT,
+        adapt=settings.AUDIO_SPEAKER_ADAPT,
+        floor_db=settings.AUDIO_SPEAKER_FLOOR_DB,
+        attack_ms=settings.AUDIO_SPEAKER_ATTACK_MS,
+        release_ms=settings.AUDIO_SPEAKER_RELEASE_MS,
+        silence_dbfs=settings.AUDIO_FOCUS_SILENCE_DBFS,
+        gap_ms=settings.AUDIO_SPEAKER_GAP_MS,
+        turn_drop_db=settings.AUDIO_SPEAKER_TURN_DROP_DB,
+        dynamic_range_db=settings.AUDIO_SPEAKER_DYNAMIC_RANGE_DB,
+        mark_background=bool(settings.AUDIO_SPEAKER_MARK_BACKGROUND),
+    )
+
+
 def _build_voice_gate(rate: int, _reference: FarEndReference) -> AudioStage:
     backend = (settings.AUDIO_VAD_BACKEND or "").strip().lower()
     detector = None
@@ -290,6 +334,7 @@ STAGE_BUILDERS = {
     "dereverb": _build_dereverb,
     "denoise": _build_denoise,
     "speaker_focus": _build_speaker_focus,
+    "speaker_lock": _build_speaker_lock,
     "voice_gate": _build_voice_gate,
     "voice_focus": _build_voice_focus,
     "normalize": _build_normalize,

@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     # ve la señal natural (los artefactos de supresión lo hacen abrir con ruido de
     # fondo) y el supresor no gasta CPU con el canal cerrado.
     AUDIO_PIPELINE_STAGES: str = (
-        "preprocess,echo_control,dereverb,speaker_focus,voice_gate,"
+        "preprocess,echo_control,dereverb,speaker_focus,speaker_lock,voice_gate,"
         "denoise,voice_focus,normalize"
     )
     # strict=True propaga el error de una etapa (solo para pruebas); en producción
@@ -119,9 +119,11 @@ class Settings(BaseSettings):
     AUDIO_WORKER_THREADS: int = 0
     # Coste medido de una llamada en núcleos, para derivar el tope de llamadas
     # simultáneas del proceso. Con el supresor neuronal y bypass en silencio el
-    # consumo es ~0.25, pero el tope se fija en 0.4 para dejar margen de latencia:
-    # medido en 8 núcleos, 20 llamadas dan p95 de 94 ms por bloque y 24 ya suben a
-    # 108 ms. Sin bypass el coste real es ~0.6. Medir en el servidor y ajustar.
+    # consumo es ~0.25, pero el tope se fija dejando margen de latencia: medido en
+    # 8 núcleos, 20 llamadas dan p95 de 94 ms por bloque y 24 ya suben a 108 ms.
+    # Medido sobre 20 s de habla continua: 0.196 núcleos sin anclaje de hablante y
+    # 0.254 con él, o sea que `speaker_lock` cuesta ~0.06 núcleos (una inferencia
+    # de ~18 ms cada 150 ms, y solo mientras hay voz).
     AUDIO_CORES_PER_CALL: float = 0.4
     # Tope explícito de llamadas simultáneas (0 = derivarlo del coste por llamada).
     AUDIO_MAX_CONCURRENT_CALLS: int = 0
@@ -207,6 +209,64 @@ class Settings(BaseSettings):
     AUDIO_FOCUS_MARGIN_DB: float = 18.0       # dB por debajo del dominante = fondo
     AUDIO_FOCUS_SILENCE_DBFS: float = -55.0
     AUDIO_FOCUS_MIN_FRAMES: int = 40          # ventana mínima antes de marcar fondo
+
+    # ── Anclaje al hablante objetivo (services/audio/stages/speaker_lock.py) ──
+    # Aprende la voz de quien llama durante la propia llamada y atenúa las demás
+    # voces. Es lo único del pipeline que distingue una voz de otra voz; el resto
+    # de criterios (nivel, armonicidad, modulación) no pueden por construcción.
+    AUDIO_SPEAKER_MODEL_PATH: str = "models/wespeaker_resnet34_lm.onnx"
+    AUDIO_SPEAKER_THREADS: int = 1
+    AUDIO_SPEAKER_FRAME_MS: float = 20.0
+    # Dos ventanas, y la asimetría es lo que hace que la etapa funcione. El patrón
+    # se construye con una ventana LARGA (fiable) y se sigue con ventanas CORTAS
+    # comparadas contra él. Medido contra un patrón estable: ventana de 0.4 s da
+    # 96.7 % de acierto, 0.6 s da 91.7 %, 1.5 s solo 80 %. Comparar dos ventanas
+    # cortas ENTRE SÍ, en cambio, no funciona (margen −0.34): de ahí la asimetría.
+    # El salto corto es lo que permite atenuar una frase ajena de medio segundo
+    # metida en la pausa del usuario, que es como se cuelan en la práctica.
+    # La ventana de enrolamiento debe caber DENTRO de un turno: las fronteras de
+    # turno vacían el buffer, así que exigir varios segundos seguidos dejaba a la
+    # etapa sin enrolar nunca. El patrón se robustece promediando varias ventanas
+    # (AUDIO_SPEAKER_ENROLL_WINDOWS), no alargando una sola.
+    AUDIO_SPEAKER_ENROLL_WINDOW_SEC: float = 1.0
+    AUDIO_SPEAKER_TRACK_WINDOW_SEC: float = 0.4
+    AUDIO_SPEAKER_HOP_SEC: float = 0.15       # cada cuánto se reevalúa la identidad
+    # Pausa que marca frontera de turno: al superarla se vacía el buffer para que
+    # una ventana nunca mezcle a dos hablantes. Es lo que separa de verdad las
+    # distribuciones de "es él" y "es otro".
+    AUDIO_SPEAKER_GAP_MS: float = 160.0
+    # Caída de nivel que marca "el dominante dejó de hablar". Es RELATIVA al nivel
+    # de habla reciente, no un umbral absoluto: con fondo continuo (televisor,
+    # restaurante) el micrófono nunca queda en silencio y un umbral absoluto no
+    # detecta ninguna frontera — medido, cero en esas escenas, y entonces la
+    # ventana de fondo arrastra la voz del usuario y la etapa no atenúa nada.
+    AUDIO_SPEAKER_TURN_DROP_DB: float = 10.0
+    AUDIO_SPEAKER_MIN_VOICED_RATIO: float = 0.6  # voz mínima en la ventana para decidir
+    AUDIO_SPEAKER_ENROLL_WINDOWS: int = 4     # ventanas promediadas para fijar el patrón
+    # Umbrales de similitud contra el patrón, con histéresis. Son deliberadamente
+    # bajos —el usuario puntúa 0.47 de media y las voces ajenas 0.14, así que un
+    # umbral "natural" estaría en 0.3— porque marcar como ajeno al propio usuario
+    # es el error caro: le corta la frase. Se exige por tanto evidencia MUY fuerte
+    # de que la voz no es suya (similitud nula o negativa) antes de atenuar nada.
+    # Barrido medido sobre las cuatro escenas con voces de fondo, rechazo medio:
+    # +0.10 → 15.8 dB, +0.05 → 16.2, 0.00 → 16.4, −0.05 → 17.0, −0.10 → 16.2.
+    AUDIO_SPEAKER_ACCEPT: float = 0.05        # similitud que confirma al usuario
+    AUDIO_SPEAKER_REJECT: float = -0.05       # similitud que confirma voz ajena
+    AUDIO_SPEAKER_ADAPT: float = 0.08         # ritmo de adaptación del patrón (0 = fijo)
+    # Suelo de atenuación de la voz ajena. NUNCA 0: el silencio digital insertado
+    # es el mayor disparador de alucinaciones de los reconocedores tipo Whisper.
+    AUDIO_SPEAKER_FLOOR_DB: float = -18.0
+    AUDIO_SPEAKER_ATTACK_MS: float = 120.0    # bajar despacio
+    AUDIO_SPEAKER_RELEASE_MS: float = 50.0    # recuperar deprisa (sesgo a quedarse corto)
+    # Rango de envolvente mínimo para enrolar: separa campo cercano de campo
+    # lejano (una voz próxima deja valles profundos entre sílabas; a dos metros
+    # la reverberación de la sala los rellena). No puede ser muy alto porque un
+    # fondo continuo también rellena los valles del propio usuario: medido, con
+    # 20 dB no se enrolaba en las escenas de televisor, restaurante ni ruido. El
+    # criterio que de verdad descarta al televisor es el de dominancia de nivel.
+    AUDIO_SPEAKER_DYNAMIC_RANGE_DB: float = 14.0
+    # La identidad manda sobre el criterio de nivel de speaker_focus.
+    AUDIO_SPEAKER_MARK_BACKGROUND: bool = True
 
     # Post-filtro de voz objetivo: atenúa lo que no encaja con una voz humana
     # (acordes, notas sostenidas, zumbidos) por estructura armónica del tono

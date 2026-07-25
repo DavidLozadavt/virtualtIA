@@ -10,6 +10,7 @@ from services.audio.stages.echo import EchoControlStage
 from services.audio.stages.normalize import NormalizeStage
 from services.audio.stages.preprocess import PreprocessStage
 from services.audio.stages.speaker_focus import SpeakerFocusStage
+from services.audio.stages.speaker_lock import TargetSpeakerStage
 from services.audio.stages.vad import (
     EnergyDetector,
     SileroOnnxDetector,
@@ -28,6 +29,7 @@ __all__ = [
     "SileroOnnxDetector",
     "SpeakerFocusStage",
     "SpectralGateEnhancer",
+    "TargetSpeakerStage",
     "VoiceFocusStage",
     "VoiceGateStage",
 ]
