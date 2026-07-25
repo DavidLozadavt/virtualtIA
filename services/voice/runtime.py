@@ -2,10 +2,12 @@
 
 Por llamada:
 
-  frames WS → [grabadora pista usuario] → OpenAI Realtime STT (siempre, sin gate)
+  frames WS → [grabadora pista usuario] → pipeline de audio (services/audio)
+             → OpenAI Realtime STT
              ↘ clasificador de barge-in (solo mientras el bot habla)
   eventos STT → endpointer híbrido → TurnReady → filtros → NLU → FSM
   respuesta → TTS (texto completo) → WAV compartido → ESL uuid_broadcast
+                                   ↘ referencia far-end del cancelador de eco
 
 Los turnos se serializan en una cola (el orden de eventos nunca se cruza);
 la escucha jamás se pausa: durante el playback el audio del usuario sigue
@@ -17,12 +19,17 @@ la documentación al pie de la letra — confirmado con logs reales, pendiente
 de soporte del vendor. El playback usa mientras tanto ESL `uuid_broadcast`
 sobre un WAV en disco compartido (ver `audio_file_store.py`), el mecanismo
 ya probado en V1. La captura (este mismo WS, streaming completo sin gate) no
-cambió. El AEC de referencia far-end queda sin usar: `uuid_broadcast`
-reproduce dentro de FreeSWITCH sin que Python controle el timing real, así
-que ya no hay una referencia de tiempo válida para cancelar eco por NLMS —
-la defensa contra eco pasa a ser el filtro de texto
-(`filters.looks_like_bot_echo`) más el clasificador de barge-in, que exige
-contenido con significado, no solo energía.
+cambió.
+
+Defensa contra eco, en capas (de la señal al texto):
+  1. `services/audio` cancela el eco usando el PCM del TTS como referencia. Que
+     `uuid_broadcast` reproduzca dentro de FreeSWITCH ya no lo impide: el reloj
+     solo aporta la hipótesis inicial y el desfase real (de decenas de ms a más
+     de medio segundo en manos libres) lo resuelve la alineación por correlación.
+  2. La puerta de voz exige más evidencia mientras hay eco detectado.
+  3. La escucha permanece cerrada durante el procesamiento y la respuesta.
+  4. El filtro de texto (`filters.looks_like_bot_echo`) descarta lo que aun así
+     se cuele, y el clasificador de barge-in exige contenido con significado.
 """
 
 from __future__ import annotations
@@ -38,6 +45,7 @@ from fastapi import WebSocket
 
 from core.address_utils import looks_like_place
 from core.config import settings
+from services.audio import CaptureEnhancer
 from services.telephony.esl_client import get_esl_client
 from services.telephony.session_store import (
     CallSession,
@@ -65,6 +73,7 @@ from services.voice.stt_stream import (
     TranscriptEvent,
 )
 from services.voice.transport import (
+    SAMPLE_RATE,
     AudioFrame,
     FreeSwitchTransport,
     StreamStart,
@@ -137,6 +146,11 @@ class VoiceCallRuntime:
 
         self.session: Optional[CallSession] = None
         self.recorder: Optional[CallRecorder] = None
+        # Mejora de audio de captura (services/audio): supresión de ruido,
+        # aislamiento de voz y cancelación de eco antes del STT. El PCM del TTS
+        # se le publica como referencia far-end para poder cancelar el eco del
+        # altavoz del usuario.
+        self.enhancer = CaptureEnhancer(rate=SAMPLE_RATE)
         self.classifier = InterruptionClassifier()
         self.endpointer = HybridEndpointer(
             hold_ms=int(settings.VOICE_ENDPOINT_HOLD_MS),
@@ -251,15 +265,28 @@ class VoiceCallRuntime:
     async def _on_audio(self, pcm: bytes) -> None:
         if self._ending or self.recorder is None:
             return
+        # La grabación guarda el audio TAL CUAL llegó: es la evidencia de la
+        # llamada, no la señal de trabajo del reconocedor.
         self.recorder.add_user_audio(pcm)
+
+        # El pipeline se alimenta SIEMPRE, incluso con la escucha cerrada: es
+        # durante el playback cuando el cancelador de eco puede aprender el
+        # camino acústico (es el único momento en que existe referencia), y
+        # mantenerlo alimentado evita además huecos de estado al reabrir.
+        clean, _ctx = self.enhancer.process(
+            pcm,
+            timestamp=asyncio.get_running_loop().time(),
+            playback_active=self._playing,
+        )
+
         # Canal de escucha cerrado durante procesamiento/respuesta: no se acepta
-        # audio nuevo (ni STT ni barge-in). Solo se conserva la grabación a disco.
+        # audio nuevo (ni STT ni barge-in).
         if not self._mic_open:
             return
         if self.stt is not None:
-            await self.stt.send_audio(pcm)
+            await self.stt.send_audio(clean)
         if self._playing:
-            self.classifier.feed_audio(pcm)
+            self.classifier.feed_audio(clean)
             if self.classifier.should_interrupt():
                 await self._handle_barge_in()
 
@@ -656,6 +683,12 @@ class VoiceCallRuntime:
                 raise TTSError("ESL deshabilitado o sin call_uuid — no se puede reproducir")
 
             self._play_started = asyncio.get_running_loop().time()
+            # Referencia far-end para el cancelador de eco: el audio exacto que
+            # va a sonar, anclado al instante en que se ordena reproducirlo. El
+            # desfase real de la red lo resuelve después la alineación por
+            # correlación, no este reloj.
+            self.enhancer.playback_started(self._play_started)
+            self.enhancer.publish_playback(bytes(pcm))
             ok = await get_esl_client().uuid_broadcast(call_uuid, container_path, "aleg")
             if not ok:
                 raise TTSError(f"uuid_broadcast falló call_uuid={call_uuid}")
@@ -663,6 +696,7 @@ class VoiceCallRuntime:
             await asyncio.sleep(duration)
         finally:
             self._playing = False
+            self.enhancer.playback_finished()
             self.classifier.reset()
 
     def _heard_text(self) -> str:
@@ -684,6 +718,11 @@ class VoiceCallRuntime:
                 await get_esl_client().uuid_break(call_uuid)
             except Exception as e:
                 logger.warning("[runtime] uuid_break failed: %s", e)
+        # El audio que quedaba por reproducir nunca sonó: descartarlo de la
+        # referencia para que el cancelador no intente restar un eco inexistente.
+        self.enhancer.playback_finished(
+            at_time=asyncio.get_running_loop().time()
+        )
         task.cancel()
         if self.session is not None:
             self.orchestrator.note_partial_delivery(self.session, self._heard_text())
@@ -744,6 +783,16 @@ class VoiceCallRuntime:
         await self._kill_channel()
         if self.stt is not None:
             await self.stt.close()
+        # Telemetría del pipeline de audio. `_shutdown` corre en cualquier ruta
+        # de fallo, incluida una en la que el constructor no llegó a terminar:
+        # el cierre nunca debe romperse por una métrica.
+        enhancer = getattr(self, "enhancer", None)
+        if enhancer is not None:
+            logger.info(
+                "[runtime] audio pipeline call_uuid=%s stats=%s",
+                self.transport.call_uuid,
+                enhancer.stats(),
+            )
         if self.recorder is not None:
             self.recorder.write_wav()
         if self.session is not None:
