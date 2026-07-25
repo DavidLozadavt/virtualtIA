@@ -24,6 +24,8 @@ dereverb        supresión estadística de cola tardía de sala (Lebart)
   ▼
 speaker_focus   marca voz de fondo por dominancia de nivel (TV, oficina, terceros)
   ▼
+speaker_lock    identidad del hablante: aprende la voz de quien llama y atenúa las demás
+  ▼
 voice_gate      Silero VAD v6 + puerta retroactiva con pre-roll e histéresis
   ▼
 denoise         DPDFNet 8 kHz nativo (ONNX/CPU); se salta con el canal cerrado
@@ -159,10 +161,81 @@ Medido: mejora en **los seis tipos de fondo probados**, con un coste de 0.5-0.7 
 sobre el nivel de la voz y sin cambiar la fidelidad de forma de onda sobre voz
 limpia (0.856 con y sin la etapa).
 
-### Extracción de hablante objetivo: por qué no
+### Identidad del hablante: `speaker_lock`
 
-Sería la solución ideal ("quédate solo con esta voz"), y se investigó a fondo. No
-es desplegable hoy, y conviene dejar escrito por qué para no repetir el análisis:
+Es la única etapa capaz de distinguir **una voz de otra voz**. Todas las demás
+miden propiedades genéricas (¿hay energía?, ¿es voz?, ¿es armónico?, ¿está
+modulado?) y un televisor encendido las satisface todas, con razón. Por eso el
+rechazo de música era de 33 dB y el de voces humanas de fondo de 1.7 dB.
+
+**Modelo.** `wespeaker-voxceleb-resnet34-LM` en ONNX (26 MB, 256 dimensiones,
+Apache-2.0), con un banco de filtros mel al estilo Kaldi reimplementado en numpy
+(`services/audio/embedding.py`). La elección está medida sobre las grabaciones de
+referencia de tres hablantes que publica sherpa-onnx (misma persona / personas
+distintas, coseno):
+
+| modelo | misma persona | personas distintas | ¿separa? |
+|---|---|---|---|
+| **wespeaker ResNet34-LM** | **0.69** | **0.18** | **sí** |
+| wespeaker CAM++ (sherpa) | 0.50 | 0.42 | no |
+| NeMo TitaNet-small | 0.34 | 0.31 | no |
+
+Los dos últimos son más baratos sobre el papel y aparecen recomendados en la
+literatura; con las mismas características de entrada **no discriminan**, así que
+se descartaron. Conviene no volver a elegirlos sin repetir esta medición.
+
+**La banda telefónica casi no estorba.** El modelo se entrenó a 16 kHz y recibe
+audio de 8 kHz remuestreado (polifásico, obligatorio: con interpolación simple la
+banda alta se llena con una imagen especular de la voz, peor que dejarla vacía).
+El margen entre "misma persona" y "otra persona" baja de 0.266 a 0.244: la
+identidad vive por debajo de 3.4 kHz.
+
+**Lo que decide si la etapa sirve o estorba es la geometría de las ventanas**, y
+esto costó varias iteraciones medidas:
+
+1. *Patrón largo, seguimiento corto.* Comparar dos fragmentos cortos entre sí no
+   funciona (margen −0.34 con 1 s). Comparar un fragmento corto contra un patrón
+   **ya estable** sí: 96.7 % de acierto con ventanas de 0.4 s, 91.7 % con 0.6 s,
+   80 % con 1.5 s. De ahí la asimetría: el patrón se promedia sobre varias
+   ventanas y el seguimiento usa ventanas de 0.4 s cada 0.15 s. La resolución
+   corta es imprescindible: las voces ajenas se cuelan en los huecos de medio
+   segundo que deja el usuario entre frases.
+2. *La ventana no cruza turnos, y la frontera es **relativa**.* Si la ventana
+   arrastra medio segundo de voz del usuario, su embedding se parece al usuario
+   —el usuario suena más fuerte— y la etapa no atenúa nada: medido, dejaba pasar
+   el 94 % de las tramas de fondo. Y la frontera **no** puede detectarse con un
+   umbral absoluto de silencio, porque con fondo continuo el micrófono nunca
+   queda en silencio: medido, cero fronteras detectadas en las escenas de
+   televisor y de restaurante. Se detecta por caída de nivel relativa a lo que se
+   venía oyendo (`AUDIO_SPEAKER_TURN_DROP_DB`).
+3. *Un solo patrón, no dos.* Se probó mantener además un patrón del intruso y
+   decidir por la diferencia entre las dos similitudes — la estructura de razón
+   de verosimilitudes que recomienda la literatura y que sobre el papel está
+   mejor calibrada. **Medido aquí, empeora**: el rechazo medio baja de 17.0 a
+   15.6 dB y la conversación cercana se desploma de 13.8 a 9.5 dB, porque durante
+   el habla simultánea las ventanas contienen a los dos y el patrón del intruso
+   se contamina hasta parecerse al usuario.
+4. *El normalizador deshacía el trabajo.* Perseguía el nivel de la voz ajena ya
+   atenuada y la subía de vuelta: 17.9 → 13.6 dB. Ahora no adapta su ganancia
+   sobre tramas marcadas como voz ajena, por el mismo argumento por el que nunca
+   adaptaba en silencio.
+
+**Sesgo deliberado a quedarse corto.** Los umbrales son bajísimos (aceptar 0.05,
+rechazar −0.05, cuando el usuario puntúa 0.47 y las voces ajenas 0.14): se exige
+evidencia muy fuerte de que la voz **no** es del usuario antes de tocar nada.
+Sin patrón, con la ventana a medio llenar, con similitud intermedia o durante el
+habla simultánea, el audio pasa intacto. Cortarle la frase al usuario cuesta la
+llamada; dejar colar una frase ajena cuesta una corrección.
+
+**Coste**: ~0.06 núcleos por llamada (0.196 → 0.254 medido sobre 20 s de habla
+continua). Sin el modelo descargado la etapa es transparente y lo registra.
+
+### Extracción de hablante objetivo (separar dos voces simultáneas): por qué no
+
+`speaker_lock` decide **de quién es** un tramo de audio; no sabe separar dos
+voces que suenan a la vez. Eso último exige un modelo de extracción de hablante
+objetivo, y ninguno es desplegable hoy. Conviene dejar escrito por qué para no
+repetir el análisis:
 
 - **Ningún modelo abierto de TSE sirve**: los buenos (VoiceFilter, SpeakerBeam-SS,
   TEA-PSE, TargetVoice) no publicaron pesos; los que sí (USEF-TSE, SEF-PNet) no son
@@ -171,7 +244,11 @@ es desplegable hoy, y conviene dejar escrito por qué para no repetir el anális
 - **Todos exigen un audio de enrolamiento de 5-10 s del usuario**, que en una
   llamada entrante no existe. La literatura de 2026 que intenta obtenerlo del
   propio comienzo de la llamada concluye que **ninguno de los modelos probados
-  mejora la tasa de error frente a no procesar nada**.
+  mejora la tasa de error frente a no procesar nada**: mejoran las métricas
+  perceptuales y **empeoran** el reconocimiento, porque la distorsión fonética
+  que introduce la extracción cuesta más que la interferencia que quita. Es el
+  motivo de fondo por el que `speaker_lock` **decide** sobre el audio en vez de
+  **reconstruirlo**: una ganancia no puede inventar fonemas.
 - **`weya-ai/hush`** (Apache-2.0) es el único modelo abierto de aislamiento de voz
   principal *sin* enrolamiento, y se descartó con una prueba propia: su ONNX no
   expone el estado recurrente, así que **no puede ejecutarse trama a trama**
@@ -253,6 +330,41 @@ De dónde sale la mejora, por partes:
 3. **`voice_focus` (+2.0 a +10.3 dB según el fondo).** Mejora en los seis fondos
    probados: música −3.5, otra persona −2.2, cafetería −2.0, motor −2.0, ruido
    blanco −7.7, impulsos −10.3 dB.
+
+### Voces humanas de fondo: efecto de `speaker_lock`
+
+Banco reproducible: `python scripts/benchmark_speaker_isolation.py`. Genera con
+`edge-tts` un corpus de seis hablantes en español, sitúa al usuario en campo
+cercano y a los interferentes en campo lejano (reverberación de sala, absorción
+del aire, nivel), y mide por separado **cuánta voz ajena sobrevive** y **cuánta
+voz propia se pierde** — ninguno de los dos números significa nada solo, porque
+silenciarlo todo da un rechazo perfecto y una transcripción vacía.
+
+| Escena | Rechazo de fondo antes | Ahora | Voz del usuario |
+|---|---|---|---|
+| **Televisión encendida** | 10.2 dB | **21.5 dB** | −6.1 dB (sin cambio) |
+| Restaurante / varias voces | 26.3 dB | 25.9 dB | −6.6 dB |
+| Conversación cercana | 16.2 dB | 15.6 dB | −6.1 dB |
+| **Habla simultánea cercana** | 3.1 dB | **3.0 dB** | −6.7 dB |
+| Música | 38.0 dB | 38.0 dB | −6.0 dB |
+| Ruido continuo + impulsivo | 31.0 dB | 31.0 dB | −6.4 dB |
+
+Lectura honesta de esta tabla:
+
+- **Resuelve el caso de la fuente sonora ajena y continua** (televisión, radio,
+  altavoz, locutor): +11 dB, que es la diferencia entre un fondo transcribible y
+  uno que no lo es. Era el peor de todos y pasa a estar en línea con los demás.
+- **No cambia lo que ya funcionaba** (música, ruido, restaurante): esas las
+  resolvían el supresor neuronal y `voice_focus`, y la identidad no tenía nada
+  que añadir. Tampoco las estropea.
+- **No resuelve el habla simultánea cercana**, y no va a resolverla: cuando dos
+  personas hablan a la vez a distancia parecida, decidir "de quién es este tramo"
+  no basta, hay que **separar** las dos señales, y eso es la extracción de
+  hablante objetivo que la sección anterior documenta como no desplegable. Con
+  las dos voces mezcladas en la misma ventana ninguna hipótesis gana, y el diseño
+  deja pasar el audio a propósito.
+- **El coste para el usuario es cero medible** (−6.0/−6.7 dB antes y después, la
+  misma cifra), que era el requisito no negociable.
 
 ### Otros comportamientos
 
@@ -346,13 +458,16 @@ sobre-suscribir.
 
 ```bash
 pip install -r requirements.txt          # añade onnxruntime
-python scripts/fetch_audio_models.py     # descarga los pesos (~12.5 MB)
+python scripts/fetch_audio_models.py     # descarga los pesos (~39 MB)
 ```
+
+Tres modelos: Silero VAD (2.3 MB, MIT), DPDFNet 8 kHz (10 MB, Apache-2.0) y
+WeSpeaker ResNet34-LM (26.5 MB, Apache-2.0, identidad de hablante).
 
 Los pesos **no están en el repositorio** (`.gitignore`: `models/*.onnx`): son
 binarios de terceros con licencia y versión propias. El script es idempotente y
-verifica tamaño y hash; `--force` re-descarga, `--only vad|denoise` limita el
-alcance.
+verifica tamaño y hash; `--force` re-descarga, `--only vad|denoise|speaker`
+limita el alcance.
 
 Sin ejecutarlo el sistema arranca igual, con el supresor espectral y el detector
 por energía, y registra:
@@ -382,7 +497,7 @@ mágicos en el código. Los más relevantes:
 | Variable | Defecto | Qué controla |
 |---|---|---|
 | `AUDIO_PIPELINE_ENABLED` | `True` | Apagarlo devuelve el PCM intacto (paso directo). |
-| `AUDIO_PIPELINE_STAGES` | 7 etapas | Composición y **orden**. Quitar un nombre desactiva esa etapa. |
+| `AUDIO_PIPELINE_STAGES` | 9 etapas | Composición y **orden**. Quitar un nombre desactiva esa etapa. |
 | `AUDIO_DENOISE_BACKEND` | `onnx` | `onnx` \| `spectral` \| `none`. |
 | `AUDIO_DENOISE_MODEL_PATH` | `models/dpdfnet2_8khz.onnx` | Cambiar de modelo = cambiar esta ruta. |
 | `AUDIO_DENOISE_ATTN_LIMIT_DB` | `12.0` | Techo de atenuación (0 = sin supresión, negativo = sin límite). |
@@ -391,6 +506,13 @@ mágicos en el código. Los más relevantes:
 | `AUDIO_GATE_PRE_ROLL_MS` | `96.0` | Apertura retroactiva = latencia del pipeline. |
 | `AUDIO_GATE_ECHO_PENALTY` | `0.3` | Evidencia extra exigida con eco (≥ 1.0 = veto absoluto). |
 | `AUDIO_FOCUS_MARGIN_DB` | `18.0` | dB por debajo del hablante dominante para considerar fondo. |
+| `AUDIO_SPEAKER_MODEL_PATH` | `models/wespeaker_resnet34_lm.onnx` | Identidad de hablante. Vacío o ausente = etapa transparente. |
+| `AUDIO_SPEAKER_REJECT` | `-0.05` | Similitud por debajo de la cual la voz se considera ajena. Subirlo rechaza más y **arriesga cortar al usuario**. |
+| `AUDIO_SPEAKER_ACCEPT` | `0.05` | Similitud que confirma al usuario (histéresis con la anterior). |
+| `AUDIO_SPEAKER_TRACK_WINDOW_SEC` | `0.4` | Ventana de seguimiento. Más corta = más resolución, menos fiable. |
+| `AUDIO_SPEAKER_TURN_DROP_DB` | `10.0` | Caída de nivel que marca frontera de turno (**relativa**, no absoluta). |
+| `AUDIO_SPEAKER_FLOOR_DB` | `-18.0` | Suelo de atenuación de voz ajena. **Nunca 0**: el silencio digital dispara alucinaciones del reconocedor. |
+| `AUDIO_SPEAKER_MARK_BACKGROUND` | `True` | Deja que la identidad mande sobre el criterio de nivel de `speaker_focus`. |
 | `AUDIO_ECHO_SEARCH_MS` | `700.0` | Rango de búsqueda del retardo de ida y vuelta. |
 | `AUDIO_FOCUS_HARMONIC_STRENGTH` | `3.0` | Fuerza del criterio armónico de `voice_focus` (0 = desactivado). |
 | `AUDIO_FOCUS_MODULATION_STRENGTH` | `1.0` | Fuerza del criterio de modulación silábica. |
@@ -422,18 +544,34 @@ mágicos en el código. Los más relevantes:
    negocio, las dos únicas vías reales son licenciar ai-coustics Quail Voice Focus /
    Krisp VIVA-tel, o entrenar un modelo causal a 8 kHz con música y voces
    competidoras como interferencia a 0 dB de relación.
-2. **Otra persona hablando cerca y a volumen parecido no se distingue.** El rechazo
-   por dominancia de nivel funciona cuando el tercero está más lejos (lo normal);
-   un acompañante pegado al teléfono no. Sigue siendo el caso más difícil: −8.5 dB.
+2. **Habla simultánea cercana: sigue sin resolverse, y es un límite de fondo.**
+   Cuando otra persona habla *a la vez* que el usuario y a distancia parecida, el
+   rechazo se queda en 3 dB — igual que antes de `speaker_lock`. La razón no es de
+   ajuste: la identidad sirve para decidir **de quién es** un tramo, y ahí los dos
+   están presentes de verdad, así que la única salida sería **separar** las dos
+   señales (extracción de hablante objetivo, §2: no desplegable). El diseño
+   detecta esa situación y deja pasar el audio a propósito, que es lo correcto
+   —el usuario está hablando— pero significa que el acompañante también pasa.
+   Vías reales si esto se vuelve crítico: licenciar Krisp VIVA-tel / ai-coustics,
+   o entrenar un modelo causal a 8 kHz con voces competidoras a 0 dB.
+   Lo que sí quedó resuelto es la fuente ajena **continua** (televisión, radio,
+   altavoz): de 10.2 a 21.5 dB.
 3. **El primer segundo de cada playback cancela peor.** Cualquier AEC necesita
    converger. Mitigado porque la escucha está cerrada durante el playback.
-4. **La medición que falta es la de verdad: WER sobre llamadas reales.** Todos los
+4. **`speaker_lock` se juega todo en el enrolamiento.** Si el patrón se aprende
+   de la persona equivocada, la etapa silencia al usuario durante el resto de la
+   llamada. Las defensas son tres (nivel dominante, rango dinámico de campo
+   cercano, sin playback de Lyra) y hasta que el patrón existe no se atenúa nada,
+   pero es el fallo que hay que vigilar en producción: el log dice cuándo se
+   aprende y `stats()` publica `enrolled`, `similarity` y `foreign_ratio`. Un
+   `foreign_ratio` alto de forma sostenida es la señal de alarma.
+5. **La medición que falta es la de verdad: WER sobre llamadas reales.** Todos los
    números de §4 son de laboratorio con voz sintetizada y fondos sintéticos. La
    varianza publicada entre "mejora un 84 %" y "empeora 46 puntos" depende del
    audio, no del modelo. La grabadora ya guarda el audio crudo: pasar 100-200
    llamadas reales por `services.audio.enhance_pcm_once` con varias configuraciones
    y comparar WER separando inserciones de borrados.
-5. **`mod_audio_stream` en su edición comunitaria limita a 10 canales simultáneos.**
+6. **`mod_audio_stream` en su edición comunitaria limita a 10 canales simultáneos.**
    Verificar la licencia antes de dimensionar para 20-40 llamadas: puede ser el
    techo antes que la CPU.
 6. **Precalentamiento opcional.** `services.audio.prewarm_async()` carga modelos y

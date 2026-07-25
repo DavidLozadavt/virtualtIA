@@ -80,8 +80,8 @@
     "semantic_hash": ""
   },
   "core/config.py": {
-    "mtime": 1784685950.9970002,
-    "ast_hash": "7a8e49de254f682e58d0b2835acf85ec",
+    "mtime": 1784952249.3365293,
+    "ast_hash": "050b167b411e99dc6cff62d7b9c58ec7",
     "semantic_hash": ""
   },
   "core/conversation_repair.py": {
@@ -330,8 +330,8 @@
     "semantic_hash": ""
   },
   "requirements.txt": {
-    "mtime": 1784685951.396926,
-    "ast_hash": "da5beb5effd6c5edc27d53bfd6dd6920",
+    "mtime": 1784946320.0023866,
+    "ast_hash": "ad67af1122ac71a7ea325d710006f9c4",
     "semantic_hash": ""
   },
   "services/whatsapp_service.py": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "services/voice/runtime.py": {
-    "mtime": 1784904817.2054775,
-    "ast_hash": "2db17699b4b45f6e9759c5a8c23bbe0a",
+    "mtime": 1784951433.1065404,
+    "ast_hash": "5e9e4d4213564bb80d183987b25da493",
     "semantic_hash": ""
   },
   "services/voice/stt_stream.py": {
@@ -495,8 +495,8 @@
     "semantic_hash": ""
   },
   "tests/test_runtime_flow.py": {
-    "mtime": 1784904899.1099968,
-    "ast_hash": "cf72b3769fba833218021e1f84565377",
+    "mtime": 1784946049.1617258,
+    "ast_hash": "1dadf8729306f1876a98c6701e4ae8e4",
     "semantic_hash": ""
   },
   "tests/test_stt_stream.py": {
@@ -657,6 +657,96 @@
   "tests/test_geocoder_known_place.py": {
     "mtime": 1784902935.8438768,
     "ast_hash": "910028c0ba74ff144985c1367a1b75d3",
+    "semantic_hash": ""
+  },
+  "scripts/fetch_audio_models.py": {
+    "mtime": 1784944190.3723507,
+    "ast_hash": "ef6b796525581675fdd5c1076b583110",
+    "semantic_hash": ""
+  },
+  "services/audio/__init__.py": {
+    "mtime": 1784952340.4063733,
+    "ast_hash": "1017d5063213c842be31f1945895bc67",
+    "semantic_hash": ""
+  },
+  "services/audio/dsp.py": {
+    "mtime": 1784944063.379825,
+    "ast_hash": "3166d409b5110f24dd03cdfd514dc88b",
+    "semantic_hash": ""
+  },
+  "services/audio/frames.py": {
+    "mtime": 1784943139.060485,
+    "ast_hash": "76f95cc32765f213bf702204781cd858",
+    "semantic_hash": ""
+  },
+  "services/audio/pipeline.py": {
+    "mtime": 1784945595.9031615,
+    "ast_hash": "7cbcf41b04478b862c5477db66fa183c",
+    "semantic_hash": ""
+  },
+  "services/audio/reference.py": {
+    "mtime": 1784945790.8264527,
+    "ast_hash": "2dee0d2dc4de165a7d81e370727eeecd",
+    "semantic_hash": ""
+  },
+  "services/audio/runtime_pool.py": {
+    "mtime": 1784952120.7628386,
+    "ast_hash": "5d53abc5960eddeac759a16a924be323",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/__init__.py": {
+    "mtime": 1784950393.4982646,
+    "ast_hash": "a782365f555e41435d2eb1299261d610",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/denoise.py": {
+    "mtime": 1784951600.589628,
+    "ast_hash": "2ecd0bac2c42f357c0de4bc26aa8ffca",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/dereverb.py": {
+    "mtime": 1784944632.166929,
+    "ast_hash": "d8553c8ad2ee8b0ba2aa4d6ac015960d",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/echo.py": {
+    "mtime": 1784945804.2140183,
+    "ast_hash": "b060c6d7b8aad67da995fbee6027fdaa",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/normalize.py": {
+    "mtime": 1784944612.7511034,
+    "ast_hash": "4adcf15a8b62690b1e11487f9c5cbe2d",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/preprocess.py": {
+    "mtime": 1784943264.577244,
+    "ast_hash": "fc5835a93998ddf0f04068722450f30f",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/speaker_focus.py": {
+    "mtime": 1784944561.9210947,
+    "ast_hash": "e5dc1ce8ca84909d84dca686977b6d8e",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/vad.py": {
+    "mtime": 1784949604.7399244,
+    "ast_hash": "fb2f57a68b051ba44e088cea5a02dc4c",
+    "semantic_hash": ""
+  },
+  "services/audio/stages/voice_focus.py": {
+    "mtime": 1784950368.4936523,
+    "ast_hash": "3355f56e06a2d5925b365326b36928e8",
+    "semantic_hash": ""
+  },
+  "tests/test_audio_pipeline.py": {
+    "mtime": 1784952311.7763872,
+    "ast_hash": "24a096c63ae5e094a46c5ad3f08d8d4f",
+    "semantic_hash": ""
+  },
+  "docs/voice/AUDIO_PIPELINE.md": {
+    "mtime": 1784952453.3899946,
+    "ast_hash": "30d50e9f678f78c06a4a933a2d5641cd",
     "semantic_hash": ""
   }
 }

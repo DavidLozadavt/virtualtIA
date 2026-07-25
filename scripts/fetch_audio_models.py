@@ -11,6 +11,10 @@ configuración los espera:
     `AUDIO_DENOISE_MODEL_PATH`. Es el supresor de ruido: modelo causal de
     streaming con tasa nativa de 8 kHz, lo que evita el ciclo
     8 kHz → 48 kHz → 8 kHz que exigen las alternativas.
+  * **WeSpeaker ResNet34-LM** (`wespeaker_resnet34_lm.onnx`, Apache-2.0, ~27 MB)
+    → `AUDIO_SPEAKER_MODEL_PATH`. Es el extractor de identidad de hablante que
+    permite distinguir la voz del usuario de las demás voces. Sin él el pipeline
+    arranca igual, pero las voces de fondo solo se filtran por nivel.
 
 Uso:
 
@@ -44,6 +48,16 @@ DENOISE_URL_TEMPLATE = (
     "https://huggingface.co/Ceva-IP/DPDFNet/resolve/main/onnx/{name}?download=true"
 )
 DENOISE_MIN_BYTES = 4_000_000  # dpdfnet2_8khz.onnx ronda 10 MB
+
+# Export ONNX del ResNet34-LM de WeSpeaker. Se prefiere este export y no el del
+# paquete de sherpa-onnx porque se midió: con las mismas características de
+# entrada, el CAM++ de aquel paquete no separa hablantes (misma persona 0.50,
+# personas distintas 0.42) mientras que este sí (0.69 frente a 0.18).
+SPEAKER_URL = (
+    "https://huggingface.co/onnx-community/wespeaker-voxceleb-resnet34-LM/"
+    "resolve/main/onnx/model.onnx?download=true"
+)
+SPEAKER_MIN_BYTES = 20_000_000  # el .onnx real ronda 26.5 MB
 
 
 def _download(url: str, destination: Path) -> None:
@@ -116,11 +130,38 @@ def fetch_denoise(force: bool) -> int:
     return 0
 
 
+def fetch_speaker(force: bool) -> int:
+    from core.config import settings
+    from services.audio import resolve_model_path
+
+    target = resolve_model_path(settings.AUDIO_SPEAKER_MODEL_PATH)
+    if target is None:
+        print("[speaker] AUDIO_SPEAKER_MODEL_PATH vacío: anclaje de hablante desactivado.")
+        return 0
+    if target.is_file() and target.stat().st_size >= SPEAKER_MIN_BYTES and not force:
+        print(f"[speaker] ya presente: {target} ({target.stat().st_size} bytes)")
+        return 0
+    print(f"[speaker] descargando {SPEAKER_URL}")
+    try:
+        _download(SPEAKER_URL, target)
+    except Exception as e:  # noqa: BLE001 — sin red el pipeline degrada, no falla
+        print(f"[speaker] no se pudo descargar {target.name}: {e}", file=sys.stderr)
+        return 1
+    size = target.stat().st_size
+    if size < SPEAKER_MIN_BYTES:
+        target.unlink(missing_ok=True)
+        print(f"[speaker] descarga inválida ({size} bytes)", file=sys.stderr)
+        return 1
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()[:16]
+    print(f"[speaker] listo: {target} ({size} bytes, sha256:{digest}…)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--only",
-        choices=("vad", "denoise"),
+        choices=("vad", "denoise", "speaker"),
         help="Descargar solo un componente.",
     )
     parser.add_argument(
@@ -133,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         status |= fetch_vad(args.force)
     if args.only in (None, "denoise"):
         status |= fetch_denoise(args.force)
+    if args.only in (None, "speaker"):
+        status |= fetch_speaker(args.force)
     return status
 
 

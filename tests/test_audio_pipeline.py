@@ -34,6 +34,7 @@ from services.audio.stages import (
     NormalizeStage,
     PreprocessStage,
     SpeakerFocusStage,
+    TargetSpeakerStage,
     VoiceFocusStage,
     VoiceGateStage,
 )
@@ -862,6 +863,7 @@ def test_default_pipeline_reports_every_configured_stage():
         "echo_control",
         "dereverb",
         "speaker_focus",
+        "speaker_lock",
         "voice_gate",
         "denoise",
         "voice_focus",
@@ -971,8 +973,9 @@ def test_onnx_sessions_are_shared_across_calls():
     enhancers = [CaptureEnhancer(rate=RATE, enabled=True) for _ in range(6)]
     for enhancer in enhancers:
         enhancer.process(float_to_pcm16(_tone(BLOCK)), timestamp=0.02)
-    # Con modelos presentes son 2 sesiones (VAD + supresor); sin modelos, 0.
-    assert session_count() <= 2
+    # Con modelos presentes son 3 sesiones (VAD + supresor + identidad de
+    # hablante); sin modelos descargados, 0.
+    assert session_count() <= 3
 
 
 def test_calls_do_not_share_state():
@@ -1242,3 +1245,249 @@ def test_stage_fallbacks_work_without_any_model(monkeypatch):
         )
         total += len(chunk)
     assert total > 0
+
+
+# ── anclaje al hablante objetivo ──
+
+
+class _ScriptedEmbedder:
+    """Extractor de prueba: la identidad la fija la amplitud del fragmento.
+
+    Devuelve un vector unitario que depende solo del nivel del fragmento, de modo
+    que un test puede construir "dos personas" sin necesitar el modelo real ni
+    audio de verdad.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, samples):
+        self.calls += 1
+        if samples.size == 0:
+            return None
+        # Nivel alto → hablante A; nivel bajo → hablante B. Los dos vectores
+        # forman un ángulo obtuso (coseno −0.6), como dos voces realmente
+        # distintas: ortogonales (coseno 0) no bastarían para cruzar el umbral
+        # de rechazo, que exige evidencia fuerte de que la voz no es del usuario.
+        loud = float(np.sqrt(np.mean(np.square(samples, dtype=np.float64)))) > 0.15
+        if loud:
+            return np.array([1.0, 0.0], dtype=np.float32)
+        return np.array([-0.6, 0.8], dtype=np.float32)
+
+
+def _speaker_lock(embedder=None, **overrides):
+    params = dict(
+        rate=RATE,
+        frame_ms=20.0,
+        enroll_window_sec=0.4,
+        track_window_sec=0.2,
+        hop_sec=0.1,
+        min_voiced_ratio=0.5,
+        enroll_windows=2,
+        accept=0.05,
+        reject=-0.05,
+        adapt=0.0,
+        floor_db=-18.0,
+        attack_ms=20.0,
+        release_ms=20.0,
+        silence_dbfs=-55.0,
+        gap_ms=60.0,
+        turn_drop_db=10.0,
+        dynamic_range_db=0.0,
+        mark_background=True,
+    )
+    params.update(overrides)
+    return TargetSpeakerStage(embedder, **params)
+
+
+def _drive(stage, signal, **ctx_kwargs):
+    """Pasa una señal por la etapa en bloques de 20 ms; devuelve (salida, contextos)."""
+    out, contexts = [], []
+    for start in range(0, signal.size, BLOCK):
+        ctx = FrameContext(
+            timestamp=(start + BLOCK) / RATE, input_rate=RATE, **ctx_kwargs
+        )
+        out.append(stage.process(signal[start : start + BLOCK], ctx))
+        contexts.append(ctx)
+    produced = np.concatenate(out) if out else np.zeros(0, dtype=np.float32)
+    return produced, contexts
+
+
+def test_speaker_lock_is_transparent_without_a_model():
+    """Sin extractor de identidad la etapa deja el audio igual: la ausencia del
+    modelo degrada el sistema, no lo rompe ni lo hace atenuar a ciegas."""
+    stage = _speaker_lock(None)
+    assert stage.active is False
+    signal = _tone(4000, amp=0.3)
+    out, _ = _drive(stage, signal)
+    assert np.allclose(out, signal)
+    assert stage.stats()["enrolled"] is False
+
+
+def test_speaker_lock_never_attenuates_before_enrolling():
+    """Hasta que el patrón existe no se toca el audio: equivocarse al principio
+    cuesta las primeras palabras del usuario, el error más caro del sistema."""
+    signal = _tone(8000, amp=0.3)
+    stage = _speaker_lock(_ScriptedEmbedder(), enroll_windows=10_000)
+    out, contexts = _drive(stage, signal)
+    assert np.allclose(out, signal)
+    assert not any(ctx.background_voice for ctx in contexts)
+
+
+def test_speaker_lock_learns_the_user_and_attenuates_another_voice():
+    """El caso que motiva la etapa: se enrola al usuario y luego llega otra voz."""
+    stage = _speaker_lock(_ScriptedEmbedder())
+    user = _tone(8000, amp=0.3)
+    user_out, _ = _drive(stage, user)
+    assert stage.stats()["enrolled"] is True
+    assert rms(user_out[-1600:]) == pytest.approx(rms(user[-1600:]), rel=0.05)
+
+    # Pausa (frontera de turno) y después otra voz, más floja: hablante B.
+    _drive(stage, np.zeros(1600, dtype=np.float32))
+    other = _tone(8000, amp=0.1)
+    other_out, contexts = _drive(stage, other)
+    assert rms(other_out[-1600:]) < rms(other[-1600:]) * 0.5
+    assert any(ctx.background_voice for ctx in contexts)
+
+
+def test_speaker_lock_publishes_its_decision():
+    stage = _speaker_lock(_ScriptedEmbedder())
+    _, contexts = _drive(stage, _tone(6000, amp=0.3))
+    notes = [c.notes for c in contexts if "speaker_similarity" in c.notes]
+    assert notes, "la decisión debe publicarse para poder auditarla"
+    assert all(0.0 <= n["speaker_gain"] <= 1.0 for n in notes)
+
+
+def test_speaker_lock_does_not_enroll_while_lyra_is_speaking():
+    """El eco del propio bot no puede acabar dentro del patrón del usuario: sería
+    aprender la voz equivocada y silenciar a quien llama durante toda la llamada."""
+    stage = _speaker_lock(_ScriptedEmbedder())
+    _drive(stage, _tone(8000, amp=0.3), playback_active=True)
+    assert stage.stats()["enrolled"] is False
+
+
+def test_speaker_lock_detects_turn_boundaries_by_relative_drop():
+    """La frontera de turno se detecta por caída RELATIVA de nivel, no contra un
+    umbral absoluto de silencio: con fondo continuo el micrófono nunca queda en
+    silencio y un criterio absoluto no detectaría ninguna frontera (medido: cero
+    en las escenas de televisor y restaurante)."""
+    stage = _speaker_lock(_ScriptedEmbedder())
+    _drive(stage, _tone(8000, amp=0.4))
+    before = stage.stats()["segments_seen"]
+    # Fondo audible, muy por encima del silencio absoluto pero 26 dB por debajo
+    # de lo que se venía oyendo.
+    _drive(stage, _tone(4000, amp=0.02))
+    assert stage.stats()["segments_seen"] > before
+
+
+def test_speaker_lock_ramps_the_gain_instead_of_stepping():
+    """La ganancia se interpola por muestra: un salto entre bloques produce un
+    clic de banda ancha que el reconocedor lee como una consonante."""
+    stage = _speaker_lock(_ScriptedEmbedder(), attack_ms=200.0)
+    _drive(stage, _tone(8000, amp=0.3))
+    _drive(stage, np.zeros(1600, dtype=np.float32))
+
+    # La otra voz se mantiene el tiempo suficiente para que la ventana de
+    # seguimiento se llene y la etapa llegue a decidir.
+    other = _tone(8000, amp=0.1)
+    ramped = False
+    for start in range(0, other.size, BLOCK):
+        block = other[start : start + BLOCK]
+        ctx = FrameContext(timestamp=(start + block.size) / RATE, input_rate=RATE)
+        out = stage.process(block, ctx)
+        audible = np.abs(block) > 1e-6
+        if audible.sum() < 3:
+            continue
+        ratios = np.abs(out[audible]) / np.abs(block[audible])
+        if not np.allclose(ratios, ratios[0], atol=1e-3):
+            ramped = True  # ganancia variando dentro del bloque: hay rampa
+            break
+    assert ramped, "la ganancia debe interpolarse por muestra, no saltar de golpe"
+
+
+def test_speaker_lock_keeps_identity_across_turn_resets():
+    """`reset()` limpia buffers pero conserva la identidad: es la misma persona
+    durante toda la llamada, y reaprenderla en cada turno dejaría desprotegido el
+    arranque de cada respuesta."""
+    stage = _speaker_lock(_ScriptedEmbedder())
+    _drive(stage, _tone(8000, amp=0.3))
+    assert stage.stats()["enrolled"] is True
+    stage.reset()
+    assert stage.stats()["enrolled"] is True
+
+
+def test_normalize_holds_its_gain_on_foreign_voice():
+    """El normalizador no debe perseguir el nivel de una voz ajena ya atenuada:
+    si lo hiciera la subiría de vuelta y desharía el trabajo del anclaje. Medido,
+    sin esta condición el rechazo de voz de fondo caía de 17.9 a 13.6 dB."""
+    stage = NormalizeStage(
+        rate=RATE,
+        target_dbfs=-20.0,
+        max_gain_db=12.0,
+        min_gain_db=-6.0,
+        attack=0.7,
+        release=0.9,
+        limit=0.95,
+        speech_only=True,
+    )
+    quiet = _tone(BLOCK, amp=0.01)
+    for _ in range(40):
+        ctx = FrameContext(
+            timestamp=0.02, input_rate=RATE, speech_active=True, background_voice=True
+        )
+        stage.process(quiet.copy(), ctx)
+    assert stage.stats()["gain_db"] == pytest.approx(0.0, abs=0.1)
+
+
+@pytest.mark.skipif(
+    _model_missing("models/wespeaker_resnet34_lm.onnx"),
+    reason="modelo de identidad de hablante no descargado",
+)
+def test_real_embedder_separates_two_voices_over_the_telephone_band():
+    """El modelo elegido debe servir para lo que se le pide: dos voces distintas,
+    a 8 kHz, quedan más lejos entre sí que cada una de sí misma."""
+    from services.audio.embedding import SpeakerEmbedder, cosine
+
+    embedder = SpeakerEmbedder("models/wespeaker_resnet34_lm.onnx", rate=RATE)
+
+    def voice(f0: float, seed: int) -> np.ndarray:
+        generator = np.random.default_rng(seed)
+        time = np.arange(RATE * 2) / RATE
+        signal = sum(
+            (0.7**k) * np.sin(2 * np.pi * k * f0 * time + generator.uniform(0, 6.28))
+            for k in range(1, 14)
+        )
+        return (signal / np.max(np.abs(signal)) * 0.3).astype(np.float32)
+
+    same_a, same_b = embedder(voice(110.0, 1)), embedder(voice(110.0, 2))
+    other = embedder(voice(210.0, 3))
+    assert same_a is not None and same_b is not None and other is not None
+    assert cosine(same_a, same_b) > cosine(same_a, other)
+
+
+def test_fbank_matches_the_reference_extractor_geometry():
+    """El banco de filtros debe cumplir la geometría de Kaldi que espera el
+    modelo: 80 bandas, 25 ms de ventana, 10 ms de salto, media restada y descarte
+    de la banda de Nyquist."""
+    from services.audio.embedding import FbankExtractor, mel_filterbank
+
+    extractor = FbankExtractor(rate=16000)
+    assert (extractor.frame_size, extractor.hop_size, extractor.fft_size) == (400, 160, 512)
+    noise = np.random.default_rng(0).standard_normal(16000).astype(np.float32) * 0.1
+    features = extractor(noise)
+    assert features is not None and features.shape[1] == 80
+    assert 95 <= features.shape[0] <= 100  # 1 s con salto de 10 ms
+    assert np.allclose(features.mean(axis=0), 0.0, atol=1e-4)
+
+    bank = mel_filterbank(80, 16000, 512)
+    assert bank.shape == (80, 257)
+    assert float(bank[:, -1].max()) == 0.0  # Kaldi no usa la banda de Nyquist
+
+
+def test_fbank_rejects_fragments_shorter_than_one_frame():
+    """Un fragmento demasiado corto devuelve None en vez de inventar tramas: la
+    etapa lo interpreta como 'todavía no se puede decidir' y deja pasar el audio."""
+    from services.audio.embedding import FbankExtractor
+
+    extractor = FbankExtractor(rate=16000)
+    assert extractor(np.zeros(100, dtype=np.float32)) is None
