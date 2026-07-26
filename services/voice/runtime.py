@@ -6,8 +6,14 @@ Por llamada:
              → OpenAI Realtime STT
              ↘ clasificador de barge-in (solo mientras el bot habla)
   eventos STT → endpointer híbrido → TurnReady → filtros → NLU → FSM
-  respuesta → TTS (texto completo) → WAV compartido → ESL uuid_broadcast
+  intención del turno → capa conversacional (plan de habla: etapas, pausas,
+                        sonido contextual) → TTS por etapa → un solo WAV
+                        compartido → ESL uuid_broadcast
                                    ↘ referencia far-end del cancelador de eco
+
+El FSM nunca entrega texto al sintetizador: entrega una intención
+(`VoiceTurnResult.speech`) y `services/voice/conversation` decide qué se dice,
+en cuántas etapas y con qué ritmo.
 
 Los turnos se serializan en una cola (el orden de eventos nunca se cruza);
 la escucha jamás se pausa: durante el playback el audio del usuario sigue
@@ -36,7 +42,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import re
 from typing import Optional
 
@@ -58,6 +63,13 @@ from services.telephony.session_store import (
 from services.voice import filters
 from services.voice.audio_file_store import get_audio_file_store
 from services.voice.barge_in import InterruptionClassifier
+from services.voice.conversation import (
+    ConversationEngine,
+    RenderedSpeech,
+    SpeechIntent,
+    SpeechPlan,
+    SpeechRequest,
+)
 from services.voice.endpointing import HybridEndpointer, StablePartial, TurnReady
 from services.voice.nlu import TurnNLU
 from services.voice.orchestrator import (
@@ -79,7 +91,7 @@ from services.voice.transport import (
     StreamStart,
     StreamStop,
 )
-from services.voice.tts_stream import BYTES_PER_SECOND, StreamingTTS, TTSError
+from services.voice.tts_stream import StreamingTTS, TTSError
 
 logger = logging.getLogger("lyra.voice.runtime")
 
@@ -91,31 +103,9 @@ _STT_FAILURE_APOLOGY = (
     "Estamos presentando una falla técnica. Por favor llámanos de nuevo en unos minutos."
 )
 
-# Mensajes de continuidad por PROCESO realmente en ejecución (nunca se usa uno que
-# no corresponda al estado actual). Solo mantienen viva la conversación.
-_FILLER_MESSAGES = {
-    # Dirección de vía (geocodificando/validando una dirección concreta).
-    "address": [
-        "Estoy validando la ubicación.",
-        "Estoy verificando esa dirección.",
-        "Permíteme validar esa información.",
-    ],
-    # Nombre propio de lugar / barrio (verificando el lugar mencionado).
-    "place": [
-        "Estoy verificando esa dirección.",
-        "Estoy revisando los datos que me indicaste.",
-        "Un momento por favor.",
-    ],
-    # Contexto geográfico adicional (desambiguando barrio/sector).
-    "geo_context": [
-        "Permíteme validar esa información.",
-        "Estoy revisando los datos que me indicaste.",
-        "Estoy verificando esa ubicación.",
-    ],
-    "generic": [
-        "Un momento por favor.",
-    ],
-}
+# Cuántas frases de espera adicionales admite una operación que se alarga. Por
+# encima de esto la espera se vuelve cháchara.
+_MAX_WAIT_PHRASES = 2
 
 _STREET_TEXT_RE = re.compile(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", re.IGNORECASE)
 
@@ -144,6 +134,11 @@ class VoiceCallRuntime:
         self.nlu = nlu or TurnNLU()
         self.http_client = http_client
 
+        # Capa conversacional: entre el resultado lógico del turno y el TTS.
+        # Decide qué se dice, en cuántas etapas, con qué pausas y con qué
+        # tiempos. El texto final nunca sale directo del orquestador.
+        self.conversation = ConversationEngine(sample_rate=SAMPLE_RATE)
+
         self.session: Optional[CallSession] = None
         self.recorder: Optional[CallRecorder] = None
         # Mejora de audio de captura (services/audio): supresión de ruido,
@@ -171,9 +166,6 @@ class VoiceCallRuntime:
         self._playing = False
 
         self._silence_deadline: Optional[float] = None
-
-        # Último relleno hablado — para no repetir el mismo consecutivamente.
-        self._last_filler: Optional[str] = None
 
         # Canal de escucha (micrófono). Se CIERRA por completo desde que el turno
         # del usuario termina y arranca el procesamiento, hasta que Lyra terminó
@@ -216,6 +208,9 @@ class VoiceCallRuntime:
     async def _initialize(self) -> None:
         self._initialized = True
         call_uuid = self.transport.call_uuid or ""
+        # La memoria de expresiones y el estado conversacional son de ESTA
+        # llamada: se reconstruyen en cuanto se conoce su identidad.
+        self.conversation = ConversationEngine(call_uuid, sample_rate=SAMPLE_RATE)
         self.session = self.store.get_or_create(
             call_uuid, caller_phone=self.transport.caller_number
         )
@@ -403,6 +398,9 @@ class VoiceCallRuntime:
                 # procesamiento o audio de Lyra, y solo se reabre al terminar la
                 # respuesta (regla de micrófono cerrado durante el turno).
                 self._close_mic()
+                # El usuario cedió la palabra: empieza el turno conversacional
+                # de Lyra (estado UNDERSTANDING, sin audio emitido todavía).
+                self.conversation.begin_turn()
                 try:
                     if kind == "greeting":
                         await self._do_greeting()
@@ -425,6 +423,7 @@ class VoiceCallRuntime:
                     )
                 finally:
                     # Respuesta terminada y de vuelta a espera: reabrir la escucha.
+                    self.conversation.end_turn()
                     self._open_mic()
         except asyncio.CancelledError:
             raise
@@ -444,6 +443,7 @@ class VoiceCallRuntime:
         if self._ending:
             return
         self.classifier.reset()
+        self.conversation.user_speaking()
         reset = getattr(self.endpointer, "reset", None)
         if callable(reset):
             try:
@@ -456,7 +456,7 @@ class VoiceCallRuntime:
         assert self.session is not None
         turn = self.orchestrator.handle_inbound(self.session)
         self.store.save(self.session)
-        await self._speak_and_wait(turn.speak_text)
+        await self._deliver(turn)
         self._arm_silence_timer()
 
     async def _do_silence_turn(self) -> None:
@@ -514,47 +514,73 @@ class VoiceCallRuntime:
         )
 
         nlu_result = await self.nlu.extract(norm, session.state, session.last_message)
-        turn = await self._process_turn_with_filler(session, norm, nlu_result, confidence)
+        turn = await self._process_turn_with_narration(session, norm, nlu_result, confidence)
         self.store.save(session)
         self._turns_done += 1
         await self._finish_turn(turn)
 
-    async def _process_turn_with_filler(
+    async def _process_turn_with_narration(
         self, session: CallSession, norm: str, nlu_result, confidence: float
     ):
-        """Emite el mensaje de espera ANTES de cualquier procesamiento pesado y,
-        con el mensaje ya iniciado, arranca el pipeline en paralelo con su audio.
+        """Narra el trabajo ANTES de empezarlo y acompaña la espera si se alarga.
 
         Orden garantizado: (1) el turno del usuario terminó y la escucha ya está
-        cerrada; (2) si el turno hará trabajo costoso, Lyra emite de inmediato el
-        mensaje correspondiente al proceso; (3) recién entonces comienza el
-        procesamiento interno, que corre igual que siempre en `proc` mientras el
-        mensaje suena. No hay procesamiento pesado antes del mensaje ni una pausa
-        silenciosa previa. Solo cambia la experiencia del usuario."""
+        cerrada; (2) si el turno hará trabajo costoso, Lyra narra de inmediato el
+        proceso que va a ejecutar; (3) recién entonces comienza el procesamiento
+        interno, que corre igual que siempre en `proc` mientras la narración
+        suena; (4) si `proc` tarda más de lo esperado, la conversación se
+        mantiene viva con frases de espera distintas entre sí.
+
+        La narración solo describe procesos que existen de verdad, y el texto lo
+        elige la capa conversacional — aquí solo se decide QUÉ proceso corre."""
         state_at_entry = session.state
+        narration_kind: Optional[str] = None
         filler_task: Optional[asyncio.Task] = None
         if self._should_announce(session, norm, nlu_result) and not self._ending:
-            filler = self._pick_filler(state_at_entry, norm, nlu_result)
-            if filler:
-                logger.info(
-                    "[runtime] pre-processing message call_uuid=%s state=%s msg=%r",
-                    session.call_uuid, state_at_entry, filler,
-                )
-                # Mensaje emitido YA (antes de arrancar el pipeline).
-                filler_task = asyncio.create_task(self._speak_safe(filler))
-                await asyncio.sleep(0)   # ceder para que el mensaje empiece a sonar
+            narration_kind = self._narration_kind(state_at_entry, norm, nlu_result)
+            logger.info(
+                "[runtime] narrating work call_uuid=%s state=%s kind=%s",
+                session.call_uuid, state_at_entry, narration_kind,
+            )
+            # Narración emitida YA (antes de arrancar el pipeline). El texto lo
+            # decide la capa conversacional, nunca esta capa.
+            filler_task = asyncio.create_task(
+                self._speak_request_safe(self.conversation.narration(narration_kind))
+            )
+            await asyncio.sleep(0)   # ceder para que la narración empiece a sonar
 
-        # Con el mensaje ya iniciado, arranca todo el procesamiento interno.
-        turn = await self.orchestrator.process_turn(
-            session,
-            text=norm,
-            nlu=nlu_result,
-            confidence=confidence,
-            http_client=self.http_client,
+        # Con la narración ya iniciada, arranca todo el procesamiento interno.
+        proc = asyncio.create_task(
+            self.orchestrator.process_turn(
+                session,
+                text=norm,
+                nlu=nlu_result,
+                confidence=confidence,
+                http_client=self.http_client,
+            )
         )
-        if filler_task is not None:
-            await filler_task   # deja terminar el audio del mensaje antes de responder
-        return turn
+        try:
+            if filler_task is not None:
+                await filler_task   # el audio de la narración termina primero
+                # Espera inteligente: si la operación se alarga, la conversación
+                # se mantiene viva con frases distintas, nunca con silencio.
+                await self._keep_alive(proc, narration_kind)
+            return await proc
+        except asyncio.CancelledError:
+            proc.cancel()
+            raise
+
+    async def _keep_alive(self, proc: asyncio.Task, kind: Optional[str]) -> None:
+        """Acompaña una operación que se alarga, sin repetir la misma frase."""
+        for attempt in range(_MAX_WAIT_PHRASES):
+            if proc.done() or self._ending:
+                return
+            await asyncio.wait(
+                {proc}, timeout=self.conversation.wait_check_interval(attempt)
+            )
+            if proc.done() or self._ending:
+                return
+            await self._speak_request_safe(self.conversation.wait_more(kind or ""))
 
     def _should_announce(self, session: CallSession, norm: str, nlu_result) -> bool:
         """True si el turno hará trabajo costoso (geocodificación/resolución) y por
@@ -580,22 +606,14 @@ class VoiceCallRuntime:
             )
         return False
 
-    def _pick_filler(self, state: str, norm: str, nlu_result) -> Optional[str]:
-        """Escoge un mensaje de continuidad acorde al PROCESO real en ejecución,
-        sin repetir el anterior de forma consecutiva."""
+    def _narration_kind(self, state: str, norm: str, nlu_result) -> str:
+        """Qué proceso REAL está corriendo — la narración nunca inventa uno."""
         if state == STATE_WAITING_GEO_CONTEXT:
-            category = "geo_context"
-        elif state == STATE_WAITING_ORIGIN:
+            return "geo_context"
+        if state == STATE_WAITING_ORIGIN:
             span = getattr(nlu_result, "best_pickup", None) or norm
-            category = "address" if _is_street_text(span) or _is_street_text(norm) else "place"
-        else:
-            category = "generic"
-        options = _FILLER_MESSAGES.get(category, _FILLER_MESSAGES["generic"])
-        # Nunca repetir consecutivamente el mismo mensaje.
-        choices = [m for m in options if m != self._last_filler] or options
-        msg = random.choice(choices)
-        self._last_filler = msg
-        return msg
+            return "address" if _is_street_text(span) or _is_street_text(norm) else "place"
+        return "generic"
 
     async def _finish_turn(self, turn: VoiceTurnResult) -> None:
         """Habla el resultado y ejecuta la acción (create/hangup/listen)."""
@@ -603,21 +621,27 @@ class VoiceCallRuntime:
         session = self.session
 
         if turn.action == VoiceAction.CREATE_SERVICE:
-            # Frase de espera en paralelo con la creación del servicio: el
-            # usuario nunca queda en silencio mientras el backend responde.
-            wait_task = asyncio.create_task(self._speak_and_wait(turn.speak_text))
-            final = await self.orchestrator.process_turn(
-                session, text="", http_client=self.http_client
+            # Acuse en paralelo con la creación del servicio: el usuario nunca
+            # queda en silencio mientras el backend responde.
+            wait_task = asyncio.create_task(self._deliver(turn))
+            create = asyncio.create_task(
+                self.orchestrator.process_turn(
+                    session, text="", http_client=self.http_client
+                )
             )
-            self.store.save(session)
             await asyncio.wait({wait_task})
-            if wait_task.cancelled():
-                pass  # barge-in sobre la frase de espera: el resultado igual se habla
-            elif wait_task.exception():
-                raise wait_task.exception()
+            # Barge-in sobre el acuse: el resultado igual se habla. Y si el
+            # acuse falló, la creación NUNCA se aborta a medias — se deja
+            # terminar y recién después se propaga el fallo.
+            speak_exc = None if wait_task.cancelled() else wait_task.exception()
+            await self._keep_alive(create, "service")
+            final = await create
+            self.store.save(session)
+            if speak_exc is not None:
+                raise speak_exc
             turn = final
 
-        await self._speak_and_wait(turn.speak_text)
+        await self._deliver(turn)
 
         if turn.action == VoiceAction.HANGUP:
             # Igual que V1: la sesión sobrevive solo si el servicio se creó
@@ -636,57 +660,105 @@ class VoiceCallRuntime:
 
     # ── playback vía ESL uuid_broadcast ──
 
-    async def _speak_and_wait(self, text: str) -> None:
-        """Reproduce `text`; retorna al terminar o al ser interrumpido."""
-        if not (text or "").strip() or self._ending:
-            return
-        task = asyncio.create_task(self._play_text(text))
+    async def _deliver(self, turn: VoiceTurnResult) -> None:
+        """Habla el resultado de un turno a través de la capa conversacional."""
+        request = turn.speech
+        if request is None:
+            # Red de seguridad: un turno sin intención declarada se dice tal
+            # cual, troceado en ideas y sin adornos.
+            if not (turn.speak_text or "").strip():
+                return
+            request = SpeechRequest(
+                intent=SpeechIntent.REPROMPT, text=turn.speak_text
+            )
+        await self._speak_request(request)
+
+    async def _speak_request(self, request: SpeechRequest) -> Optional[RenderedSpeech]:
+        """Planifica la intención, la reproduce y espera a que termine."""
+        if self._ending:
+            return None
+        plan = self.conversation.plan(request)
+        if not plan.segments:
+            return None
+        rendered = await self._speak_plan_and_wait(plan)
+        if rendered is not None and rendered.text and self.session is not None:
+            # El historial guarda lo REALMENTE dicho: es contra eso que se
+            # compara el eco textual y lo que se repite si el usuario lo pide.
+            self.session.last_message = rendered.text
+        return rendered
+
+    async def _speak_request_safe(self, request: SpeechRequest) -> None:
+        try:
+            await self._speak_request(request)
+        except TTSError as e:
+            logger.error("[runtime] speak failed: %s", e)
+
+    async def _speak_plan_and_wait(self, plan: SpeechPlan) -> Optional[RenderedSpeech]:
+        """Reproduce un plan; retorna al terminar o al ser interrumpido."""
+        task = asyncio.create_task(self._play_plan(plan))
         self._playout_task = task
         await asyncio.wait({task})
         if task.cancelled():
-            return  # barge-in: el turno del usuario ya está en camino
+            return None  # barge-in: el turno del usuario ya está en camino
         exc = task.exception()
         if exc is not None:
             raise exc
+        return task.result()
 
-    async def _play_text(self, text: str) -> None:
-        """Sintetiza el texto completo, lo sube a broadcast y espera su duración.
+    async def _speak_and_wait(self, text: str) -> None:
+        """Reproduce texto suelto (disculpas técnicas), sin intención declarada."""
+        if not (text or "").strip() or self._ending:
+            return
+        await self._speak_request(self.conversation.fallback(text))
+
+    async def _synth_stage(self, text: str) -> bytes:
+        """PCM de una etapa hablada, con el mismo reintento de TTS de siempre."""
+        from services.voice.text_normalize import split_sentences
+
+        pcm = bytearray()
+        for sentence in split_sentences(text):
+            attempt = 0
+            while True:
+                try:
+                    async for chunk in self.tts.synthesize_sentence(sentence):
+                        pcm.extend(chunk)
+                    break
+                except TTSError:
+                    attempt += 1
+                    if attempt >= 2:
+                        raise
+                    logger.warning("[runtime] TTS retry sentence=%r", sentence[:60])
+        return bytes(pcm)
+
+    async def _play_plan(self, plan: SpeechPlan) -> Optional[RenderedSpeech]:
+        """Renderiza el plan a un único buffer y lo reproduce.
+
+        Las pausas y el fondo contextual viajan DENTRO del mismo PCM: una sola
+        síntesis, un solo WAV y un solo `uuid_broadcast`, igual que antes. El
+        ritmo humano no cuesta ni una conexión extra ni latencia añadida.
 
         `mod_audio_stream` no reproduce vía WS (ver docstring del módulo) —
         se usa `uuid_broadcast` sobre un WAV compartido, como en V1.
         """
-        from services.voice.text_normalize import split_sentences
-
         self._playing = True
+        self.conversation.playback_started()
         self.classifier.reset()
         self._sentence_marks = []
         call_uuid = self.transport.call_uuid or ""
-        pcm = bytearray()
         try:
-            for sentence in split_sentences(text):
-                attempt = 0
-                while True:
-                    try:
-                        async for chunk in self.tts.synthesize_sentence(sentence):
-                            pcm.extend(chunk)
-                        break
-                    except TTSError:
-                        attempt += 1
-                        if attempt >= 2:
-                            raise
-                        logger.warning(
-                            "[runtime] TTS retry sentence=%r", sentence[:60]
-                        )
-                self._sentence_marks.append((len(pcm) / BYTES_PER_SECOND, sentence))
+            rendered = await self.conversation.render(plan, self._synth_stage)
+            self._sentence_marks = list(rendered.marks)
 
-            if not pcm or self.transport.closed or self._ending:
-                return
+            if not rendered.pcm or self.transport.closed or self._ending:
+                return rendered
 
             if self.recorder is not None:
-                self.recorder.add_bot_audio(bytes(pcm))
+                self.recorder.add_bot_audio(rendered.pcm)
 
             store = get_audio_file_store()
-            _, container_path, duration = store.save_pcm(bytes(pcm), call_uuid=call_uuid)
+            _, container_path, duration = store.save_pcm(
+                rendered.pcm, call_uuid=call_uuid
+            )
 
             if not (settings.FREESWITCH_ESL_ENABLED and call_uuid):
                 raise TTSError("ESL deshabilitado o sin call_uuid — no se puede reproducir")
@@ -697,14 +769,16 @@ class VoiceCallRuntime:
             # desfase real de la red lo resuelve después la alineación por
             # correlación, no este reloj.
             self.enhancer.playback_started(self._play_started)
-            self.enhancer.publish_playback(bytes(pcm))
+            self.enhancer.publish_playback(rendered.pcm)
             ok = await get_esl_client().uuid_broadcast(call_uuid, container_path, "aleg")
             if not ok:
                 raise TTSError(f"uuid_broadcast falló call_uuid={call_uuid}")
 
             await asyncio.sleep(duration)
+            return rendered
         finally:
             self._playing = False
+            self.conversation.playback_finished()
             self.enhancer.playback_finished()
             self.classifier.reset()
 

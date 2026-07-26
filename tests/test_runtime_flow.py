@@ -234,39 +234,53 @@ def test_full_call_flow(fast_settings, monkeypatch):
 
 # ── mensajes de continuidad ("un momento por favor") mientras se procesa ──
 
-def test_filler_matches_process_state_and_never_repeats():
+def test_narration_matches_the_process_actually_running():
+    """La narración corresponde al PROCESO real y su texto lo decide la capa
+    conversacional, con formulaciones que no se repiten consecutivamente."""
     from types import SimpleNamespace
 
     from services.telephony.session_store import (
+        STATE_CONFIRMING_ORIGIN,
         STATE_WAITING_GEO_CONTEXT,
         STATE_WAITING_ORIGIN,
     )
-    from services.voice.runtime import VoiceCallRuntime, _FILLER_MESSAGES
+    from services.voice.conversation import PHRASE_BANK, SpeechIntent
+    from services.voice.runtime import VoiceCallRuntime
 
     rt = VoiceCallRuntime(FakeWebSocket())
 
-    # Dirección de vía → categoría 'address'; nunca se repite consecutivamente.
-    prev = None
-    for _ in range(20):
-        msg = rt._pick_filler(
-            STATE_WAITING_ORIGIN, "cra 17 #6e-20",
-            SimpleNamespace(best_pickup="cra 17 #6e-20"),
-        )
-        assert msg in _FILLER_MESSAGES["address"]
-        assert msg != prev
-        prev = msg
-
-    # Nombre propio de lugar → categoría 'place'.
-    msg = rt._pick_filler(
+    assert rt._narration_kind(
+        STATE_WAITING_ORIGIN, "cra 17 #6e-20",
+        SimpleNamespace(best_pickup="cra 17 #6e-20"),
+    ) == "address"
+    assert rt._narration_kind(
         STATE_WAITING_ORIGIN, "el campanario",
         SimpleNamespace(best_pickup="el campanario"),
-    )
-    assert msg in _FILLER_MESSAGES["place"]
+    ) == "place"
+    assert rt._narration_kind(
+        STATE_WAITING_GEO_CONTEXT, "por la iglesia",
+        SimpleNamespace(best_pickup="por la iglesia"),
+    ) == "geo_context"
+    assert rt._narration_kind(
+        STATE_CONFIRMING_ORIGIN, "sí", SimpleNamespace(best_pickup=None)
+    ) == "generic"
 
-    # Contexto geográfico → categoría 'geo_context'.
-    msg = rt._pick_filler(STATE_WAITING_GEO_CONTEXT, "por la iglesia",
-                          SimpleNamespace(best_pickup="por la iglesia"))
-    assert msg in _FILLER_MESSAGES["geo_context"]
+    # El texto narrado sale del banco de la categoría correspondiente y nunca
+    # se repite dos veces seguidas dentro de la misma llamada.
+    allowed = {
+        part
+        for phrase in PHRASE_BANK["narrate_address"]
+        for part in phrase.parts
+    }
+    previous = None
+    for _ in range(12):
+        request = rt.conversation.narration("address")
+        assert request.intent is SpeechIntent.NARRATE and request.did_work
+        plan = rt.conversation.plan(request)
+        narrated = [s.text for s in plan.speech_segments if s.text in allowed]
+        assert narrated, "la narración no salió del banco de 'address'"
+        assert narrated[0] != previous
+        previous = narrated[0]
 
 
 def test_closed_mic_drops_turns_and_audio():

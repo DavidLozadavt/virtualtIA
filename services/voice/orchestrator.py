@@ -59,6 +59,7 @@ from services.telephony.session_store import (
     STATE_WAITING_GEO_CONTEXT,
     STATE_WAITING_ORIGIN,
 )
+from services.voice.conversation import SpeechIntent, SpeechRequest
 from services.voice.nlu import NLUResult
 
 logger = logging.getLogger("lyra.voice.orchestrator")
@@ -102,6 +103,31 @@ class VoiceTurnResult:
     short_answer: bool = False
     session: Optional[CallSession] = None
     backend_ok: Optional[bool] = None
+    # Intención conversacional del turno. El orquestador declara QUÉ comunicar
+    # y con qué datos; la capa conversacional decide CÓMO se dice. `speak_text`
+    # se conserva como contenido de negocio literal (y como respaldo cuando la
+    # intención no aporta formulaciones propias).
+    speech: Optional[SpeechRequest] = None
+
+
+def _speech(
+    intent: SpeechIntent,
+    text: str = "",
+    *,
+    did_work: bool = False,
+    after_user_turn: bool = True,
+    kind: str = "",
+    **slots,
+) -> SpeechRequest:
+    """Declara la intención de habla del turno (nunca su texto final)."""
+    return SpeechRequest(
+        intent=intent,
+        text=text,
+        slots={k: v for k, v in slots.items() if v},
+        did_work=did_work,
+        after_user_turn=after_user_turn,
+        kind=kind,
+    )
 
 
 async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
@@ -406,7 +432,12 @@ class TurnOrchestrator:
     def handle_inbound(self, session: CallSession) -> VoiceTurnResult:
         session.state = STATE_WAITING_ORIGIN
         session.last_message = GREETING
-        return VoiceTurnResult(speak_text=GREETING, action=VoiceAction.LISTEN, session=session)
+        return VoiceTurnResult(
+            speak_text=GREETING,
+            action=VoiceAction.LISTEN,
+            session=session,
+            speech=_speech(SpeechIntent.GREETING, GREETING, after_user_turn=False),
+        )
 
     # ── truncado de historial en barge-in (spec §3.6) ──
 
@@ -426,10 +457,12 @@ class TurnOrchestrator:
     def handle_silence(self, session: CallSession) -> VoiceTurnResult:
         session.silence_count += 1
         if session.silence_count >= MAX_SILENCE:
+            farewell = "No te escucho. Llámanos cuando puedas. ¡Hasta luego!"
             return VoiceTurnResult(
-                speak_text="No te escucho. Llámanos cuando puedas. ¡Hasta luego!",
+                speak_text=farewell,
                 action=VoiceAction.HANGUP,
                 session=session,
+                speech=_speech(SpeechIntent.CLOSING, farewell, after_user_turn=False),
             )
         msgs = {
             (STATE_WAITING_ORIGIN, 1): "¿Sigues ahí? Dime dónde te recojo.",
@@ -443,7 +476,12 @@ class TurnOrchestrator:
             "¿Me escuchas? Háblame.",
         )
         session.last_message = msg
-        return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            session=session,
+            speech=_speech(SpeechIntent.SILENCE_PROMPT, msg, after_user_turn=False),
+        )
 
     # ── generación anticipada: geocoding especulativo sobre parciales ──
 
@@ -522,6 +560,7 @@ class TurnOrchestrator:
                 speak_text=closing,
                 action=VoiceAction.HANGUP,
                 session=session,
+                speech=_speech(SpeechIntent.CLOSING, closing),
             )
 
         # ── Crear servicio en backend ──
@@ -541,17 +580,33 @@ class TurnOrchestrator:
                 msg = f"Perfecto, {canonical}. ¿Te recogemos ahí? Di sí para confirmar."
                 session.last_message = msg
                 return VoiceTurnResult(
-                    speak_text=msg, action=VoiceAction.LISTEN, short_answer=True, session=session
+                    speak_text=msg,
+                    action=VoiceAction.LISTEN,
+                    short_answer=True,
+                    session=session,
+                    speech=_speech(
+                        SpeechIntent.CONFIRM_PICKUP, msg, place=canonical
+                    ),
                 )
             session.state = STATE_WAITING_ORIGIN
             msg = "Listo. Dime el nombre del barrio o la dirección donde te recogemos."
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(SpeechIntent.ASK_PICKUP, msg),
+            )
 
         # ── Repetir ──
         if text and (nlu.intent == "repeat_request" or _is_repeat_request(text)):
             replay = session.last_message or "¿En qué parte de Popayán te recogemos?"
-            return VoiceTurnResult(speak_text=replay, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=replay,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(SpeechIntent.REPEAT, replay),
+            )
 
         # ── Saludo / social puro, sin datos útiles ──
         # Solo se intercepta fuera de la confirmación: en confirming_origin un
@@ -565,11 +620,18 @@ class TurnOrchestrator:
         ):
             if session.state == STATE_WAITING_ORIGIN:
                 msg = "¡Hola! Con mucho gusto te ayudo. Cuéntame, ¿en dónde te recogemos?"
+                intent = SpeechIntent.ASK_PICKUP
             else:
                 # A mitad de flujo no se reinicia nada: se retoma la pregunta.
                 msg = session.last_message or "¿En dónde te recogemos?"
+                intent = SpeechIntent.REPEAT
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(intent, msg),
+            )
 
         # ── Silencio ──
         if not text:
@@ -605,7 +667,12 @@ class TurnOrchestrator:
 
         msg = "¿En qué puedo ayudarte?"
         session.last_message = msg
-        return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            session=session,
+            speech=_speech(SpeechIntent.REPROMPT, msg),
+        )
 
     # ── corrección parcial de placa (task 4) ──
 
@@ -653,6 +720,7 @@ class TurnOrchestrator:
             action=VoiceAction.LISTEN,
             short_answer=True,
             session=session,
+            speech=_speech(SpeechIntent.CONFIRM_CORRECTION, msg, place=origen),
         )
 
     # ── creación de servicio (bucket A: contrato intacto) ──
@@ -698,6 +766,7 @@ class TurnOrchestrator:
                 short_answer=True,
                 session=session,
                 backend_ok=False,
+                speech=_speech(SpeechIntent.REPROMPT, msg, did_work=True),
             )
 
         session.service_created = True
@@ -721,6 +790,12 @@ class TurnOrchestrator:
             action=VoiceAction.HANGUP,
             session=session,
             backend_ok=True,
+            speech=_speech(
+                SpeechIntent.SERVICE_CREATED,
+                msg,
+                did_work=True,
+                after_user_turn=False,
+            ),
         )
 
     # ── captura de origen ──
@@ -753,7 +828,11 @@ class TurnOrchestrator:
                 msg = pd.get("question") or "¿Cuál de las opciones?"
                 session.last_message = msg
                 return VoiceTurnResult(
-                    speak_text=msg, action=VoiceAction.LISTEN, short_answer=True, session=session
+                    speak_text=msg,
+                    action=VoiceAction.LISTEN,
+                    short_answer=True,
+                    session=session,
+                    speech=_speech(SpeechIntent.DISAMBIGUATE, msg),
                 )
         else:
             m = resolve_location_entity(span or clean_text)
@@ -765,7 +844,12 @@ class TurnOrchestrator:
                 }
                 msg = session.pending_disambiguation["question"]
                 session.last_message = msg
-                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                return VoiceTurnResult(
+                    speak_text=msg,
+                    action=VoiceAction.LISTEN,
+                    session=session,
+                    speech=_speech(SpeechIntent.DISAMBIGUATE, msg),
+                )
 
             if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
                 origen = m.canonical
@@ -782,7 +866,12 @@ class TurnOrchestrator:
                     )
                 )
                 session.last_message = msg
-                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                return VoiceTurnResult(
+                    speak_text=msg,
+                    action=VoiceAction.LISTEN,
+                    session=session,
+                    speech=_speech(SpeechIntent.REPROMPT, msg),
+                )
             else:
                 origen = clean_text
 
@@ -802,7 +891,12 @@ class TurnOrchestrator:
                 )
             )
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(SpeechIntent.REPROMPT, msg),
+            )
 
         session.retry_count = 0
         # Red de seguridad: si la extracción recortó el número de casa o el
@@ -829,7 +923,10 @@ class TurnOrchestrator:
                 )
                 session.last_message = msg
                 return VoiceTurnResult(
-                    speak_text=msg, action=VoiceAction.LISTEN, session=session
+                    speak_text=msg,
+                    action=VoiceAction.LISTEN,
+                    session=session,
+                    speech=_speech(SpeechIntent.REPROMPT, msg),
                 )
             if parsed.canonical:
                 origen = parsed.canonical
@@ -903,6 +1000,14 @@ class TurnOrchestrator:
                             action=VoiceAction.LISTEN,
                             short_answer=True,
                             session=session,
+                            speech=_speech(
+                                SpeechIntent.CONFIRM_PICKUP,
+                                msg,
+                                did_work=True,
+                                kind="address",
+                                place=origen,
+                                barrio=barrio,
+                            ),
                         )
                 elif geo_result.status in (
                     ResolutionStatus.CONTEXT_GATHERING,
@@ -935,6 +1040,14 @@ class TurnOrchestrator:
                                 action=VoiceAction.LISTEN,
                                 short_answer=True,
                                 session=session,
+                                speech=_speech(
+                                    SpeechIntent.CONFIRM_PICKUP,
+                                    msg,
+                                    did_work=True,
+                                    kind="address",
+                                    place=origen,
+                                    barrio=sel.neighborhood,
+                                ),
                             )
                     session.geo_original_query = origen
                     session.geo_attempt = 1
@@ -943,7 +1056,17 @@ class TurnOrchestrator:
                     session.state = STATE_WAITING_GEO_CONTEXT
                     msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
                     session.last_message = msg
-                    return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                    return VoiceTurnResult(
+                        speak_text=msg,
+                        action=VoiceAction.LISTEN,
+                        session=session,
+                        speech=_speech(
+                            SpeechIntent.ASK_GEO_CONTEXT,
+                            msg,
+                            did_work=True,
+                            kind="address",
+                        ),
+                    )
             except Exception as exc:
                 logger.warning("[orchestrator] geocode pipeline error: %s", exc)
 
@@ -965,6 +1088,14 @@ class TurnOrchestrator:
                         action=VoiceAction.LISTEN,
                         short_answer=True,
                         session=session,
+                        speech=_speech(
+                            SpeechIntent.CONFIRM_PICKUP,
+                            msg,
+                            did_work=True,
+                            kind="place",
+                            place=origen,
+                            barrio=barrio,
+                        ),
                     )
                 elif (
                     geo_result.status in (
@@ -982,7 +1113,17 @@ class TurnOrchestrator:
                     session.state = STATE_WAITING_GEO_CONTEXT
                     msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
                     session.last_message = msg
-                    return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                    return VoiceTurnResult(
+                        speak_text=msg,
+                        action=VoiceAction.LISTEN,
+                        session=session,
+                        speech=_speech(
+                            SpeechIntent.ASK_GEO_CONTEXT,
+                            msg,
+                            did_work=True,
+                            kind="place",
+                        ),
+                    )
                 # trusted en no-RESOLVED, o FAILED → caer a confirm plano.
             except Exception as exc:
                 logger.warning("[orchestrator] landmark geocode pipeline error: %s", exc)
@@ -1000,6 +1141,7 @@ class TurnOrchestrator:
             action=VoiceAction.LISTEN,
             short_answer=True,
             session=session,
+            speech=_speech(SpeechIntent.CONFIRM_PICKUP, msg, place=origen),
         )
 
     # ── contexto geográfico adicional ──
@@ -1042,6 +1184,14 @@ class TurnOrchestrator:
                 return VoiceTurnResult(
                     speak_text=msg, action=VoiceAction.LISTEN,
                     short_answer=True, session=session,
+                    speech=_speech(
+                        SpeechIntent.CONFIRM_PICKUP,
+                        msg,
+                        did_work=True,
+                        kind="geo_context",
+                        place=orig_q,
+                        barrio=sel.neighborhood,
+                    ),
                 )
             # Inconcluso: NO concatenar. Re-preguntar entre los candidatos por
             # su NOMBRE OFICIAL (precision-first: preferible repreguntar).
@@ -1053,6 +1203,9 @@ class TurnOrchestrator:
                 return VoiceTurnResult(
                     speak_text=msg, action=VoiceAction.LISTEN,
                     short_answer=True, session=session,
+                    speech=_speech(
+                        SpeechIntent.DISAMBIGUATE, msg, did_work=True, kind="geo_context"
+                    ),
                 )
             # Intentos agotados / sin nombres: handoff con el primer barrio,
             # dirección intacta (evento terminal → se cierra el universo).
@@ -1074,6 +1227,13 @@ class TurnOrchestrator:
             return VoiceTurnResult(
                 speak_text=msg, action=VoiceAction.CREATE_SERVICE,
                 short_answer=True, session=session,
+                speech=_speech(
+                    SpeechIntent.HANDOFF,
+                    msg,
+                    did_work=True,
+                    kind="geo_context",
+                    barrio=barrio,
+                ),
             )
 
         # Sin candidatos múltiples → flujo actual sin cambios: dar contexto a una
@@ -1096,12 +1256,27 @@ class TurnOrchestrator:
                 action=VoiceAction.LISTEN,
                 short_answer=True,
                 session=session,
+                speech=_speech(
+                    SpeechIntent.CONFIRM_PICKUP,
+                    msg,
+                    did_work=True,
+                    kind="geo_context",
+                    place=orig_q,
+                    barrio=barrio,
+                ),
             )
 
         if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
             msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(
+                    SpeechIntent.ASK_GEO_CONTEXT, msg, did_work=True, kind="geo_context"
+                ),
+            )
 
         if geo_result.status == ResolutionStatus.FAILED:
             # Reintentos agotados: NO se reinicia la captura (genera bucle). Se
@@ -1133,6 +1308,13 @@ class TurnOrchestrator:
                 action=VoiceAction.CREATE_SERVICE,
                 short_answer=True,
                 session=session,
+                speech=_speech(
+                    SpeechIntent.HANDOFF,
+                    msg,
+                    did_work=True,
+                    kind="geo_context",
+                    barrio=barrio,
+                ),
             )
 
         # NEEDS_DISAMBIGUATION u otro estado no terminal → confirmar texto.
@@ -1144,6 +1326,13 @@ class TurnOrchestrator:
             action=VoiceAction.LISTEN,
             short_answer=True,
             session=session,
+            speech=_speech(
+                SpeechIntent.CONFIRM_PICKUP,
+                msg,
+                did_work=True,
+                kind="geo_context",
+                place=orig_q,
+            ),
         )
 
     # ── confirmación de origen ──
@@ -1171,11 +1360,17 @@ class TurnOrchestrator:
                     speak_text="Un momento por favor...",
                     action=VoiceAction.CREATE_SERVICE,
                     session=session,
+                    speech=_speech(SpeechIntent.ACK_CREATE, "Un momento por favor."),
                 )
             session.state = STATE_WAITING_ORIGIN  # placeholder if dest enabled later
             msg = f"Listo {session.origen_text}. ¿A dónde vas?"
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(SpeechIntent.ASK_PICKUP, msg),
+            )
 
         if is_yes is False and not span:
             session.state = STATE_WAITING_ORIGIN
@@ -1184,7 +1379,12 @@ class TurnOrchestrator:
             session.origen_lat = session.origen_lng = None
             msg = "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección."
             session.last_message = msg
-            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                session=session,
+                speech=_speech(SpeechIntent.ASK_PICKUP, msg),
+            )
 
         # Corrección / restatement — override explícito del slot ya lleno
         # (Dialogue State Tracking estándar, spec §3.4): el usuario cambió de
@@ -1200,6 +1400,9 @@ class TurnOrchestrator:
                         speak_text="Un momento por favor...",
                         action=VoiceAction.CREATE_SERVICE,
                         session=session,
+                        speech=_speech(
+                            SpeechIntent.ACK_CREATE, "Un momento por favor."
+                        ),
                     )
             session.origen_text = local
             session.origen_barrio = None
@@ -1212,6 +1415,7 @@ class TurnOrchestrator:
                 action=VoiceAction.LISTEN,
                 short_answer=True,
                 session=session,
+                speech=_speech(SpeechIntent.CONFIRM_CORRECTION, msg, place=local),
             )
 
         if span and nlu.intent in ("correction", "provide_pickup"):
@@ -1226,6 +1430,7 @@ class TurnOrchestrator:
                 action=VoiceAction.LISTEN,
                 short_answer=True,
                 session=session,
+                speech=_speech(SpeechIntent.CONFIRM_CORRECTION, msg, place=span),
             )
 
         # Respuesta ambigua con origen+barrio ya resueltos → confirmación
@@ -1252,6 +1457,7 @@ class TurnOrchestrator:
                     speak_text="Un momento por favor...",
                     action=VoiceAction.CREATE_SERVICE,
                     session=session,
+                    speech=_speech(SpeechIntent.ACK_CREATE, "Un momento por favor."),
                 )
 
         # No parseable: reparación contextual con variación (no un "no te
@@ -1265,6 +1471,7 @@ class TurnOrchestrator:
             action=VoiceAction.LISTEN,
             short_answer=True,
             session=session,
+            speech=_speech(SpeechIntent.REPROMPT, msg),
         )
 
 
