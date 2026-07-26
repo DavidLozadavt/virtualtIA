@@ -12,7 +12,7 @@ Entel SIP trunk → FreeSWITCH → lyra_stream.lua
         → OpenAI Realtime streaming (STT parciales, gpt-4o-mini-transcribe)
         → NLU structured-output (spans) → FSM de negocio
         → geocoding (Google/Nominatim) → Laravel /taxi/solicitud-telefonica
-        → edge-tts streaming → playback streamAudio
+        → OpenAI TTS streaming → playback streamAudio
     → Lyra cuelga vía ESL uuid_kill
 ```
 

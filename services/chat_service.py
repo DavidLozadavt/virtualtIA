@@ -204,6 +204,7 @@ class ChatService:
         audio_url = None
         if getattr(payload, "voice", False) and app_state:
             from core.voice_engine import get_voice_engine
+            from core.config import settings
             import asyncio
             engine = get_voice_engine()
             audio_id = str(uuid.uuid4())
@@ -213,7 +214,7 @@ class ChatService:
                 personality_config.get("tts_voice") or 
                 personality_config.get("voice") or 
                 (project_config.get("voice") if isinstance(project_config.get("voice"), str) else project_config.get("voice", {}).get("tts_voice")) or
-                "es-CO-SalomeNeural"
+                settings.VOICE_TTS_VOICE
             )
             audio_bytes = await engine.synthesize_to_bytes(clean_reply, voice=voice_id)
             

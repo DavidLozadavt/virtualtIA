@@ -90,7 +90,12 @@ class Settings(BaseSettings):
     VOICE_NLU_API_KEY: str = ""              # si vacío usa OPENAI_API_KEY (no sk-or)
     VOICE_NLU_TIMEOUT_SEC: float = 3.5
 
-    # TTS streaming por oración (edge-tts incremental → PCM 8k vía ffmpeg pipe).
+    # TTS: OpenAI en streaming por oración (PCM 24k del modelo → 8k telefónico).
+    # `gpt-4o-mini-tts` es el único modelo admitido: es el que acepta el bloque
+    # `instructions` con el que se gobierna la interpretación de la operadora
+    # (services/voice/tts_prompt.py). La voz solo elige el timbre.
+    VOICE_TTS_MODEL: str = "gpt-4o-mini-tts"
+    VOICE_TTS_VOICE: str = "coral"
     VOICE_TTS_TIMEOUT_SEC: float = 10.0
 
     # Barge-in (clasificador de interrupción real vs. backchannel).
@@ -313,8 +318,6 @@ class Settings(BaseSettings):
     # el umbral de silencio, útil si la puerta no está en la cadena.
     AUDIO_NORMALIZE_SPEECH_ONLY: bool = True
 
-    LYRA_TTS_VOICE: str = "es-BO-SofiaNeural"
-
     FFMPEG_BIN: str = "/usr/bin/ffmpeg"
 
     VOICE_SESSION_STORE: str = "memory"  # memory | redis
@@ -327,17 +330,22 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
-    def openai_stt_key(self) -> str:
-        """Credencial OpenAI real para STT de voz (Realtime transcription).
+    def openai_audio_key(self) -> str:
+        """Credencial OpenAI real para audio (STT y TTS).
 
         OpenRouter (sk-or...) no soporta audio, así que se rechaza. Se prefiere
         la key dedicada OPENAI_WHISPER_KEY; si no, se usa OPENAI_API_KEY salvo
-        que sea de OpenRouter. Misma política que core/voice_engine (STT navegador).
+        que sea de OpenRouter.
         """
         key = (self.OPENAI_WHISPER_KEY or "").strip()
         if not key and not self.OPENAI_API_KEY.startswith("sk-or"):
             key = self.OPENAI_API_KEY.strip()
         return key
+
+    def openai_stt_key(self) -> str:
+        """Credencial del STT de voz (Realtime transcription) — misma política
+        de audio que el TTS: una sola resolución, un solo comportamiento."""
+        return self.openai_audio_key()
 
     def llm_api_key(self) -> str:
         """Credencial para llamadas de chat al LLM.

@@ -12,7 +12,7 @@ Llamada entrante (Entel/SIP)
   → Lyra (FastAPI WS):
       audio del llamante (PCM16 8k → g711_ulaw) → OpenAI Realtime STT streaming
       parciales → endpointing híbrido → NLU (spans) → FSM de negocio
-      respuesta → edge-tts por oración → streamAudio (playback full-duplex)
+      respuesta → OpenAI TTS por oración → streamAudio (playback full-duplex)
   → Lyra cuelga con ESL uuid_kill; la grabación completa la mezcla el servidor
     y queda en FREESWITCH_RECORDINGS_DIR/{call_uuid}.wav
     (GET /freeswitch/recording/{call_uuid}.wav — contrato del panel intacto)
@@ -46,7 +46,8 @@ Llamada entrante (Entel/SIP)
 | `VOICE_STT_SILENCE_MS` | `600` | server_vad: silencio que cierra el enunciado |
 | `VOICE_ENDPOINT_HOLD_MS` | `900` | retención semántica (direcciones dictadas) |
 | `VOICE_NLU_MODEL` | `gpt-4o-mini` | extracción de spans (structured outputs) |
-| `LYRA_TTS_VOICE` | `es-CO-SalomeNeural` | voz (igual que V1) |
+| `VOICE_TTS_MODEL` | `gpt-4o-mini-tts` | único modelo TTS (acepta `instructions`) |
+| `VOICE_TTS_VOICE` | `coral` | timbre de la operadora |
 
 El STT usa la misma `OPENAI_API_KEY` real que el NLU (no requiere credencial
 aparte). Si existe `OPENAI_WHISPER_KEY` dedicada, se prefiere esa para STT.

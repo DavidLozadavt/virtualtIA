@@ -10,7 +10,7 @@ Entel SIP trunk
         → OpenAI Realtime STT streaming (parciales + server_vad)
         → NLU structured-output → FSM de negocio
         → POST Laravel /taxi/solicitud-telefonica
-        → edge-tts streaming → playback streamAudio
+        → OpenAI TTS streaming → playback streamAudio
         → grabación mezclada server-side → /freeswitch/recording/{uuid}.wav
 ```
 
@@ -33,7 +33,8 @@ VOICE_STT_LANGUAGE=es
 VOICE_STT_SILENCE_MS=600
 VOICE_ENDPOINT_HOLD_MS=900
 VOICE_NLU_MODEL=gpt-4o-mini
-LYRA_TTS_VOICE=es-BO-SofiaNeural
+VOICE_TTS_MODEL=gpt-4o-mini-tts
+VOICE_TTS_VOICE=coral
 
 # ESL solo localhost — NUNCA exponer 8021 a internet
 FREESWITCH_ESL_HOST=127.0.0.1

@@ -5,43 +5,37 @@ STT: OpenAI gpt-4o-mini-transcribe — única ruta de transcripción soportada.
      Supera a whisper-1 en nombres propios/barrios (evidencia:
      scratch/audio_diagnostic.py, donde whisper-1 rompe "Valle del Ortigal").
      whisper-1 y el fallback Groq whisper-large-v3 fueron retirados a propósito.
-TTS: edge-tts (Microsoft Neural TTS) — 100% GRATIS, voz humana y natural en español
+TTS: OpenAI gpt-4o-mini-tts vía services/voice/tts_stream — el mismo motor y las
+     mismas instrucciones de interpretación que el canal telefónico, para que la
+     voz del navegador sea la misma persona. El texto se normaliza antes de
+     sintetizar (números, nomenclatura vial, puntuación) y el audio se emite en
+     streaming según lo genera el modelo.
 
-Voces disponibles para español colombiano (edge-tts):
-  es-CO-SalomeNeural    → femenina, natural colombiana ★ recomendada
-  es-CO-GonzaloNeural   → masculina, natural colombiana
-  es-MX-DaliaNeural     → femenina, mexicana, muy natural
-  es-MX-JorgeNeural     → masculina, mexicana
-  es-ES-ElviraNeural    → femenina, española
-  es-AR-ElenaNeural     → femenina, argentina
+Voces disponibles (timbre; la fonética española la fijan el texto y las
+instrucciones, no el nombre de la voz):
+  coral    → femenina, cálida y cercana ★ recomendada para atención
+  sage     → femenina, serena
+  nova     → femenina, clara
+  ballad   → femenina, expresiva
+  ash      → masculina, firme
+  onyx     → masculina, grave
+  verse    → masculina, conversacional
 
 Usage in any project: enable via voice.enabled: true in the project's YAML config.
 """
 
-import asyncio
 import logging
 import re as _re
-import sys
-import threading
 from io import BytesIO
-from typing import Literal, AsyncGenerator
+from typing import AsyncGenerator
 
-import edge_tts
-
-# ── FIX PARA WINDOWS DNS: Forzar ThreadedResolver en aiohttp ───────────────
-import aiohttp
-from aiohttp.resolver import ThreadedResolver
-
-_orig_tcp_connector_init = aiohttp.TCPConnector.__init__
-
-def _patched_tcp_connector_init(self, *args, **kwargs):
-    # Forzamos ThreadedResolver si no se pasó un resolver
-    if kwargs.get('resolver') is None:
-        kwargs['resolver'] = ThreadedResolver()
-    _orig_tcp_connector_init(self, *args, **kwargs)
-
-aiohttp.TCPConnector.__init__ = _patched_tcp_connector_init
-# ─────────────────────────────────────────────────────────────────────────────
+from services.voice.text_normalize import prepare_for_speech
+from services.voice.tts_stream import (
+    DEFAULT_VOICE,
+    TTSError,
+    resolve_voice,
+    stream_speech,
+)
 
 logger = logging.getLogger("lyra.voice")
 
@@ -92,6 +86,8 @@ def _clean_for_tts(text: str) -> str:
     """
     Limpia el texto antes de enviarlo al motor TTS.
     Elimina markdown, anclas internas y caracteres que suenan raro al hablar.
+    Los símbolos que sí tienen lectura en español ('#', '$', '%', '°') se
+    conservan aquí: los convierte a palabras la normalización posterior.
     """
     # Eliminar tags internos de Lyra [TAG:XX], [BIZ:XX], [ID:XX]
     # Usamos [^\]]* para permitir IDs alfanuméricos
@@ -112,40 +108,16 @@ def _clean_for_tts(text: str) -> str:
     clean = _re.sub(r'\n+', '. ', clean)
     
     # Limpieza final de caracteres extraños pero permitiendo lo básico pronunciable
-    clean = _re.sub(r'[^\w\s\.,;:¿?¡!\[\]\-:]', '', clean, flags=_re.UNICODE)
-    
+    clean = _re.sub(r'[^\w\s\.,;:¿?¡!\[\]\-:#$%°º]', '', clean, flags=_re.UNICODE)
+
     result = _re.sub(r'\s+', ' ', clean).strip()
     return result if result else " "  # Nunca retornar vacío para no romper el stream Audio
 
 
-# ── Fix para Windows: edge-tts en hilo con SelectorEventLoop propio ─────────
-
-def _edge_tts_sync_bytes(text: str, voice: str) -> bytes:
-    """
-    Ejecuta edge-tts de forma síncrona dentro de un SelectorEventLoop propio.
-    Esto evita el bug de DNS de aiohttp en el ProactorEventLoop de Uvicorn/Windows.
-    """
-    loop = asyncio.SelectorEventLoop()
-    try:
-        async def _inner():
-            communicate = edge_tts.Communicate(text=text, voice=voice)
-            buf = BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    buf.write(chunk["data"])
-            return buf.getvalue()
-        return loop.run_until_complete(_inner())
-    finally:
-        loop.close()
-
-
-async def _run_edge_tts_in_thread(text: str, voice: str) -> bytes:
-    """
-    Wrapper asíncrono: lanza edge-tts en un hilo de fondo con su propio loop,
-    devuelve los bytes al caller sin bloquear el event loop de Uvicorn.
-    """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _edge_tts_sync_bytes, text, voice)
+def _speech_text(text: str, limit: int = 4000) -> str:
+    """Texto tal como se envía al modelo: sin markdown, con pronunciación y
+    puntuación de habla resueltas."""
+    return prepare_for_speech(_clean_for_tts(text))[:limit]
 
 
 class VoiceEngine:
@@ -154,7 +126,8 @@ class VoiceEngine:
 
     STT: OpenAI gpt-4o-mini-transcribe (requiere una key REAL de OpenAI —
          OpenRouter no soporta audio)
-    TTS: edge-tts de Microsoft — 100% GRATUITO, voces neurales de alta calidad
+    TTS: OpenAI gpt-4o-mini-tts con instrucciones de operadora telefónica
+         (misma key real de OpenAI)
     """
 
     SUPPORTED_AUDIO_FORMATS = {"audio/webm", "audio/wav", "audio/mp3", "audio/mpeg", "audio/ogg", "audio/m4a"}
@@ -204,8 +177,22 @@ class VoiceEngine:
             self.openai_client = None
             self.stt_available = False
 
-        self.tts_available = True
-        logger.info("VoiceEngine TTS (edge-tts) inicializado - GRATIS")
+        # El TTS usa la misma credencial real de OpenAI que el STT: sin ella no
+        # hay síntesis posible, y decirlo al arrancar evita descubrirlo en la
+        # primera respuesta hablada.
+        from core.config import settings as _settings
+
+        self.tts_available = bool(_settings.openai_audio_key())
+        if self.tts_available:
+            logger.info(
+                "VoiceEngine TTS (OpenAI %s, voz %s) inicializado.",
+                _settings.VOICE_TTS_MODEL, _settings.VOICE_TTS_VOICE,
+            )
+        else:
+            logger.warning(
+                "TTS deshabilitado: falta una key real de OpenAI para audio "
+                "(OPENAI_WHISPER_KEY / OPENAI_API_KEY no-OpenRouter)."
+            )
 
         # Por compatibilidad con código legacy
         self.available = self.stt_available or self.tts_available
@@ -283,23 +270,31 @@ class VoiceEngine:
             logger.error(f"Error en transcripción: {e}")
             return {"success": False, "text": "", "error": str(e)}
 
-    # ── TTS (edge-tts — GRATIS) ───────────────────────────────────────────────
+    # ── TTS (OpenAI gpt-4o-mini-tts) ─────────────────────────────────────────
 
-    async def synthesize_to_bytes(self, text: str, voice: str = "es-CO-SalomeNeural") -> bytes:
+    async def synthesize_to_bytes(self, text: str, voice: str = DEFAULT_VOICE) -> bytes:
         """
         Sintetiza audio y lo retorna directamente en bytes MP3 (en memoria).
         """
         if not self.tts_available:
             return b""
-            
-        clean_text = _clean_for_tts(text)[:5000]
-        if not clean_text:
+
+        speech = _speech_text(text)
+        if not speech.strip():
             return b""
-            
+
         try:
-            audio_bytes = await _run_edge_tts_in_thread(clean_text, voice)
+            buffer = BytesIO()
+            async for chunk in stream_speech(
+                speech, voice=voice, response_format="mp3"
+            ):
+                buffer.write(chunk)
+            audio_bytes = buffer.getvalue()
             if audio_bytes:
-                logger.info(f"[edge-tts BYTES] {len(audio_bytes)} bytes generados en memoria | voz={voice}")
+                logger.info(
+                    "[tts BYTES] %d bytes generados en memoria | voz=%s",
+                    len(audio_bytes), resolve_voice(voice),
+                )
             return audio_bytes
         except Exception as e:
             logger.error(f"Error en synthesize_to_bytes: {e}")
@@ -308,65 +303,51 @@ class VoiceEngine:
     async def synthesize(
         self,
         text: str,
-        voice: str = "es-ES-AlvaroNeural",  # male, serious, Jarvis vibe
-        tts_model: str = "edge-tts",         
+        voice: str = DEFAULT_VOICE,
+        tts_model: str = "",
         speed: float = 1.0,
     ) -> dict:
         """
-        Convierte texto a audio usando edge-tts de Microsoft (100% GRATIS).
+        Convierte texto a audio con OpenAI gpt-4o-mini-tts.
 
-        Voces recomendadas para español:
-          es-CO-SalomeNeural   → colombiana femenina ★ (default)
-          es-CO-GonzaloNeural  → colombiana masculina
-          es-MX-DaliaNeural    → mexicana femenina, muy natural
-          es-ES-ElviraNeural   → española femenina
+        El modelo es fijo (el único que acepta el bloque `instructions` con el
+        que se gobierna la interpretación): `tts_model` se conserva por
+        compatibilidad de firma y se ignora, igual que en el STT.
+
+        `speed` no se envía como parámetro de la API (gpt-4o-mini-tts no lo
+        soporta): se traduce a una indicación de ritmo dentro de las
+        instrucciones, que es donde suena natural.
+
+        Voces recomendadas: coral, sage, nova, ballad (femeninas);
+        ash, onyx, verse (masculinas).
 
         Returns: { "success": bool, "audio_bytes": bytes, "format": "mp3" }
         """
         if not self.tts_available:
-            return {"success": False, "audio_bytes": b"", "error": "edge-tts no instalado. Ejecuta: pip install edge-tts"}
+            return {"success": False, "audio_bytes": b"", "error": "TTS no disponible."}
 
         if not text or not text.strip():
             return {"success": False, "audio_bytes": b"", "error": "Texto vacío."}
 
-        # Limpiar markdown antes de sintetizar
-        clean_text = _clean_for_tts(text)
-        if not clean_text:
+        speech = _speech_text(text)
+        if not speech.strip():
             return {"success": False, "audio_bytes": b"", "error": "El texto quedó vacío después de limpiar."}
 
-        # Límite de 5000 chars para edge-tts
-        clean_text = clean_text[:5000]
-
-        # Convertir speed a formato edge-tts (porcentaje relativo: +0%, +10%, -10%, etc.)
-        if speed != 1.0:
-            pct = int((speed - 1.0) * 100)
-            rate_str = f"{pct:+d}%"
-        else:
-            rate_str = "+0%"
-
         try:
-            # Usamos el helper en hilo para evitar el bug DNS en Windows
-            def _sync_with_rate(text, voice):
-                loop = asyncio.SelectorEventLoop()
-                try:
-                    async def _inner():
-                        communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate_str)
-                        chunks = []
-                        async for chunk in communicate.stream():
-                            if chunk["type"] == "audio":
-                                chunks.append(chunk["data"])
-                        return b"".join(chunks)
-                    return loop.run_until_complete(_inner())
-                finally:
-                    loop.close()
-
-            event_loop = asyncio.get_running_loop()
-            audio_bytes = await event_loop.run_in_executor(None, _sync_with_rate, clean_text, voice)
+            buffer = BytesIO()
+            async for chunk in stream_speech(
+                speech, voice=voice, response_format="mp3", pace=speed
+            ):
+                buffer.write(chunk)
+            audio_bytes = buffer.getvalue()
 
             if not audio_bytes:
-                return {"success": False, "audio_bytes": b"", "error": "edge-tts no generó audio."}
+                return {"success": False, "audio_bytes": b"", "error": "El TTS no generó audio."}
 
-            logger.info(f"[edge-tts] {len(audio_bytes)} bytes sintetizados | voz={voice} | '{clean_text[:50]}'")
+            logger.info(
+                "[tts] %d bytes sintetizados | voz=%s | '%s'",
+                len(audio_bytes), resolve_voice(voice), speech[:50],
+            )
             return {"success": True, "audio_bytes": audio_bytes, "format": "mp3"}
 
         except Exception as e:
@@ -376,31 +357,28 @@ class VoiceEngine:
     async def synthesize_stream(
         self,
         text: str,
-        voice: str = "es-ES-AlvaroNeural",
+        voice: str = DEFAULT_VOICE,
         speed: float = 1.0,
     ) -> AsyncGenerator[bytes, None]:
         """
-        Versión optimizada que transmite (streamea) los chunks de audio a medida
-        que se generan, reduciendo el delay (Time-To-First-Byte) radicalmente.
+        Emite el MP3 según lo genera el modelo (streaming real del proveedor):
+        el primer byte sale sin esperar a que la frase esté completa.
         """
         if not self.tts_available or not text or not text.strip():
             return
-            
-        clean_text = _clean_for_tts(text)[:5000]
-        if not clean_text:
+
+        speech = _speech_text(text)
+        if not speech.strip():
             return
-            
-        rate_str = f"{int((speed - 1.0) * 100):+d}%" if speed != 1.0 else "+0%"
-        
+
         try:
-            # Para streaming, generamos los bytes completos en hilo y luego los emitimos
-            logger.info(f"[edge-tts STREAM] Generando con voz={voice} | '{clean_text[:50]}'")
-            audio_bytes = await _run_edge_tts_in_thread(clean_text, voice)
-            if audio_bytes:
-                # Emitir en chunks de 4KB para mantener la semántica de streaming
-                chunk_size = 4096
-                for i in range(0, len(audio_bytes), chunk_size):
-                    yield audio_bytes[i:i + chunk_size]
+            logger.info(
+                "[tts STREAM] voz=%s | '%s'", resolve_voice(voice), speech[:50]
+            )
+            async for chunk in stream_speech(
+                speech, voice=voice, response_format="mp3", pace=speed
+            ):
+                yield chunk
         except Exception as e:
             logger.error(f"Error en stream TTS: {e}")
 

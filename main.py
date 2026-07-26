@@ -102,19 +102,21 @@ async def lifespan(app: FastAPI):
         
         pusher_client = get_pusher_client()
         
-        # ── PRE-WARM VOICES (Lyra & Nexo) ──
+        # ── PRE-WARM VOICE ──
+        # Una síntesis corta al arrancar: abre la conexión TLS con OpenAI y deja
+        # el cliente listo, así la primera respuesta hablada no paga el saludo
+        # de red además de la síntesis.
         async def warm_voices():
+            from core.config import settings as voice_settings
+
             engine = get_voice_engine()
-            # Inicializamos ambas voces (Lyra: es-BO-SofiaNeural, Nexo: es-CL-LorenzoNeural)
-            # Simplemente hacemos un stream corto vacío para "despertar" la conexión con edge-tts
-            voices_to_warm = ["es-BO-SofiaNeural", "es-CL-LorenzoNeural"]
-            for v in voices_to_warm:
-                try:
-                    async for _ in engine.synthesize_stream(" ", voice=v):
-                        break
-                    logger.info(f"[VoiceEngine] Voz pre-calentada: {v}")
-                except Exception:
-                    pass
+            voice = voice_settings.VOICE_TTS_VOICE
+            try:
+                async for _ in engine.synthesize_stream("Hola.", voice=voice):
+                    break
+                logger.info(f"[VoiceEngine] Voz pre-calentada: {voice}")
+            except Exception:
+                pass
 
         asyncio.create_task(warm_voices())
 

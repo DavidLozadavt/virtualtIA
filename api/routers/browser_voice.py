@@ -3,10 +3,12 @@ gateway/browser_voice_router.py — REST endpoints for browser-based voice (STT 
 
 Provides:
   POST /voice/transcribe   — Audio file → transcribed text (gpt-4o-mini-transcribe)
-  POST /voice/synthesize   — Text → MP3 audio (edge-tts)
+  POST /voice/synthesize   — Text → MP3 audio (OpenAI gpt-4o-mini-tts)
 
-STT model is fixed to gpt-4o-mini-transcribe en core/voice_engine (no override
-por proyecto). No configures `stt_model` en el YAML: se ignora a propósito.
+Los modelos son fijos en core/voice_engine: STT gpt-4o-mini-transcribe y TTS
+gpt-4o-mini-tts (el único que acepta las instrucciones de interpretación de la
+operadora). No configures `stt_model` ni `tts_model` en el YAML: se ignoran a
+propósito. Lo único que el proyecto elige es el timbre (`tts_voice`).
 
 Per-project activation: set `voice.enabled: true` in the project's YAML config.
 
@@ -15,8 +17,7 @@ How to enable for a new project:
        voice:
          enabled: true
          language: es
-         tts_model: edge-tts
-         tts_voice: es-CO-SalomeNeural
+         tts_voice: coral
   2. That's it. These endpoints handle the rest.
 """
 
@@ -26,6 +27,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 
+from core.config import settings
 from orchestrator.context_builder import load_project_config
 from core.voice_engine import get_voice_engine
 from core.pusher import trigger_pusher_event
@@ -126,7 +128,7 @@ async def transcribe_audio(
 @browser_voice_router.post("/synthesize")
 async def synthesize_speech(req: SynthesizeRequest):
     """
-    Convert text to spoken audio using OpenAI TTS.
+    Convert text to spoken audio using OpenAI gpt-4o-mini-tts.
 
     Returns: MP3 audio binary (Content-Type: audio/mpeg)
 
@@ -151,8 +153,7 @@ async def synthesize_speech(req: SynthesizeRequest):
     engine = get_voice_engine()
     result = await engine.synthesize(
         text=req.text,
-        voice=req.voice or voice_cfg.get("tts_voice", "nova"),
-        tts_model=voice_cfg.get("tts_model", "tts-1-hd"),  # HD = más humano
+        voice=req.voice or voice_cfg.get("tts_voice", settings.VOICE_TTS_VOICE),
         speed=req.speed or 1.0,
     )
 
@@ -190,7 +191,7 @@ async def synthesize_speech_stream(
     engine = get_voice_engine()
     generator = engine.synthesize_stream(
         text=text,
-        voice=voice_cfg.get("tts_voice", "es-ES-AlvaroNeural"),
+        voice=voice_cfg.get("tts_voice", settings.VOICE_TTS_VOICE),
         speed=speed,
     )
     
@@ -204,7 +205,7 @@ async def get_voice_config_public(project_id: str):
     Frontend uses this to know if voice is enabled, and what language to use.
 
     Usage: GET /voice/config/nexiservice
-    Returns: { "enabled": true, "language": "es", "tts_voice": "nova" }
+    Returns: { "enabled": true, "language": "es", "tts_voice": "coral" }
     """
     config = load_project_config(project_id)
     if not config:
@@ -215,7 +216,7 @@ async def get_voice_config_public(project_id: str):
     return {
         "enabled": voice_cfg.get("enabled", False),
         "language": voice_cfg.get("language", "es"),
-        "tts_voice": voice_cfg.get("tts_voice", "nova"),
+        "tts_voice": voice_cfg.get("tts_voice", settings.VOICE_TTS_VOICE),
         "bot_name": bot_name,
         "bot_greeting": config.get("greeting") or f"¡Hola! Bienvenido al portal de NexiService Colombia. Soy {bot_name}, tu guía para descubrir negocios y gestionar tus servicios. ¿Qué estás buscando hoy?",
     }

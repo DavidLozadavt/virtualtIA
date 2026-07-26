@@ -93,7 +93,8 @@ services/
 │   ├── endpointing.py       → Endpointing híbrido acústico + semántico
 │   ├── nlu.py               → Extracción de spans (structured outputs)
 │   ├── orchestrator.py      → FSM de negocio de la llamada
-│   ├── tts_stream.py        → edge-tts incremental por oración
+│   ├── tts_stream.py        → OpenAI gpt-4o-mini-tts streaming por oración
+│   ├── tts_prompt.py        → instrucciones de interpretación (operadora)
 │   ├── aec.py / barge_in.py → Eco servidor + interrupciones reales
 │   └── recorder.py          → Grabación mezclada server-side
 └── telephony/               → Contratos de negocio: sesiones, backend, ESL
@@ -151,7 +152,7 @@ core/
 ├── llm_engine.py    → Cliente LLM async · OpenRouter / OpenAI · recuperación de errores
 ├── logger.py        → Logging centralizado con rotación de archivos (10MB × 5)
 ├── pusher.py        → Eventos en tiempo real hacia el frontend
-└── voice_engine.py  → TTS con edge-tts
+└── voice_engine.py  → STT/TTS del canal navegador (OpenAI)
 ```
 
 ---
@@ -311,7 +312,7 @@ class LegacyToolAdapter:
    → creating_service → finished
 
 5. Respuesta hablada
-   texto → normalización (números/direcciones) → edge-tts por oración
+   texto → normalización (números/direcciones) + prosodia → OpenAI TTS por oración
    → playback streamAudio con pacing (~200 ms/chunk)
    → si el usuario interrumpe con contenido real: se cancela el playback
      y el historial se trunca a lo realmente escuchado

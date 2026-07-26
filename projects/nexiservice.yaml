@@ -54,8 +54,9 @@ tools:
   - name: open_business_web
     description: Abre el sitio web o red social de un negocio buscándolo por su nombre.
 
-# Configuración de voz (STT = gpt-4o-mini-transcribe, fijo en core/voice_engine)
+# Configuración de voz (modelos fijos en core/voice_engine: STT
+# gpt-4o-mini-transcribe, TTS gpt-4o-mini-tts). `tts_voice` = timbre.
 voice:
   enabled: true
   language: es
-  tts_model: edge-tts
+  tts_voice: coral

@@ -15,7 +15,8 @@ lejano (convolucionados con una respuesta de sala, filtrados por el aire y
 atenuados), que es la diferencia física que existe de verdad en una llamada.
 
 Las voces se sintetizan con el mismo motor de TTS que ya usa el proyecto
-(`edge-tts`, varias voces en español) y se guardan en un corpus local. La razón
+(OpenAI `gpt-4o-mini-tts`, un timbre distinto por papel, todas hablando español)
+y se guardan en un corpus local. La razón
 de generarlas en vez de grabarlas es que **hace falta la señal limpia de cada
 hablante por separado**: sin esa referencia el aislamiento no se puede medir,
 solo opinar sobre él. Y la razón de no usar voces sintetizadas a mano (tonos con
@@ -280,41 +281,42 @@ def _scale_to_dbfs(signal: np.ndarray, dbfs: float) -> np.ndarray:
 
 CORPUS_DIR = PROJECT_ROOT / "scratch" / "voice_corpus"
 
-# Un hablante por papel. Las voces son de países distintos a propósito: timbres,
-# ritmos y tonos medios separados, como en una escena real.
+# Un hablante por papel. Los timbres se eligen bien separados a propósito (tonos
+# medios y ritmos distintos), como en una escena real. El texto en español y las
+# instrucciones de síntesis fijan la fonética; la voz solo aporta el timbre.
 CORPUS_VOICES: dict[str, tuple[str, str]] = {
     "target": (
-        "es-CO-GonzaloNeural",
+        "onyx",
         "Buenas tardes, necesito un taxi para la carrera diecisiete número ocho "
         "guion cincuenta y cinco, en el barrio La Esmeralda. Sí, para ahora mismo, "
         "por favor. Voy hasta el centro comercial Campanario. Mi nombre es Miguel "
         "y el teléfono es el mismo desde el que estoy llamando. Muchas gracias.",
     ),
     "woman": (
-        "es-CO-SalomeNeural",
+        "coral",
         "Oye, ¿tú viste dónde dejé las llaves del carro? Es que las puse encima de "
         "la mesa del comedor y ya no están. Mira a ver si están en el bolso azul, "
         "porque yo salí de afán y no me acuerdo de nada.",
     ),
     "man2": (
-        "es-MX-JorgeNeural",
+        "ash",
         "No, mira, lo que pasa es que el pedido llegó incompleto otra vez. Faltaron "
         "dos cajas y nadie avisó. Hay que llamar al proveedor mañana temprano para "
         "que lo resuelvan antes del mediodía.",
     ),
     "announcer": (
-        "es-ES-AlvaroNeural",
+        "verse",
         "Continuamos con la información del tiempo. Se esperan lluvias dispersas "
         "durante la tarde y una temperatura máxima de veintidós grados. En el "
         "capítulo deportivo, el partido de esta noche comienza a las ocho.",
     ),
     "child": (
-        "es-MX-DaliaNeural",
+        "nova",
         "¡Mamá, mamá! Es que él me quitó el juguete y no me lo quiere devolver. "
         "Yo lo tenía primero y no vale, dile que me lo dé.",
     ),
     "woman2": (
-        "es-AR-ElenaNeural",
+        "sage",
         "Bueno, entonces quedamos así: nos vemos el jueves a las cuatro en la "
         "oficina de siempre y llevamos los papeles firmados. Avisame si cambia algo.",
     ),
@@ -360,28 +362,16 @@ def _decode_mp3(data: bytes, rate: int) -> np.ndarray:
 def _synthesize(voice: str, text: str, rate: int) -> np.ndarray:
     import asyncio
 
-    import edge_tts  # type: ignore
+    from services.voice.tts_stream import stream_speech
 
     async def render() -> bytes:
         buffer = bytearray()
-        # Resolutor de DNS en hilos: el asíncrono (aiodns/c-ares) falla en
-        # algunos Windows y deja el corpus sin generar por una razón que no
-        # tiene nada que ver con el audio.
-        connector = None
-        try:
-            import aiohttp
-            from aiohttp.resolver import ThreadedResolver
-
-            connector = aiohttp.TCPConnector(resolver=ThreadedResolver())
-        except Exception:  # noqa: BLE001 — sin aiohttp, edge-tts usa el suyo
-            connector = None
-        try:
-            communicate = edge_tts.Communicate(text, voice, connector=connector)
-        except TypeError:  # versión de edge-tts sin `connector`
-            communicate = edge_tts.Communicate(text, voice)
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                buffer.extend(chunk["data"])
+        # MP3 y no PCM: el corpus se genera una vez y se cachea, así que pesa más
+        # el ancho de banda que la latencia, y el decodificador ya existe aquí.
+        async for chunk in stream_speech(
+            text, voice=voice, response_format="mp3", timeout=60.0
+        ):
+            buffer.extend(chunk)
         return bytes(buffer)
 
     return _decode_mp3(asyncio.run(render()), rate)

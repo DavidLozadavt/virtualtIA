@@ -102,7 +102,8 @@ async def freeswitch_health():
         "stt_language": settings.VOICE_STT_LANGUAGE,
         "stt_available": bool(settings.openai_stt_key()),
         "nlu_model": settings.VOICE_NLU_MODEL,
-        "tts_voice": settings.LYRA_TTS_VOICE,
+        "tts_model": settings.VOICE_TTS_MODEL,
+        "tts_voice": settings.VOICE_TTS_VOICE,
         "active_sessions": store.active_count(),
     }
 

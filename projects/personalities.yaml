@@ -6,7 +6,7 @@
 
 lyra:
   assistant_name: "Lyra"
-  tts_voice: "es-BO-SofiaNeural"
+  tts_voice: "coral"
   greeting: "¡Hola! Qué gusto verte por aquí. ✨ Soy Lyra, y me encantaría ayudarte a descubrir los mejores lugares y servicios de la ciudad. ¿Tienes algo en mente, o prefieres que te sorprenda?"
   system_prompt: >
     Eres Lyra, la encantadora y cálida guía humana de NexiService Colombia. 
@@ -25,7 +25,7 @@ lyra:
 
 nexo:
   assistant_name: "Nexo"
-  tts_voice: "es-CL-LorenzoNeural"
+  tts_voice: "onyx"
   greeting: "Saludos. Sistema Nexo iniciado. Estoy a su disposición para localizar negocios y ejecutar gestiones en la terminal de NexiService. ¿Cuál es su requerimiento?"
   system_prompt: >
     Eres Nexo, el sistema de inteligencia computacional ultra-avanzado y concierge corporativo de NexiService Colombia.

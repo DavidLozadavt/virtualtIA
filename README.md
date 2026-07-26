@@ -147,7 +147,8 @@ lyra-ai/
 │   │   ├── endpointing.py               # Endpointing híbrido acústico + semántico
 │   │   ├── nlu.py                       # Extracción de spans (structured outputs)
 │   │   ├── orchestrator.py              # FSM de negocio (estados V1 preservados)
-│   │   ├── tts_stream.py                # edge-tts incremental por oración + caché
+│   │   ├── tts_stream.py                # OpenAI gpt-4o-mini-tts streaming + caché
+│   │   ├── tts_prompt.py                # Instrucciones de interpretación (operadora)
 │   │   ├── aec.py                       # Cancelación de eco NLMS (lado servidor)
 │   │   ├── barge_in.py                  # Clasificador interrupción vs backchannel
 │   │   ├── recorder.py                  # Grabación de llamada mezclada server-side
@@ -188,7 +189,7 @@ lyra-ai/
 │   ├── llm_engine.py                    # Cliente LLM async · OpenRouter / OpenAI
 │   ├── logger.py                        # Logging centralizado con rotación
 │   ├── pusher.py                        # Eventos en tiempo real
-│   ├── voice_engine.py                  # TTS con edge-tts
+│   ├── voice_engine.py                  # STT/TTS del canal navegador (OpenAI)
 │   ├── location_match.py                # Resolución tipada de ubicaciones (precision-first)
 │   ├── geocoder_service.py              # Pipeline geocodificación: Cache→Google→Nominatim
 │   ├── geo_types.py                     # LocationType · ResolutionStatus · GeoCandidate
@@ -223,7 +224,7 @@ lyra-ai/
 | **FreeSWITCH + mod_audio_stream** | Gateway telefónico — WS streaming full-duplex |
 | **OpenAI Realtime (gpt-4o-mini-transcribe)** | STT streaming telefónico (parciales + server_vad) |
 | **openai (gpt-4o-mini)** | NLU de turno (structured outputs) y chat |
-| **edge-tts** | Generación de voz (TTS) streaming por oración |
+| **OpenAI gpt-4o-mini-tts** | Generación de voz (TTS) streaming por oración, con instrucciones de interpretación |
 | **pusher** | Eventos en tiempo real hacia el frontend |
 
 ---
