@@ -7,7 +7,10 @@ Arquitectura (docs/voice/audit_2026-07-18/LYRA_VOICE_V2_SPEC.md):
       → stt_stream  (OpenAI Realtime gpt-4o-mini-transcribe, parciales + server_vad)
       → endpointing (híbrido acústico + semántico)
       → nlu         (LLM structured-output: extrae SOLO spans, nunca resuelve)
-      → orchestrator(estados de negocio del FSM preservados tal cual)
+      → orchestrator(estados de negocio del FSM preservados tal cual; declara
+                     la INTENCIÓN del turno, nunca el texto que se reproduce)
+      → conversation(estados conversacionales, plan de habla multietapa,
+                     pausas, ritmo humano, variabilidad y sonido contextual)
       → tts_stream  (edge-tts incremental por oración → PCM 8k)
       → barge_in    (clasificador interrupción real vs backchannel)
 
