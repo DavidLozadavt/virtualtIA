@@ -942,61 +942,12 @@ _STREET_LETTER_BLACKLIST = frozenset({
 })
 
 
-def repair_mangled_street_address(text: str) -> str:
-    """
-    Repara direcciones callejeras mangled por STT.
-    'carrera 4 a eb 1728' → 'carrera 4a # 17b 28'
-    'calle 5 a 12 34' → 'calle 5a # 12 34'
-    Detecta: (calle|carrera) + número + letra(s) cortas + número(s) mangled
-    NO aplica si la "letra" es una palabra española común (número, norte, etc.)
-    """
-    t = text.strip()
-
-    # Patrón: (calle|carrera) + número + espacio? + letra(s) + espacio + número(s) mangled
-    pattern = r'((?:calle|carrera|cl|cra|cr|kr|kra|k)\s+\d+)\s+([a-záéíóú]+(?:\s+[a-záéíóú]+)*)\s+(\d+)'
-    match = re.search(pattern, t, re.IGNORECASE)
-
-    if match:
-        letters_raw = match.group(2).strip().lower()
-        # Si la "letra" es una palabra española, no es código de nomenclatura — ignorar
-        if letters_raw in _STREET_LETTER_BLACKLIST or len(letters_raw) > 4:
-            return t
-
-        prefix = match.group(1)
-        letters = match.group(2)
-        numbers = match.group(3)
-
-        # Limpiar letras: "a eb" → "ae", "a e b" → "ae"
-        # "eb" es STT mangling de "b" (letra del apartamento) o parte de "ae"
-        # Primero: unir espacios → "aeb"
-        clean_letters = re.sub(r'\s+', '', letters.lower())
-        # Si es "aeb" → "ae" (STT separó "ae" en "a eb")
-        if clean_letters == "aeb":
-            clean_letters = "ae"
-        elif clean_letters.endswith("eb"):
-            # "xeb" → "xb" (eb es mangling de b)
-            clean_letters = clean_letters[:-2] + "b"
-        elif clean_letters.startswith("e"):
-            # "eb" → "b"
-            clean_letters = clean_letters[1:]
-
-        # Intentar separar números mangled: "1728" → "17b 28" o "17 28"
-        # Si hay 4+ dígitos, probablemente son 2 números
-        if len(numbers) >= 4:
-            # Dividir a la mitad: "1728" → "17" y "28"
-            mid = len(numbers) // 2
-            num1 = numbers[:mid]
-            num2 = numbers[mid:]
-            repaired = f"{prefix}{clean_letters} # {num1}b {num2}"
-        elif len(numbers) == 3:
-            # "172" → "17" y "2"
-            repaired = f"{prefix}{clean_letters} # {numbers[:2]} {numbers[2:]}"
-        else:
-            repaired = f"{prefix}{clean_letters} # {numbers}"
-
-        t = t[:match.start()] + repaired + t[match.end():]
-
-    return t
+# repair_mangled_street_address — RETIRADO (F9, spec §3.3).
+# La reconstrucción estructural de direcciones colombianas es responsabilidad
+# ÚNICA de core.co_address_parser.parse_co_address. Esta heurística la duplicaba
+# (adivinaba la letra y la división de dígitos: "1728"→"17b 28") y fue eliminada
+# para que no exista un segundo normalizador de direcciones en el árbol.
+# La corrección de mishears de ASR (correct_stt_errors) permanece intacta.
 
 
 # ── Detección de calidad de audio ─────────────────────────────────────────────
@@ -1076,3 +1027,155 @@ class AudioQualityProfile:
         if self.avg_confidence >= 0.35:
             return "medium"
         return "low"
+
+
+# ── Pipeline de preprocesamiento (movido de api/routers/twilio.py) ────────────
+# Único gateway de voz activo es FreeSWITCH (api/routers/freeswitch.py); este
+# pipeline se comparte vía core en vez de importar desde el router Twilio muerto.
+
+# Contracciones payanesas
+_PAYANES_CONTRACTIONS = {
+    "tá": "está",
+    "toy": "estoy",
+    "tamos": "estamos",
+    "taba": "estaba",
+    "pa": "para",
+    "pal": "para el",
+    "pa'l": "para el",
+    "p'alla": "para allá",
+    "pa'lla": "para allá",
+    "palla": "para allá",
+    "pa'ca": "para acá",
+    "paca": "para acá",
+    "onde": "donde",
+    "ónde": "donde",
+    "d'onde": "de donde",
+    "nonces": "entonces",
+    "tonces": "entonces",
+    "'tonces": "entonces",
+    "tons": "entonces",
+    "l centro": "el centro",
+    "'l centro": "el centro",
+    "vea": "mire",
+    "hágale": "sí",
+    "de una": "sí",
+    "cójame": "recoja",
+    "recojame": "recoja",
+    "mandame": "envíe",
+}
+
+# Fragmentos de barge-in de Lyra que el STT puede capturar
+_BARGEIN_FRAGMENTS = [
+    r"^hola\s+soy\s+lyra[,.]?\s*",
+    r"^soy\s+lyra[,.]?\s*",
+    r"^tu\s+asistente\s+de\s+taxbelalcazar[,.]?\s*",
+    r"^cu[eé]ntame[,.]?\s*",
+    r"^listo[,.]?\s+te\s+recojo\s+en\s*",
+    r"^procesando\s+tu\s+solicitud[,.]?\s*",
+]
+
+_FUSED_STREET_RE = re.compile(
+    r"\b(calle|carrera|barrio)(\d+|[a-záéíóúñ]{3,})",
+    re.IGNORECASE,
+)
+
+# Tokens de 1 carácter que SÍ son palabras/marcadores válidos en español o en
+# nomenclatura de direcciones — no se eliminan. El resto de tokens de 1 char
+# (ruido suelto que el STT escupe sobre línea PSTN sucia) se descarta.
+_VALID_1CHAR_TOKENS = frozenset({"a", "y", "o", "u", "e", "#"})
+
+# Frases-basura observadas: "quiero un móvil" mal transcrito como "quisiera/quiero
+# morir". Se eliminan enteras para no contaminar la extracción del destino.
+_STT_JUNK_PHRASES = [
+    r"\bquisiera\s+morir\b",
+    r"\bquiero\s+morir\b",
+]
+
+_REPEAT_CHAR_RE = re.compile(r"(.)\1{2,}")          # 3+ repeticiones → 1
+_WEIRD_CHARS_RE = re.compile(r"[^\w\s#\-]", re.UNICODE)
+
+
+def _aggressive_normalize(text: str) -> str:
+    """
+    Normalización agresiva previa, para audio telefónico muy degradado.
+
+    - Elimina caracteres extraños que el STT a veces inyecta en transcripciones
+      de audio ruidoso (deja letras —incl. acentuadas—, dígitos, espacio, # y -).
+    - Colapsa caracteres repetidos: "fuuuerza" → "fuerza".
+    - Elimina frases-basura conocidas ("quisiera morir" = "quiero un móvil").
+    - Descarta tokens sueltos de 1 carácter que no sean número ni palabra válida.
+    """
+    t = _WEIRD_CHARS_RE.sub(" ", text)
+    t = _REPEAT_CHAR_RE.sub(r"\1", t)
+
+    for pat in _STT_JUNK_PHRASES:
+        t = re.sub(pat, " ", t, flags=re.IGNORECASE)
+
+    tokens = []
+    for tok in t.split():
+        if len(tok) == 1 and not tok.isdigit() and tok.lower() not in _VALID_1CHAR_TOKENS:
+            continue
+        tokens.append(tok)
+
+    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
+
+
+def preprocess_stt(text: str, confidence: float = 1.0) -> str:
+    """
+    Pipeline completo de pre-procesamiento STT.
+
+    Pasos (en orden):
+    0. Normalización agresiva (audio muy degradado): chars extraños, repeticiones,
+       frases-basura, tokens sueltos de 1 char
+    1. Eliminar fragmentos de barge-in de Lyra
+    2. Expandir contracciones payanesas
+    3. Separar palabras fusionadas (habla rápida)
+    4. Convertir números-palabra en contexto de calles
+    5. Corregir errores fonéticos específicos de Popayán
+    6. Normalizar espacios
+    """
+    if not text or len(text) < 2:
+        return text
+
+    t = text.strip()
+
+    # 0. Normalización agresiva previa
+    t = _aggressive_normalize(t)
+    if not t:
+        return text.strip()
+
+    # 1. Barge-in cleanup
+    for pat in _BARGEIN_FRAGMENTS:
+        t = re.sub(pat, "", t, flags=re.IGNORECASE).strip()
+
+    if not t:
+        return text.strip()
+
+    # 2. Contracciones payanesas
+    for contraction, expansion in _PAYANES_CONTRACTIONS.items():
+        pat = r"\b" + re.escape(contraction) + r"\b"
+        t = re.sub(pat, expansion, t, flags=re.IGNORECASE)
+
+    # 3. Palabras fusionadas: "callequince" → "calle quince"
+    t = _FUSED_STREET_RE.sub(r"\1 \2", t)
+
+    # 4. Números-palabra en contexto de calle: "calle quince" → "calle 15"
+    t = expand_number_words_in_streets(t)
+
+    # 4b. RETIRADO (F9). La reconstrucción estructural de direcciones es autoridad
+    #     EXCLUSIVA de core.co_address_parser (spec §3.3). Este paso duplicaba esa
+    #     responsabilidad y adivinaba divisiones ("1728"→"17b 28"); ya no corre.
+    #     La corrección de mishears de ASR (paso 5) permanece.
+
+    # 5. Correcciones STT específicas de Popayán (dict curado)
+    t = correct_stt_errors(t)
+
+    # 5b. Reparación fonética de transcripción contra el catálogo completo
+    #     (generaliza el dict a los ~600 lugares; guardas estrictas, no expande
+    #     ni colisiona — ej. "villa del karmen" → "villa del carmen").
+    t = repair_location_transcription(t)
+
+    # 6. Normalizar espacios
+    t = re.sub(r"\s+", " ", t).strip()
+
+    return t

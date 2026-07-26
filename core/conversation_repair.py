@@ -81,102 +81,7 @@ class ConversationMemory:
         return max(self.partial_hypotheses, key=lambda h: h["confidence"])
 
 
-# ── Inferencia de intención ───────────────────────────────────────────────────
-
-# Patrones de intención con sus scores de certeza
-INTENT_PATTERNS: dict[str, list[tuple[str, float]]] = {
-    "request_taxi": [
-        (r"\b(taxi|carro|servicio|veh[ií]culo|moto)\b", 0.9),
-        (r"\b(necesito|quiero|manda|env[ií]a|mándame)\b", 0.6),
-        (r"\b(recogida|me recogen|véngase|vengan)\b", 0.8),
-    ],
-    "give_origin": [
-        (r"\b(estoy|me encuentro|quedo|estamos|estaba)\s+(en|por|cerca)\b", 0.9),
-        (r"\b(rec[oó]j[ae]me|recójanme)\s+(en|por|aquí|acá)\b", 0.95),
-        (r"\b(desde|de)\s+\w+", 0.6),
-        (r"\b(barrio|calle|carrera|sector)\b", 0.7),
-    ],
-    "give_destination": [
-        (r"\b(voy|vamos|llévame|me dirijo|mi destino)\s+(a|para|hacia|al|pa)\b", 0.9),
-        (r"\b(hasta|para|hacia|pa)\s+\w+", 0.6),
-        (r"\b(deja(me)?|déjame)\s+(en|por)\b", 0.85),
-    ],
-    "confirm_yes": [
-        (r"^(s[ií]|sip|claro|dale|listo|ok|bueno|correcto|exacto|afirmativo)$", 1.0),
-        (r"\bs[ií]\b.*\b(correcto|exacto|bien)\b", 0.9),
-    ],
-    "confirm_no": [
-        (r"^(no|nop|negativo|nada)$", 1.0),
-        (r"\bno\b.*\b(correcto|bien|ah[ií]|eso)\b", 0.9),
-        (r"\b(diferente|otro|otra|mal|mala)\b", 0.7),
-    ],
-    "correction": [
-        (r"\b(corregir|cambiar|equivoc|mal|mala)\b", 0.9),
-        (r"\bno[,]?\s+(es|era|queda|quiero)\b", 0.8),
-    ],
-}
-
-
-def infer_intent(
-    text: str,
-    current_state: str,
-    memory: ConversationMemory,
-) -> dict:
-    """
-    Infiere la intención del usuario con scores de probabilidad.
-    
-    Retorna:
-    {
-      "primary_intent": "give_origin",
-      "confidence": 0.85,
-      "all_scores": {"give_origin": 0.85, "request_taxi": 0.3, ...},
-      "partial_location": "esmeralda",   # si hay ubicación parcial detectada
-    }
-    """
-    t_lower = strip_accents(text.lower().strip())
-    scores: dict[str, float] = {}
-
-    for intent, patterns in INTENT_PATTERNS.items():
-        max_score = 0.0
-        for pattern, score in patterns:
-            if re.search(pattern, t_lower):
-                max_score = max(max_score, score)
-        if max_score > 0:
-            scores[intent] = max_score
-
-    # Boost contextual por estado
-    if current_state == "waiting_origin" and "give_origin" in scores:
-        scores["give_origin"] = min(1.0, scores["give_origin"] + 0.1)
-    elif current_state == "waiting_dest_or_skip" and "give_destination" in scores:
-        scores["give_destination"] = min(1.0, scores["give_destination"] + 0.1)
-
-    # Inferencia implícita: si el texto es muy corto y contiene algo que parece lugar
-    # y estamos esperando un origen, probablemente ES el origen
-    if len(t_lower.split()) <= 4 and current_state == "waiting_origin":
-        if not scores.get("give_origin"):
-            # Verificar si parece un lugar sin verb explícito
-            place_indicators = [
-                r"\b(barrio|sector|urbanizacion|conjunto)\b",
-                r"\b(calle|carrera|cl|cra|kr)\b",
-                r"\b(norte|sur|oriente|occidente)\b",
-            ]
-            for pat in place_indicators:
-                if re.search(pat, t_lower):
-                    scores["give_origin"] = 0.65
-                    break
-
-    # Detectar ubicación parcial en el texto
-    partial_location = _extract_partial_location(text)
-
-    primary = max(scores, key=scores.get) if scores else "unknown"
-    confidence = scores.get(primary, 0.0)
-
-    return {
-        "primary_intent":   primary,
-        "confidence":       confidence,
-        "all_scores":       scores,
-        "partial_location": partial_location,
-    }
+# ── Extracción de ubicación parcial (para hipótesis de reparación) ───────────
 
 
 def _extract_partial_location(text: str) -> Optional[str]:
@@ -373,34 +278,6 @@ class ConversationRepair:
             return "¿Me confirmas el barrio o la dirección?"
 
         return "¿Me repites, por favor?"
-
-    def generate_zone_hint(self, text: str) -> Optional[str]:
-        """
-        Si se detecta una referencia a zona pero no a barrio específico,
-        genera una pregunta de zona para acotar.
-        """
-        t_lower = strip_accents(text.lower())
-
-        zone_indicators = {
-            "norte":     ["norte", "prados", "sauces", "tablazo", "pubenza"],
-            "sur":       ["sur", "yanaconas", "pandiguando", "las americas"],
-            "oriente":   ["oriente", "campanario", "ortigal", "esmeralda", "polideportivo"],
-            "occidente": ["occidente", "occidente", "maria", "camilo"],
-            "centro":    ["centro", "parque", "caldas", "catedral"],
-        }
-
-        detected_zone = None
-        for zone, keywords in zone_indicators.items():
-            if any(kw in t_lower for kw in keywords):
-                detected_zone = zone
-                break
-
-        if detected_zone:
-            sample_barrios = ", ".join(self.ZONES.get(detected_zone, [])[:3])
-            return f"¿Estás en el sector {detected_zone}? Por ejemplo, {sample_barrios}."
-
-        return None
-
 
 # ── Manejador de interrupciones (barge-in) ────────────────────────────────────
 

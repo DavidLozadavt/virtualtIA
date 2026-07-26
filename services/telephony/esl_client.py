@@ -110,6 +110,14 @@ class FreeSwitchESLClient:
         logger.info("[esl] uuid_kill call_uuid=%s ok=%s", call_uuid, ok)
         return ok
 
+    async def uuid_break(self, call_uuid: str) -> bool:
+        """Detiene la reproducción en curso en el canal (comando core, sin
+        depender de mod_audio_stream) — usado para cortar el playback en
+        barge-in."""
+        ok, reply = await self._run_api(f"uuid_break {call_uuid} all")
+        logger.info("[esl] uuid_break call_uuid=%s ok=%s", call_uuid, ok)
+        return ok
+
 
 _esl: Optional[FreeSwitchESLClient] = None
 

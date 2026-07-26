@@ -1,0 +1,1277 @@
+"""Turn Orchestrator (spec §3.4) — estados de negocio del FSM preservados.
+
+Los estados y transiciones de negocio son EXACTAMENTE los de V1:
+waiting_origin → confirming_origin / waiting_geo_context → creating_service
+→ finished, con las mismas reglas (overrides de dirección, guard de troncal,
+handoff de barrio cuando el geocoder agota reintentos, confirmación implícita
+acotada, idempotencia, WhatsApp). Lo que cambia es CÓMO se llega a cada
+transición: el turno lo dirige el resultado del NLU (spans extraídos) en vez
+de heurísticas de primera pasada, y el geocoding puede llegar pre-calentado
+por la ejecución especulativa de solo-lectura (nunca crea servicios).
+
+La resolución de ubicaciones sigue siendo de core/location_match y
+core/geocoder_service (bucket B, sin cambios).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+import httpx
+
+from core.address_utils import (
+    _is_repeat_request,
+    _parse_si_no,
+    _try_local_match,
+    looks_like_place,
+    normalize_address,
+    normalize_colombian_address,
+    reattach_address_details,
+)
+from core.co_address_parser import AddressState, parse_co_address
+from core.geo_context_resolver import select_candidate
+from core.conversation_repair import (
+    ConversationMemory,
+    get_progressive_retry_message,
+    get_repair_message,
+)
+from core.geo_types import ResolutionStatus
+from core.geocoder_service import run_pipeline
+from core.location_match import Decision, decide, is_filler, resolve_location_entity
+from core.stt_enhancer import (
+    fuzzy_match_location,
+    strip_accents,
+    strip_conversational_prefix,
+)
+from services.telephony.backend_client import TelephonyBackendClient
+from services.telephony.phone_utils import es_numero_troncal_o_empresa
+from services.telephony.session_store import (
+    CallSession,
+    STATE_CONFIRMING_ORIGIN,
+    STATE_CREATING_SERVICE,
+    STATE_FINISHED,
+    STATE_WAITING_GEO_CONTEXT,
+    STATE_WAITING_ORIGIN,
+)
+from services.voice.nlu import NLUResult
+
+logger = logging.getLogger("lyra.voice.orchestrator")
+
+ASK_DESTINATION = False
+MAX_SILENCE = 3
+
+GREETING = (
+    "Soy Lyra, tu asistente de Tax Belalcázar. "
+    "Cuéntame, ¿en dónde te recogemos hoy?"
+)
+
+# Barrios cuyo NOMBRE geocodifica mal o choca con otro homónimo: se fuerza la
+# dirección correcta (clave = canónico normalizado, sin tildes). La creación del
+# servicio geocodifica esta dirección, no el nombre del barrio.
+_ORIGIN_ADDRESS_OVERRIDES = {
+    "la paz": "Cra. 4 #70AN-09, Popayán, Cauca",
+}
+
+DTMF_BARRIO_MAP = {
+    "1": "Pubenza",
+    "2": "Centro",
+    "3": "Campanario",
+    "4": "Los Sauces",
+    "5": "Yanaconas",
+    "6": "Valle del Ortigal",
+    "7": "María Oriente",
+}
+
+
+class VoiceAction(str, Enum):
+    LISTEN = "listen"
+    HANGUP = "hangup"
+    CREATE_SERVICE = "create_service"
+
+
+@dataclass
+class VoiceTurnResult:
+    speak_text: str
+    action: VoiceAction = VoiceAction.LISTEN
+    short_answer: bool = False
+    session: Optional[CallSession] = None
+    backend_ok: Optional[bool] = None
+
+
+async def _send_whatsapp_message_async(celular: str, message: str, call_uuid: str) -> None:
+    """Envía una plantilla de WhatsApp a través del Telecom Manager de Laravel."""
+    from core.config import settings
+    url = f"{settings.INTELLITAXI_API_BASE}/admin/telecom/send"
+    payload = {
+        "company_id": 1,
+        "to": celular,
+        "message": message,
+        "type": "template",
+        "template_name": "servicio_creado",
+        "template_language": "es"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            logger.info(
+                "[orchestrator] WhatsApp template sent call_uuid=%s phone=%s status=%s resp=%s",
+                call_uuid,
+                celular,
+                resp.status_code,
+                resp.text[:200]
+            )
+    except Exception as e:
+        logger.error(
+            "[orchestrator] Error sending WhatsApp template call_uuid=%s phone=%s err=%s",
+            call_uuid,
+            celular,
+            e
+        )
+
+
+class SpeculativeGeocoder:
+    """Ejecución especulativa de solo-lectura del pipeline de geocoding.
+
+    `prewarm()` lanza `run_pipeline` en paralelo apenas el NLU entrega un span
+    con confianza razonable sobre un parcial estable; `resolve()` reutiliza el
+    resultado si el turno final pidió la misma consulta. Es seguro especular:
+    run_pipeline no crea servicios ni toca el backend de despacho. Un
+    resultado especulativo JAMÁS crea un servicio por sí mismo — solo acelera
+    la rama de confirmación (spec §3.4).
+    """
+
+    _TTL_SEC = 120.0
+    _MAX_TASKS = 6
+
+    def __init__(self):
+        self._tasks: dict[tuple[str, int], tuple[float, asyncio.Task]] = {}
+
+    @staticmethod
+    def _key(query: str, attempt: int) -> tuple[str, int]:
+        return (strip_accents((query or "").lower().strip()), attempt)
+
+    def _prune(self) -> None:
+        now = time.monotonic()
+        for key in list(self._tasks):
+            created, task = self._tasks[key]
+            if now - created > self._TTL_SEC or (task.done() and task.exception()):
+                self._tasks.pop(key, None)
+        while len(self._tasks) > self._MAX_TASKS:
+            _, (_, task) = self._tasks.popitem()
+            task.cancel()
+
+    def prewarm(self, query: str, attempt: int = 1) -> None:
+        if not (query or "").strip():
+            return
+        key = self._key(query, attempt)
+        if key in self._tasks:
+            return
+        self._prune()
+        task = asyncio.create_task(run_pipeline(query, attempt=attempt))
+        self._tasks[key] = (time.monotonic(), task)
+        logger.info("[orchestrator] speculative geocode prewarm query=%r", query[:80])
+
+    async def resolve(self, query: str, attempt: int = 1):
+        key = self._key(query, attempt)
+        entry = self._tasks.pop(key, None)
+        if entry is not None:
+            _, task = entry
+            try:
+                result = await task
+                logger.info(
+                    "[orchestrator] speculative geocode hit query=%r", query[:80]
+                )
+                return result
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # la especulación falló: reintentar en frío
+        return await run_pipeline(query, attempt=attempt)
+
+
+def _serialize_geo_candidates(geo_result) -> list:
+    """Serializa los candidatos de una GeoResolution a dicts guardables en sesión.
+
+    Universo CERRADO para el resolvedor de contexto geográfico. No incluye lógica
+    de dirección ni geocoding: solo copia los campos que el resolvedor consume.
+    """
+    cands = getattr(geo_result, "candidates", None) or []
+    out = []
+    for c in cands:
+        out.append({
+            "neighborhood": getattr(c, "neighborhood", None),
+            "display_name": getattr(c, "display_name", None),
+            "lat": getattr(c, "lat", None),
+            "lng": getattr(c, "lng", None),
+            "confidence": getattr(c, "confidence", None),
+        })
+    return out
+
+
+def _dedup_named(names: list) -> list:
+    """Nombres de barrio no vacíos, sin duplicados, preservando el orden."""
+    seen, out = set(), []
+    for n in names:
+        if n and n.strip() and n.lower() not in seen:
+            seen.add(n.lower())
+            out.append(n.strip())
+    return out
+
+
+def _join_options(names: list) -> str:
+    """'A' | 'A o B' | 'A, B o C' para preguntar entre candidatos."""
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" o {names[-1]}"
+
+
+# Patrón de vía con número: distingue una dirección de calle de un nombre propio.
+_STREET_RE = re.compile(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", re.IGNORECASE)
+
+
+def _looks_like_street(text: str) -> bool:
+    return bool(_STREET_RE.search((text or "").lower()))
+
+
+# Nomenclatura de vía + números + separadores. Se elimina para AISLAR la
+# referencia de barrio cuando dirección y barrio vienen en la misma frase. NO se
+# eliminan cardinales (norte/sur/oriente/occidente): son parte de nombres de
+# barrio reales (María Oriente, María Occidente, Prados del Norte…).
+_ADDR_VIA_WORDS_RE = re.compile(
+    r"\b(?:calle|carrera|cra|cr|cll|cl|kra|kr|avenida|av|avda|ave|diagonal|diag|"
+    r"dg|transversal|transv|tr|tv|manzana|mz|numero|numeral|nro|no|bis|con)\b",
+    re.IGNORECASE,
+)
+
+
+def _barrio_ref_from_text(raw_text: str) -> Optional[str]:
+    """Aísla y resuelve la referencia de barrio/sector de una frase que también
+    contiene una dirección de vía ("Cr 17 #6E-20 María Oriente" → "María
+    Oriente"). Quita la nomenclatura de vía, números y separadores, y matchea el
+    resto contra el catálogo local. Devuelve el canónico o None."""
+    if not raw_text:
+        return None
+    t = strip_accents(raw_text.lower())
+    t = re.sub(r"[#\-]", " ", t)
+    t = re.sub(r"\d+[a-z]*", " ", t)     # 17, 6e, 20, 3c…
+    t = _ADDR_VIA_WORDS_RE.sub(" ", t)
+    t = " ".join(t.split()).strip()
+    if len(t) < 3:
+        return None
+    try:
+        return _try_local_match(t)
+    except Exception:
+        return None
+
+
+def _canonical_barrio(name: Optional[str]) -> Optional[str]:
+    """Nombre OFICIAL de un barrio a partir de una referencia en lenguaje natural.
+
+    Muchos usuarios usan nombres populares (María Oriente, Los Sauces Viejo, El
+    Terminal, La Galería…) y no el nombre oficial. Se resuelve al canónico del
+    catálogo local; si no matchea, se devuelve tal cual (puede seguir siendo un
+    barrio válido devuelto por Google)."""
+    if not name or not name.strip():
+        return None
+    try:
+        canon = _try_local_match(name)
+    except Exception:
+        canon = None
+    return canon or name.strip()
+
+
+def _select_barrio_by_proximity(
+    lat: Optional[float],
+    lng: Optional[float],
+    *,
+    hint: Optional[str] = None,
+    google_barrio: Optional[str] = None,
+) -> Optional[str]:
+    """Elige el barrio OFICIAL geográficamente más cercano a una dirección ya
+    geocodificada, desambiguando entre las alternativas disponibles.
+
+    La dirección (lat,lng) es la FUENTE DE VERDAD. El `hint` (barrio/sector que el
+    usuario mencionó en lenguaje natural) y el barrio que dio Google solo aportan
+    candidatos; gana el más cercano a las coordenadas ya resueltas. Nunca
+    reemplaza la dirección — solo devuelve la etiqueta de barrio a asociarle.
+
+    El nombre popular no se asume oficial: se resuelve por proximidad usando la
+    dirección previamente geocodificada, nunca al revés."""
+    if lat is None or lng is None:
+        return None
+    try:
+        from tools.popayan_geodata import (
+            ALL_BARRIOS,
+            _haversine,
+            get_nearby_barrios,
+            infer_barrio_from_coords,
+        )
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+    alternatives: dict = {}   # canónico -> (blat, blng)
+
+    def _add(name: Optional[str]) -> None:
+        canon = _canonical_barrio(name)
+        if canon and canon in ALL_BARRIOS:
+            alternatives[canon] = ALL_BARRIOS[canon]
+
+    _add(hint)
+    _add(google_barrio)
+    for b in get_nearby_barrios(lat, lng, radius_km=1.5):
+        alternatives.setdefault(b["name"], (b["lat"], b["lng"]))
+
+    if not alternatives:
+        b = infer_barrio_from_coords(lat, lng)
+        return b["name"] if b else None
+
+    best = min(
+        alternatives.items(),
+        key=lambda kv: _haversine(lat, lng, kv[1][0], kv[1][1]),
+    )
+    return best[0]
+
+
+# Placa de corrección: "17-25", "17A-25", "18-25"… (cruce[letra]-distancia).
+_PLACA_TOKEN_RE = re.compile(r"\b(\d{1,3}[A-Za-z]?)\s*-\s*(\d{1,4})\b")
+
+# Preámbulos de corrección / relleno que suelen preceder a la placa corregida.
+_PLACA_PREAMBLE_RE = re.compile(
+    r"\b(?:no|nop|nel|perdon|disculpa|disculpe|es|era|seria|mejor|digo|osea|"
+    r"o\s*sea|mas\s*bien|quise\s*decir|queria\s*decir|el|la|numero|nro)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_placa_correction(text: str) -> Optional[str]:
+    """Placa de una corrección PARCIAL ("No, 17-25" → "17-25"), o None.
+
+    Solo devuelve algo cuando el turno es exclusivamente una placa (más
+    preámbulos de corrección/relleno): sin nomenclatura de vía ni otro contenido
+    significativo. Así "17-25 en el centro" o "cra 5 #17-25" NO se tratan como
+    corrección de placa."""
+    if not text:
+        return None
+    t = strip_accents(text.strip().lower()).replace("#", " ")
+    if _looks_like_street(t):
+        return None                       # trae vía → dirección nueva, no corrección
+    m = _PLACA_TOKEN_RE.search(t)
+    if not m:
+        return None
+    remainder = _PLACA_TOKEN_RE.sub(" ", t)
+    remainder = _PLACA_PREAMBLE_RE.sub(" ", remainder)
+    remainder = re.sub(r"[^\w]+", " ", remainder)
+    remainder = " ".join(remainder.split()).strip()
+    if len(remainder) > 2:
+        return None                       # queda contenido → no es corrección pura
+    return f"{m.group(1).upper()}-{m.group(2)}"
+
+
+class TurnOrchestrator:
+    """Procesa turnos de conversación telefónica (control-loop V2)."""
+
+    def __init__(
+        self,
+        backend: Optional[TelephonyBackendClient] = None,
+        geocoder: Optional[SpeculativeGeocoder] = None,
+    ):
+        self.backend = backend or TelephonyBackendClient()
+        self.geocoder = geocoder or SpeculativeGeocoder()
+        self._memories: dict[str, ConversationMemory] = {}
+
+    # ── memoria conversacional por llamada (para reparación con variación) ──
+
+    def _memory(self, session: CallSession) -> ConversationMemory:
+        mem = self._memories.get(session.call_uuid)
+        if mem is None:
+            mem = ConversationMemory(call_sid=session.call_uuid)
+            self._memories[session.call_uuid] = mem
+            if len(self._memories) > 200:
+                self._memories.pop(next(iter(self._memories)))
+        return mem
+
+    def forget(self, call_uuid: str) -> None:
+        self._memories.pop(call_uuid, None)
+
+    # ── entrada de llamada ──
+
+    def handle_inbound(self, session: CallSession) -> VoiceTurnResult:
+        session.state = STATE_WAITING_ORIGIN
+        session.last_message = GREETING
+        return VoiceTurnResult(speak_text=GREETING, action=VoiceAction.LISTEN, session=session)
+
+    # ── truncado de historial en barge-in (spec §3.6) ──
+
+    def note_partial_delivery(self, session: CallSession, heard_text: str) -> None:
+        """El usuario interrumpió: el contexto queda en lo realmente escuchado."""
+        heard = (heard_text or "").strip()
+        if heard and session.last_message and heard != session.last_message:
+            logger.info(
+                "[orchestrator] history truncated to heard prefix call_uuid=%s heard=%r",
+                session.call_uuid,
+                heard[:80],
+            )
+            session.last_message = heard
+
+    # ── silencio (el runtime detecta la ausencia de turno y llama aquí) ──
+
+    def handle_silence(self, session: CallSession) -> VoiceTurnResult:
+        session.silence_count += 1
+        if session.silence_count >= MAX_SILENCE:
+            return VoiceTurnResult(
+                speak_text="No te escucho. Llámanos cuando puedas. ¡Hasta luego!",
+                action=VoiceAction.HANGUP,
+                session=session,
+            )
+        msgs = {
+            (STATE_WAITING_ORIGIN, 1): "¿Sigues ahí? Dime dónde te recojo.",
+            (STATE_WAITING_ORIGIN, 2): "¿Dónde estás en Popayán?",
+            (STATE_CONFIRMING_ORIGIN, 1): (
+                f"¿Confirmas {session.origen_barrio or session.origen_text or 'esa zona'}? Di sí o no."
+            ),
+        }
+        msg = msgs.get(
+            (session.state, min(session.silence_count, 2)),
+            "¿Me escuchas? Háblame.",
+        )
+        session.last_message = msg
+        return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+    # ── generación anticipada: geocoding especulativo sobre parciales ──
+
+    def prewarm_origin(self, session: CallSession, raw_text: str, nlu: NLUResult) -> None:
+        """Pre-calienta el pipeline de geocoding con el span de un parcial.
+
+        Espejo de solo-lectura de la derivación de origen de
+        `_handle_waiting_origin` (canonical del catálogo → override → reattach
+        → normalización), sin mutar la sesión. Si el turno final llega a la
+        misma consulta, `SpeculativeGeocoder.resolve` reutiliza el resultado.
+        """
+        if session.state != STATE_WAITING_ORIGIN or session.pending_disambiguation:
+            return
+        span = nlu.best_pickup
+        if not span or nlu.pickup_confidence < 0.6:
+            return
+        m = resolve_location_entity(span)
+        d = decide(m)
+        origen = (
+            m.canonical
+            if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical
+            else span
+        )
+        forced = _ORIGIN_ADDRESS_OVERRIDES.get(strip_accents(origen.lower().strip()))
+        if forced:
+            origen = forced
+        elif not looks_like_place(origen) and not looks_like_place(raw_text):
+            return
+        origen = reattach_address_details(raw_text, origen) or origen
+        parsed = parse_co_address(origen)
+        # Estructura de vía inválida → no especular geocoding (spec §5).
+        if parsed.state == AddressState.INVALID_ADDRESS_STRUCTURE:
+            return
+        if parsed.canonical:
+            origen = parsed.canonical
+        self.geocoder.prewarm(origen, attempt=1)
+
+    # ── turno principal ──
+
+    async def process_turn(
+        self,
+        session: CallSession,
+        *,
+        text: str = "",
+        nlu: Optional[NLUResult] = None,
+        confidence: float = 0.0,
+        digits: str = "",
+        http_client: Optional[httpx.AsyncClient] = None,
+    ) -> VoiceTurnResult:
+        call_uuid = session.call_uuid
+        text = (text or "").strip()
+        if nlu is None:
+            from services.voice.nlu import fallback_classify
+
+            nlu = fallback_classify(text)
+
+        logger.info(
+            "[orchestrator] call_uuid=%s state=%s intent=%s text=%r digits=%r conf=%.2f",
+            call_uuid,
+            session.state,
+            nlu.intent,
+            text[:100],
+            digits,
+            confidence,
+        )
+
+        # ── Terminales (servicio ya creado o llamada finalizada) ──
+        if session.service_created or session.state == STATE_FINISHED:
+            closing = (
+                session.last_message
+                if session.service_created and session.last_message
+                else "¡Gracias por llamar! ¡Que te vaya bien!"
+            )
+            session.state = STATE_FINISHED
+            return VoiceTurnResult(
+                speak_text=closing,
+                action=VoiceAction.HANGUP,
+                session=session,
+            )
+
+        # ── Crear servicio en backend ──
+        if session.state == STATE_CREATING_SERVICE:
+            return await self._create_service_turn(session, http_client=http_client)
+
+        # ── DTMF ──
+        if digits:
+            session.silence_count = 0
+            session.retry_count = 0
+            canonical = DTMF_BARRIO_MAP.get(digits)
+            if canonical:
+                session.origen_text = canonical
+                session.origen_barrio = None
+                session.origen_lat = session.origen_lng = None
+                session.state = STATE_CONFIRMING_ORIGIN
+                msg = f"Perfecto, {canonical}. ¿Te recogemos ahí? Di sí para confirmar."
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN, short_answer=True, session=session
+                )
+            session.state = STATE_WAITING_ORIGIN
+            msg = "Listo. Dime el nombre del barrio o la dirección donde te recogemos."
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        # ── Repetir ──
+        if text and (nlu.intent == "repeat_request" or _is_repeat_request(text)):
+            replay = session.last_message or "¿En qué parte de Popayán te recogemos?"
+            return VoiceTurnResult(speak_text=replay, action=VoiceAction.LISTEN, session=session)
+
+        # ── Saludo / social puro, sin datos útiles ──
+        # Solo se intercepta fuera de la confirmación: en confirming_origin un
+        # ack social corto ("listo pues", "muchas gracias") ES una señal de
+        # confirmación implícita y la decide el handler del estado (regla V1).
+        if (
+            text
+            and nlu.intent in ("greeting", "chitchat_only")
+            and not nlu.best_pickup
+            and session.state != STATE_CONFIRMING_ORIGIN
+        ):
+            if session.state == STATE_WAITING_ORIGIN:
+                msg = "¡Hola! Con mucho gusto te ayudo. Cuéntame, ¿en dónde te recogemos?"
+            else:
+                # A mitad de flujo no se reinicia nada: se retoma la pregunta.
+                msg = session.last_message or "¿En dónde te recogemos?"
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        # ── Silencio ──
+        if not text:
+            return self.handle_silence(session)
+
+        session.silence_count = 0
+
+        # ── Corrección parcial de placa sobre la última dirección (task 4) ──
+        # Mientras seguimos capturando la MISMA dirección, un turno que solo trae
+        # una placa ("No, 17-25") corrige el último componente de la dirección ya
+        # almacenada — NO se interpreta como una dirección nueva. Fuera del flujo
+        # de captura de dirección (otro contexto) esta lógica no aplica.
+        if session.state in (
+            STATE_WAITING_ORIGIN,
+            STATE_CONFIRMING_ORIGIN,
+            STATE_WAITING_GEO_CONTEXT,
+        ):
+            corrected = self._maybe_placa_correction(session, text)
+            if corrected is not None:
+                return corrected
+
+        # ── waiting_origin ──
+        if session.state == STATE_WAITING_ORIGIN:
+            return await self._handle_waiting_origin(session, text, nlu, confidence)
+
+        # ── waiting_geo_context ──
+        if session.state == STATE_WAITING_GEO_CONTEXT:
+            return await self._handle_geo_context(session, text, nlu)
+
+        # ── confirming_origin ──
+        if session.state == STATE_CONFIRMING_ORIGIN:
+            return await self._handle_confirming_origin(session, text, nlu, confidence)
+
+        msg = "¿En qué puedo ayudarte?"
+        session.last_message = msg
+        return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+    # ── corrección parcial de placa (task 4) ──
+
+    def _maybe_placa_correction(
+        self, session: CallSession, text: str
+    ) -> Optional[VoiceTurnResult]:
+        """Aplica una corrección de placa ("No, 17-25") sobre la última dirección
+        capturada, conservando la vía. Devuelve el turno de re-confirmación, o
+        None si el turno no es una corrección de placa pura o no hay una dirección
+        de vía previa que corregir."""
+        stored = session.origen_text
+        if not stored:
+            return None
+        placa = _extract_placa_correction(text)
+        if not placa:
+            return None
+        # Solo si la dirección previa es una vía con número (algo que corregir).
+        stored_parsed = parse_co_address(stored)
+        ast = stored_parsed.ast
+        if ast is None or ast.via is None or ast.via.numero is None:
+            return None
+        # Reconstruir con la placa corregida, conservando la vía previa. Se pasa
+        # por el parser (única autoridad) para canonicalizar y validar.
+        base = re.sub(r"#.*$", "", stored).strip()
+        new_parsed = parse_co_address(f"{base} #{placa}")
+        if new_parsed.state != AddressState.STREET_ADDRESS or not new_parsed.canonical:
+            return None
+        origen = new_parsed.canonical
+        logger.info(
+            "[orchestrator] placa correction call_uuid=%s %r + %r -> %r",
+            session.call_uuid, stored, placa, origen,
+        )
+        # La dirección cambió de placa: cualquier resolución previa queda obsoleta.
+        session.origen_text = origen
+        session.origen_barrio = None
+        session.origen_lat = session.origen_lng = None
+        session.geo_candidates = None
+        session.geo_decision_trace = None
+        session.pending_disambiguation = None
+        session.state = STATE_CONFIRMING_ORIGIN
+        msg = f"Corrijo, {origen}. ¿Es correcto?"
+        session.last_message = msg
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            short_answer=True,
+            session=session,
+        )
+
+    # ── creación de servicio (bucket A: contrato intacto) ──
+
+    async def _create_service_turn(
+        self,
+        session: CallSession,
+        *,
+        http_client: Optional[httpx.AsyncClient] = None,
+    ) -> VoiceTurnResult:
+        celular = session.caller_phone
+        if celular and es_numero_troncal_o_empresa(celular):
+            logger.warning(
+                "[orchestrator] blocked trunk as customer call_uuid=%s phone=%s",
+                session.call_uuid,
+                celular,
+            )
+            celular = None
+
+        ok, msg = await self.backend.create_service_from_geocoded(
+            celular=celular,
+            origen=session.origen_text or "",
+            destino=session.destino_text,
+            call_uuid=session.call_uuid,
+            use_freeswitch_channel=True,
+            http_client=http_client,
+            origen_barrio=session.origen_barrio,
+            # Origen ya resuelto y confirmado: se pasan las coords autoritativas
+            # para que el backend NO vuelva a geocodificar ni reabra la ambigüedad.
+            origen_lat=session.origen_lat,
+            origen_lng=session.origen_lng,
+        )
+
+        if not ok:
+            session.state = STATE_WAITING_ORIGIN
+            session.origen_text = None
+            session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                short_answer=True,
+                session=session,
+                backend_ok=False,
+            )
+
+        session.service_created = True
+        session.state = STATE_FINISHED
+        session.last_message = msg
+
+        if celular:
+            msg_whatsapp = (
+                "Hola 👋\n\n"
+                "Soy tu asistente de Tax Belalcázar.\n\n"
+                "Hemos recibido correctamente tu solicitud de servicio.\n\n"
+                "Hola soy tu asistente de taxi, de Tax Belalcázar, "
+                "nos tomaremos un momento para buscar un movil para atender su servicio, gracias por esperar"
+            )
+            asyncio.create_task(
+                _send_whatsapp_message_async(celular, msg_whatsapp, session.call_uuid)
+            )
+
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.HANGUP,
+            session=session,
+            backend_ok=True,
+        )
+
+    # ── captura de origen ──
+
+    async def _handle_waiting_origin(
+        self,
+        session: CallSession,
+        text: str,
+        nlu: NLUResult,
+        confidence: float,
+    ) -> VoiceTurnResult:
+        origen = None
+        trusted = False
+
+        raw_text = text
+        clean_text = strip_conversational_prefix(text) or text
+        span = nlu.best_pickup
+
+        # Respuesta a una desambiguación pendiente (ej. "¿La Paz o La Paz Sur?"):
+        # resolver acotado a las sedes ofrecidas.
+        if session.pending_disambiguation:
+            pd = session.pending_disambiguation
+            m_dis = resolve_location_entity(span or clean_text, scope=pd.get("candidates"))
+            if decide(m_dis) == Decision.ACCEPT and m_dis.canonical:
+                session.pending_disambiguation = None
+                origen = m_dis.canonical
+                trusted = True
+                logger.info("[orchestrator] disambiguated -> %r", origen)
+            else:
+                msg = pd.get("question") or "¿Cuál de las opciones?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN, short_answer=True, session=session
+                )
+        else:
+            m = resolve_location_entity(span or clean_text)
+            d = decide(m)
+            if d == Decision.AMBIGUOUS and m.canonical:
+                session.pending_disambiguation = {
+                    "candidates": list(m.disambiguation_candidates),
+                    "question": _disambiguation_question(m.disambiguation_candidates),
+                }
+                msg = session.pending_disambiguation["question"]
+                session.last_message = msg
+                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+            if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical:
+                origen = m.canonical
+                trusted = True
+            elif span:
+                # El NLU ya extrajo el fragmento útil del turno completo — esto
+                # reemplaza al fallback LLM de V1 y corre en cada turno.
+                origen = span
+            elif nlu.intent in ("confirm_yes", "confirm_no", "unclear") or is_filler(clean_text):
+                session.retry_count += 1
+                msg = get_progressive_retry_message(session.retry_count) or (
+                    get_repair_message(
+                        clean_text, confidence, session.state, self._memory(session)
+                    )
+                )
+                session.last_message = msg
+                return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            else:
+                origen = clean_text
+
+        # Barrios con dirección fija (nombre geocodifica mal o es ambiguo).
+        if origen:
+            forced = _ORIGIN_ADDRESS_OVERRIDES.get(strip_accents(origen.lower().strip()))
+            if forced:
+                logger.info("[orchestrator] origin address override %r -> %r", origen, forced)
+                origen = forced
+                trusted = True
+
+        if not trusted and not looks_like_place(origen) and not looks_like_place(text):
+            session.retry_count += 1
+            msg = get_progressive_retry_message(session.retry_count) or (
+                get_repair_message(
+                    clean_text, confidence, session.state, self._memory(session)
+                )
+            )
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        session.retry_count = 0
+        # Red de seguridad: si la extracción recortó el número de casa o el
+        # landmark que el usuario sí dijo, se recuperan del texto original antes
+        # de geocodificar.
+        if origen:
+            origen = reattach_address_details(raw_text, origen)
+        if origen:
+            parsed = parse_co_address(origen)
+            # Nomenclatura de vía pero estructura inválida → NUNCA se geocodifica;
+            # se vuelve a pedir la dirección (spec §5, estado
+            # INVALID_ADDRESS_STRUCTURE). Barrios/landmarks/lugares no entran aquí.
+            if parsed.state == AddressState.INVALID_ADDRESS_STRUCTURE:
+                session.retry_count += 1
+                logger.info(
+                    "[orchestrator] invalid address structure call_uuid=%s "
+                    "reason=%s query=%r → re-ask",
+                    session.call_uuid, parsed.invalid_reason, origen,
+                )
+                msg = get_progressive_retry_message(session.retry_count) or (
+                    get_repair_message(
+                        clean_text, confidence, session.state, self._memory(session)
+                    )
+                )
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN, session=session
+                )
+            if parsed.canonical:
+                origen = parsed.canonical
+
+        # ── Garantía dura (task 3): una dirección de vía COMPLETA en el texto
+        # original NUNCA se descarta por una referencia de barrio en la misma
+        # frase. Si el texto trae una dirección (vía o intersección) y el
+        # candidato extraído no es esa vía, se recupera la dirección; el barrio
+        # quedará solo como contexto (barrio_hint, abajo). Nunca se reemplaza una
+        # dirección válida por un nombre de barrio.
+        raw_parsed = parse_co_address(raw_text)
+        raw_is_addr = raw_parsed.state in (
+            AddressState.STREET_ADDRESS,
+            AddressState.INTERSECTION,
+        )
+        if origen and raw_is_addr and raw_parsed.canonical and not _looks_like_street(origen):
+            logger.info(
+                "[orchestrator] address preserved over barrio ref call_uuid=%s "
+                "%r → %r",
+                session.call_uuid, origen, raw_parsed.canonical,
+            )
+            origen = raw_parsed.canonical
+
+        session.origen_text = origen
+        # Origen nuevo desde captura: cualquier coord resuelta previa es obsoleta.
+        session.origen_lat = session.origen_lng = None
+        self._memory(session).add_location_mention(origen or "")
+        is_street = _looks_like_street(origen)
+
+        # ── Referencia de barrio/sector mencionada JUNTO a la dirección (tasks 3
+        # y 4). Cuando una misma frase trae dirección completa + referencia de
+        # barrio ("Cr 17 #6E-20 María Oriente"), la dirección es la fuente de
+        # verdad y se conserva íntegra; el barrio se guarda aparte como contexto
+        # para desambiguar por PROXIMIDAD sobre la dirección ya geocodificada. El
+        # nombre popular no se asume oficial: solo desambigua, nunca reemplaza.
+        barrio_hint: Optional[str] = None
+        if is_street:
+            hinted = _barrio_ref_from_text(raw_text)
+            if hinted and strip_accents(hinted.lower().strip()) not in strip_accents(
+                (origen or "").lower()
+            ):
+                barrio_hint = hinted
+
+        if is_street:
+            try:
+                geo_result = await self.geocoder.resolve(origen, attempt=1)
+                if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                    sel = geo_result.selected
+                    lat = getattr(sel, "lat", None)
+                    lng = getattr(sel, "lng", None)
+                    barrio = sel.neighborhood
+                    # Task 4: barrio OFICIAL por proximidad a la dirección ya
+                    # geocodificada. Se aplica cuando el usuario mencionó un
+                    # barrio/sector junto a la dirección, o cuando Google no lo
+                    # dio. La dirección (origen) se conserva intacta.
+                    if lat is not None and lng is not None and (barrio_hint or not barrio):
+                        picked = _select_barrio_by_proximity(
+                            lat, lng, hint=barrio_hint, google_barrio=barrio
+                        )
+                        if picked:
+                            barrio = picked
+                            session.origen_lat = lat
+                            session.origen_lng = lng
+                    if barrio:
+                        session.origen_barrio = barrio
+                        session.state = STATE_CONFIRMING_ORIGIN
+                        msg = f"El punto de recogida es {origen}, barrio {barrio}."
+                        session.last_message = msg
+                        return VoiceTurnResult(
+                            speak_text=msg,
+                            action=VoiceAction.LISTEN,
+                            short_answer=True,
+                            session=session,
+                        )
+                elif geo_result.status in (
+                    ResolutionStatus.CONTEXT_GATHERING,
+                    ResolutionStatus.NEEDS_DISAMBIGUATION,
+                ):
+                    candidates = _serialize_geo_candidates(geo_result)
+                    # Task 3+4: si el usuario YA mencionó el barrio junto a la
+                    # dirección, la ambigüedad se resuelve AHORA por proximidad
+                    # sobre el universo CERRADO de candidatos, sin re-preguntar ni
+                    # descartar la dirección (que se conserva intacta).
+                    if barrio_hint and len(candidates) >= 2:
+                        sel = select_candidate(barrio_hint, candidates)
+                        if sel is not None:
+                            session.origen_text = origen           # dirección intacta
+                            session.origen_barrio = sel.neighborhood
+                            session.origen_lat = sel.lat
+                            session.origen_lng = sel.lng
+                            session.geo_decision_trace = sel.to_trace()
+                            session.geo_candidates = None
+                            session.state = STATE_CONFIRMING_ORIGIN
+                            logger.info(
+                                "[orchestrator] barrio ref resolved in-utterance via %s "
+                                "call_uuid=%s barrio=%r hint=%r",
+                                sel.method, session.call_uuid, sel.neighborhood, barrio_hint,
+                            )
+                            msg = f"¿{origen}, barrio {sel.neighborhood}, es correcto?"
+                            session.last_message = msg
+                            return VoiceTurnResult(
+                                speak_text=msg,
+                                action=VoiceAction.LISTEN,
+                                short_answer=True,
+                                session=session,
+                            )
+                    session.geo_original_query = origen
+                    session.geo_attempt = 1
+                    session.geo_candidates = candidates
+                    session.geo_decision_trace = None
+                    session.state = STATE_WAITING_GEO_CONTEXT
+                    msg = geo_result.disambiguation_question or "¿En qué barrio o sector queda?"
+                    session.last_message = msg
+                    return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+            except Exception as exc:
+                logger.warning("[orchestrator] geocode pipeline error: %s", exc)
+
+        # Nombre propio / landmark sin patrón de calle: también se geocodifica
+        # para ejercer el guard _NEVER_AUTOACCEPT en la captura inicial.
+        if not is_street and origen and looks_like_place(origen):
+            try:
+                geo_result = await self.geocoder.resolve(origen, attempt=1)
+                if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+                    barrio = geo_result.selected.neighborhood
+                    if barrio:
+                        session.origen_barrio = barrio
+                    session.state = STATE_CONFIRMING_ORIGIN
+                    barrio_str = f", barrio {barrio}" if barrio else ""
+                    msg = f"¿{origen}{barrio_str}, es correcto?"
+                    session.last_message = msg
+                    return VoiceTurnResult(
+                        speak_text=msg,
+                        action=VoiceAction.LISTEN,
+                        short_answer=True,
+                        session=session,
+                    )
+                elif (
+                    geo_result.status in (
+                        ResolutionStatus.CONTEXT_GATHERING,
+                        ResolutionStatus.NEEDS_DISAMBIGUATION,
+                    )
+                    and not trusted
+                ):
+                    # No degradar shortcuts confiables (catálogo local / override):
+                    # solo los NO confiables pasan a pedir barrio/referencia.
+                    session.geo_original_query = origen
+                    session.geo_attempt = 1
+                    session.geo_candidates = _serialize_geo_candidates(geo_result)
+                    session.geo_decision_trace = None
+                    session.state = STATE_WAITING_GEO_CONTEXT
+                    msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
+                    session.last_message = msg
+                    return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+                # trusted en no-RESOLVED, o FAILED → caer a confirm plano.
+            except Exception as exc:
+                logger.warning("[orchestrator] landmark geocode pipeline error: %s", exc)
+
+        session.state = STATE_CONFIRMING_ORIGIN
+        # Confianza media → confirmación implícita natural en vez de eco seco
+        # (spec §3.4: "¿Vale, X es donde te recogemos?" en vez de loop sí/no).
+        if span and 0.4 <= nlu.pickup_confidence < 0.75:
+            msg = f"Vale, ¿{origen} es donde te recogemos?"
+        else:
+            msg = f"¿{origen} es correcto?"
+        session.last_message = msg
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            short_answer=True,
+            session=session,
+        )
+
+    # ── contexto geográfico adicional ──
+
+    async def _handle_geo_context(
+        self, session: CallSession, text: str, nlu: NLUResult
+    ) -> VoiceTurnResult:
+        orig_q = session.geo_original_query or session.origen_text or ""
+        context_text = nlu.best_pickup or text
+
+        # ── Resolvedor de contexto geográfico (universo CERRADO) ─────────────
+        # Dirección VÁLIDA con múltiples candidatos: la respuesta natural del
+        # usuario ("María Oriente segundo puente") NUNCA se concatena a la query
+        # ni reemplaza la dirección. Se usa como EVIDENCIA para escoger entre los
+        # candidatos ya encontrados. La dirección original se conserva intacta y
+        # NO se vuelve a consultar el geocoder para ampliar el universo.
+        candidates = session.geo_candidates or []
+        if len(candidates) >= 2:
+            sel = select_candidate(context_text, candidates)
+            if sel is not None:
+                # Selección definitiva → dirección intacta + barrio oficial +
+                # coordenadas del candidato elegido. La ambigüedad queda RESUELTA:
+                # se congelan las coords para que la creación del servicio las use
+                # tal cual y NUNCA vuelva a geocodificar (no se reabre el universo).
+                session.origen_text = orig_q                # dirección congelada
+                session.origen_barrio = sel.neighborhood    # barrio oficial elegido
+                session.origen_lat = sel.lat                # coords autoritativas
+                session.origen_lng = sel.lng
+                session.geo_decision_trace = sel.to_trace()  # traza auditable
+                session.geo_candidates = None                # universo cerrado
+                session.state = STATE_CONFIRMING_ORIGIN
+                logger.info(
+                    "[orchestrator] geo context resolved via %s call_uuid=%s "
+                    "barrio=%r ref=%r trace=%s",
+                    sel.method, session.call_uuid, sel.neighborhood, context_text,
+                    session.geo_decision_trace,
+                )
+                msg = f"¿{orig_q}, barrio {sel.neighborhood}, es correcto?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN,
+                    short_answer=True, session=session,
+                )
+            # Inconcluso: NO concatenar. Re-preguntar entre los candidatos por
+            # su NOMBRE OFICIAL (precision-first: preferible repreguntar).
+            session.geo_attempt += 1
+            names = _dedup_named([c.get("neighborhood") for c in candidates])
+            if session.geo_attempt <= 3 and len(names) >= 2:
+                msg = f"¿La dirección queda en {_join_options(names)}?"
+                session.last_message = msg
+                return VoiceTurnResult(
+                    speak_text=msg, action=VoiceAction.LISTEN,
+                    short_answer=True, session=session,
+                )
+            # Intentos agotados / sin nombres: handoff con el primer barrio,
+            # dirección intacta (evento terminal → se cierra el universo).
+            barrio = names[0] if names else (context_text.strip() or orig_q)
+            session.origen_text = orig_q
+            session.origen_barrio = barrio
+            session.geo_candidates = None
+            session.geo_decision_trace = None
+            session.state = STATE_CREATING_SERVICE
+            logger.warning(
+                "[orchestrator] geo context inconclusive → barrio handoff "
+                "call_uuid=%s barrio=%r", session.call_uuid, barrio,
+            )
+            msg = (
+                f"Listo, te ubico en el barrio {barrio}. El conductor te "
+                "llamará para afinar el punto exacto. Un momento por favor."
+            )
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg, action=VoiceAction.CREATE_SERVICE,
+                short_answer=True, session=session,
+            )
+
+        # Sin candidatos múltiples → flujo actual sin cambios: dar contexto a una
+        # dirección DÉBIL que aún no resolvió (búsqueda legítima, no hay universo
+        # cerrado que preservar).
+        enriched = f"{orig_q}, {context_text}".strip(", ")
+        geo_result = await self.geocoder.resolve(enriched, attempt=session.geo_attempt + 1)
+        session.geo_attempt = geo_result.attempt
+        if geo_result.status == ResolutionStatus.RESOLVED and geo_result.selected:
+            barrio = geo_result.selected.neighborhood
+            if barrio:
+                session.origen_barrio = barrio
+            session.origen_text = orig_q
+            session.state = STATE_CONFIRMING_ORIGIN
+            barrio_str = f", barrio {barrio}" if barrio else ""
+            msg = f"¿{orig_q}{barrio_str}, es correcto?"
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                short_answer=True,
+                session=session,
+            )
+
+        if geo_result.status == ResolutionStatus.CONTEXT_GATHERING:
+            msg = geo_result.disambiguation_question or "¿En qué barrio o referencia cercana queda?"
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        if geo_result.status == ResolutionStatus.FAILED:
+            # Reintentos agotados: NO se reinicia la captura (genera bucle). Se
+            # toma el barrio/referencia que el usuario acaba de dar y se crea el
+            # servicio con ese barrio: el conductor llama para afinar el punto.
+            barrio = (
+                session.origen_barrio
+                or _try_local_match(context_text)
+                or context_text.strip()
+                or orig_q
+            )
+            logger.warning(
+                "[orchestrator] geo context exhausted → barrio-only handoff "
+                "call_uuid=%s barrio=%r origen=%r",
+                session.call_uuid,
+                barrio,
+                orig_q,
+            )
+            session.origen_text = orig_q or barrio
+            session.origen_barrio = barrio
+            session.state = STATE_CREATING_SERVICE
+            msg = (
+                f"Listo, te ubico en el barrio {barrio}. El conductor te "
+                "llamará para afinar el punto exacto. Un momento por favor."
+            )
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.CREATE_SERVICE,
+                short_answer=True,
+                session=session,
+            )
+
+        # NEEDS_DISAMBIGUATION u otro estado no terminal → confirmar texto.
+        session.state = STATE_CONFIRMING_ORIGIN
+        msg = f"¿{orig_q} es correcto?"
+        session.last_message = msg
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            short_answer=True,
+            session=session,
+        )
+
+    # ── confirmación de origen ──
+
+    async def _handle_confirming_origin(
+        self,
+        session: CallSession,
+        text: str,
+        nlu: NLUResult,
+        confidence: float,
+    ) -> VoiceTurnResult:
+        if nlu.intent == "confirm_yes":
+            is_yes: Optional[bool] = True
+        elif nlu.intent == "confirm_no":
+            is_yes = False
+        else:
+            is_yes = _parse_si_no(text)
+
+        span = nlu.best_pickup
+
+        if is_yes is True and not span:
+            if not ASK_DESTINATION:
+                session.state = STATE_CREATING_SERVICE
+                return VoiceTurnResult(
+                    speak_text="Un momento por favor...",
+                    action=VoiceAction.CREATE_SERVICE,
+                    session=session,
+                )
+            session.state = STATE_WAITING_ORIGIN  # placeholder if dest enabled later
+            msg = f"Listo {session.origen_text}. ¿A dónde vas?"
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        if is_yes is False and not span:
+            session.state = STATE_WAITING_ORIGIN
+            session.origen_text = None
+            session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
+            msg = "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección."
+            session.last_message = msg
+            return VoiceTurnResult(speak_text=msg, action=VoiceAction.LISTEN, session=session)
+
+        # Corrección / restatement — override explícito del slot ya lleno
+        # (Dialogue State Tracking estándar, spec §3.4): el usuario cambió de
+        # idea o repitió el lugar; no se reinicia la conversación.
+        local = _try_local_match(span or text)
+        if local:
+            cur = strip_accents((session.origen_text or "").lower())
+            new = strip_accents(local.lower())
+            if cur and (cur == new or fuzzy_match_location(new, [cur], threshold=0.80)):
+                if not ASK_DESTINATION:
+                    session.state = STATE_CREATING_SERVICE
+                    return VoiceTurnResult(
+                        speak_text="Un momento por favor...",
+                        action=VoiceAction.CREATE_SERVICE,
+                        session=session,
+                    )
+            session.origen_text = local
+            session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
+            session.state = STATE_CONFIRMING_ORIGIN
+            msg = f"Ah, {local}. ¿Te recogemos ahí? Di sí para confirmar."
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                short_answer=True,
+                session=session,
+            )
+
+        if span and nlu.intent in ("correction", "provide_pickup"):
+            session.origen_text = span
+            session.origen_barrio = None
+            session.origen_lat = session.origen_lng = None
+            session.state = STATE_CONFIRMING_ORIGIN
+            msg = f"Ah, {span}. ¿Te recogemos ahí? Di sí para confirmar."
+            session.last_message = msg
+            return VoiceTurnResult(
+                speak_text=msg,
+                action=VoiceAction.LISTEN,
+                short_answer=True,
+                session=session,
+            )
+
+        # Respuesta ambigua con origen+barrio ya resueltos → confirmación
+        # implícita, SOLO para respuestas cortas (≤3 palabras) que no sean un
+        # lugar ni una negación/corrección: un ack coloquial ("de una", "listo
+        # pues") sí confirma; una frase larga o una dirección nueva NO.
+        ambiguous_is_place = looks_like_place(text)
+        token_count = len((text or "").split())
+        if (
+            session.origen_text
+            and session.origen_barrio
+            and not ambiguous_is_place
+            and 1 <= token_count <= 3
+            and nlu.intent not in ("confirm_no", "correction", "provide_pickup", "provide_destination")
+        ):
+            logger.info(
+                "[orchestrator] implicit confirm call_uuid=%s text=%r",
+                session.call_uuid,
+                text[:80],
+            )
+            if not ASK_DESTINATION:
+                session.state = STATE_CREATING_SERVICE
+                return VoiceTurnResult(
+                    speak_text="Un momento por favor...",
+                    action=VoiceAction.CREATE_SERVICE,
+                    session=session,
+                )
+
+        # No parseable: reparación contextual con variación (no un "no te
+        # entendí" fijo — rescata ConversationRepair, spec §3.4).
+        msg = get_repair_message(
+            text, confidence, session.state, self._memory(session)
+        )
+        session.last_message = msg
+        return VoiceTurnResult(
+            speak_text=msg,
+            action=VoiceAction.LISTEN,
+            short_answer=True,
+            session=session,
+        )
+
+
+def _disambiguation_question(candidates: list) -> str:
+    if not candidates:
+        return "¿Cuál de las opciones?"
+    if len(candidates) == 2:
+        return f"¿Te refieres a {candidates[0]} o a {candidates[1]}?"
+    opts = ", ".join(candidates[:-1]) + f" o {candidates[-1]}"
+    return f"¿Cuál de estas opciones: {opts}?"

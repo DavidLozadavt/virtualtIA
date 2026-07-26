@@ -443,101 +443,31 @@ def _is_repeat_request(text: str) -> bool:
 
 # ── ADDRESS EXTRACTION ────────────────────────────────────────────────────────
 
-def normalize_address(address: str) -> str:
-    """Estandariza nomenclatura (Calle → Cl, etc.)"""
-    if not address:
-        return ""
-    replacements = {
-        r'\bcl\b': 'Calle', r'\bcra?\b': 'Carrera', r'\bkra?\b': 'Carrera',
-        r'\bav\b': 'Avenida', r'\btr\b': 'Transversal', r'\bdiag?\b': 'Diagonal',
-        r'\bno\.\s*': '#',
-    }
-    result = address
-    for pattern, replacement in replacements.items():
-        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-    return result.strip()
-
-
-def _compound_num_replace(m: re.Match) -> str:
-    """Convierte 'cuarenta y uno' → '41', etc. en el contexto de una dirección."""
-    tens_map  = {"veinte":20,"treinta":30,"cuarenta":40,"cincuenta":50,
-                 "sesenta":60,"setenta":70,"ochenta":80,"noventa":90}
-    units_map = {"un":1,"uno":1,"dos":2,"tres":3,"cuatro":4,"cinco":5,
-                 "seis":6,"siete":7,"ocho":8,"nueve":9}
-    t_val = tens_map.get(m.group(1).lower(), 0)
-    u_val = units_map.get(m.group(2).lower(), 0)
-    return str(t_val + u_val) if t_val else m.group(0)
-
-
 def normalize_colombian_address(address: str) -> str:
-    """
-    Normaliza al formato colombiano estándar.
-    'carrera cuarta a el # 17 b 28' → 'Cra. 4ae # 17B-28'
-    'calle 16 # 3 ce cuarenta y uno' → 'Cl. 16 # 3CE-41'
+    """Forma canónica abreviada colombiana (`Cra. 52 #3C-6`).
+
+    Wrapper de compatibilidad: delega en la ÚNICA autoridad de direcciones,
+    `core.co_address_parser.parse_co_address` (spec
+    docs/superpowers/specs/colombian_address_parser_design.md §7). No contiene
+    lógica de reconstrucción propia. Para vía/intersección devuelve la canónica;
+    para no-dirección devuelve el texto original (identidad).
     """
     if not address:
         return ""
+    from core.co_address_parser import parse_co_address
+    return parse_co_address(address).canonical or address.strip()
 
-    t = address.strip()
 
-    # 0. Convertir números compuestos STT: "cuarenta y uno" → "41"
-    #    Cubre el caso más común: Twilio STT deletrea el número de casa en palabras.
-    t = re.sub(
-        r'\b(veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)'
-        r'\s+y\s+(un[o]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b',
-        _compound_num_replace,
-        t, flags=re.IGNORECASE,
-    )
-    # Números simples como última parte del número de casa (sin combinación con decenas)
-    _simple_end = [
-        (r'\b(once)\b', '11'), (r'\b(doce)\b', '12'), (r'\b(trece)\b', '13'),
-        (r'\b(catorce)\b', '14'), (r'\b(quince)\b', '15'),
-        (r'\b(diecis[eé]is)\b', '16'), (r'\b(diecisiete)\b', '17'),
-        (r'\b(dieciocho)\b', '18'), (r'\b(diecinueve)\b', '19'),
-    ]
-    for pat, repl in _simple_end:
-        t = re.sub(pat, repl, t, flags=re.IGNORECASE)
-
-    num_words = {
-        "primera":"1","segunda":"2","tercera":"3","cuarta":"4",
-        "quinta":"5","sexta":"6","septima":"7","octava":"8",
-        "novena":"9","decima":"10","once":"11","doce":"12",
-        "trece":"13","catorce":"14","quince":"15","dieciseis":"16",
-        "diecisiete":"17","dieciocho":"18","diecinueve":"19","veinte":"20",
-    }
-
-    for word, digit in num_words.items():
-        t = re.sub(
-            rf'\b(calle|carrera|cl|cra|cr|kr|kra)\s+{word}\b',
-            rf'\1 {digit}', t, flags=re.IGNORECASE,
-        )
-
-    t = re.sub(r'\bn[uú]mero\s*', '# ', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bcarrera\s+(\d)', r'Cra. \1', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bcalle\s+(\d)',   r'Cl. \1',  t, flags=re.IGNORECASE)
-    t = re.sub(r'\bcl\s+(\d)',      r'Cl. \1',  t, flags=re.IGNORECASE)
-    t = re.sub(r'\bcra\s+(\d)',     r'Cra. \1', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bkr\s+(\d)',      r'Cra. \1', t, flags=re.IGNORECASE)
-    t = re.sub(r'\bkra\s+(\d)',     r'Cra. \1', t, flags=re.IGNORECASE)
-
-    t = re.sub(r'(\d+)\s+[aá]\s+el\b', r'\1ae', t, flags=re.IGNORECASE)
-    t = re.sub(r'(\d+)\s+ae\b',         r'\1ae', t, flags=re.IGNORECASE)
-    t = re.sub(r'(\d+)a\s+ae\b',        r'\1ae', t, flags=re.IGNORECASE)
-    t = re.sub(r'(\d+)\s+a\s+b\b',      r'\1ab', t, flags=re.IGNORECASE)
-
-    t = re.sub(
-        r'#\s*(\d+)\s+([a-zA-Z]{1,3})\s*[-–]?\s*(\d+)',
-        lambda m: f"# {m.group(1)}{m.group(2).upper()}-{m.group(3)}",
-        t,
-    )
-    t = re.sub(r'#\s*(\d+)\s+de\s+(\d+)',   r'# \1-\2', t, flags=re.IGNORECASE)
-    t = re.sub(r'#\s*(\d+)\s+(\d+)\s*$',    r'# \1-\2', t, flags=re.IGNORECASE)
-
-    t = re.sub(r'^cra\.', 'Cra.', t)
-    t = re.sub(r'^cl\.',  'Cl.',  t)
-    t = re.sub(r'^calle(?=[.\s])', 'Cl.', t, flags=re.IGNORECASE)
-
-    return t.strip()
+def normalize_address(address: str) -> str:
+    """Render en palabras completas (`Carrera 5 #12-34`) para la ruta legacy de
+    WhatsApp/Nominatim. Delega en el mismo parser (misma autoridad, otro estilo
+    de render; spec §7.1). Sin lógica de parsing propia."""
+    if not address:
+        return ""
+    from core.co_address_parser import parse_co_address, render_full
+    parsed = parse_co_address(address)
+    full = render_full(parsed)
+    return full or address.strip()
 
 
 # ── Recuperación de número de casa / landmark perdidos en la extracción ───────
@@ -557,36 +487,34 @@ def reattach_address_details(original_user_text: str, extracted: str) -> str:
     número de casa ("# 26") y el landmark ("Camilo Torres"). La normalización
     posterior ya no puede recuperar lo que se descartó ANTES de ella.
 
-    `normalize_colombian_address` SÍ preserva número + landmark cuando recibe el
-    texto completo del usuario. Por eso, si la normalización del texto original
-    contiene un número de casa ('#') que el candidato extraído perdió, usamos la
-    normalización completa del original como fuente de verdad: es exactamente lo
-    que el usuario dijo, normalizado, sin pérdida.
+    Implementación (spec §7.2): CONSUMIDOR del parser, no reconstructor. Compara
+    los `components` de la dirección original vs. la extraída; si el original tiene
+    una placa (`distancia`) que la extraída perdió, devuelve la canónica del
+    original. La detección por componente también recupera el caso "número de casa
+    suelto al final" (audit §3b) que la vieja sonda por '#' no veía.
 
     Returns:
-        El candidato enriquecido, o el `extracted` original si no hay número de
-        casa que proteger o si el candidato ya lo conserva.
+        El candidato enriquecido, o el `extracted` original si no hay placa que
+        proteger o si el candidato ya la conserva.
     """
     if not original_user_text or not extracted:
         return extracted
 
-    norm_full = normalize_colombian_address(_strip_preamble(original_user_text))
+    from core.co_address_parser import parse_co_address
 
-    # Sin número de casa en el texto original → no hay detalle de casa que
-    # proteger (ej. el usuario solo dio un barrio). No tocar el candidato.
-    if _HOUSE_NUMBER_MARK not in norm_full:
-        return extracted
+    raw_p = parse_co_address(original_user_text)
+    ext_p = parse_co_address(extracted)
 
-    # El candidato extraído ya conserva un número de casa → respetarlo tal cual.
-    if _HOUSE_NUMBER_MARK in normalize_colombian_address(extracted):
-        return extracted
+    raw_has_placa = raw_p.components.get("distancia") is not None
+    ext_has_placa = ext_p.components.get("distancia") is not None
 
-    logger.info(
-        "[ADDR_RECOVER] extracted %r dropped house number/landmark; "
-        "recovering full normalized address %r",
-        extracted, norm_full,
-    )
-    return norm_full
+    if raw_has_placa and not ext_has_placa and raw_p.canonical:
+        logger.info(
+            "[ADDR_RECOVER] extracted %r dropped house number; recovering %r",
+            extracted, raw_p.canonical,
+        )
+        return raw_p.canonical
+    return extracted
 
 
 # ── Resolución local de barrios/landmarks (catálogo popayan_geodata) ──────────

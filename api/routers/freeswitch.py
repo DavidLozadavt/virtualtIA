@@ -1,55 +1,73 @@
-"""
-api/routers/freeswitch.py — Integración directa FreeSWITCH ↔ Lyra (sin Twilio).
+"""api/routers/freeswitch.py — Gateway FreeSWITCH ↔ Lyra Voice V2.
+
+Un único camino de voz: WebSocket full-duplex con mod_audio_stream
+(WS /freeswitch/audio). El record-loop de V1 (inbound-call + audio-turn +
+archivos WAV por turno) fue reemplazado por completo por el runtime
+streaming (services/voice).
+
+Contratos preservados (bucket A):
+  - GET /freeswitch/recording/{call_uuid}.wav — grabación de la llamada para
+    el panel del operador (ahora la escribe el propio runtime, mezclada
+    server-side; ya no la sube FreeSWITCH).
+  - POST /freeswitch/test-create-service — herramienta de operación que llama
+    al backend IntelliTaxi con el contrato intacto.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import logging
-import traceback
-import wave
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request, WebSocket
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from core.config import settings
 from services.telephony.backend_client import TelephonyBackendClient
-from services.telephony.call_handler import process_text_turn, _restore_terminal_session
-from services.telephony.esl_client import get_esl_client
-from services.telephony.phone_utils import limpiar_numero, resolve_caller_phone
-from services.telephony.session_store import STATE_FINISHED, get_session_store
-from services.telephony.stt_service import TelephonySTTService
-from services.telephony.tts_file_store import (
-    build_audio_url,
-    build_ws_audio_url,
-    get_tts_file_store,
-    sanitize_audio_id,
-)
-from services.telephony.tts_service import TelephonyTTSService
-from services.telephony.voice_call_engine import VoiceCallEngine
-from services.telephony.ws_audio_buffer import WsAudioBuffer, resolve_ws_encoding
+from services.telephony.phone_utils import limpiar_numero
+from services.telephony.session_store import get_session_store
+from services.voice.nlu import TurnNLU
+from services.voice.orchestrator import GREETING, TurnOrchestrator
+from services.voice.recorder import recording_path
+from services.voice.runtime import VoiceCallRuntime
+from services.voice.tts_stream import StreamingTTS
 
 logger = logging.getLogger("lyra.freeswitch")
 
 freeswitch_router = APIRouter(prefix="/freeswitch", tags=["FreeSWITCH"])
 
-_engine = VoiceCallEngine()
-_stt = TelephonySTTService()
-_tts = TelephonyTTSService()
+# Compartidos entre llamadas: la caché de frases TTS y las tareas NLU
+# anticipadas viven a nivel de proceso, no por llamada.
+_orchestrator = TurnOrchestrator()
+_tts = StreamingTTS()
+_nlu = TurnNLU()
 _backend = TelephonyBackendClient()
 
-_ws_audio: Dict[str, WsAudioBuffer] = {}
+_FIXED_PHRASES = [
+    GREETING,
+    "Un momento por favor...",
+    "¡Hola! Con mucho gusto te ayudo. Cuéntame, ¿en dónde te recogemos?",
+    "¿Sigues ahí? Dime dónde te recojo.",
+    "¿Dónde estás en Popayán?",
+    "No te escucho. Llámanos cuando puedas. ¡Hasta luego!",
+    "Entendido. ¿Dónde queda exactamente? Puedes darme el barrio o la dirección.",
+    (
+        "Te enviaremos los datos del conductor por WhatsApp "
+        "y en un momento él se comunica contigo. "
+        "¡Que tengas un excelente viaje!"
+    ),
+]
+_prewarm_started = False
 
-# Cola extra (s) tras la duración del WAV antes de re-abrir la captura.
-# Pequeña a propósito: una cola larga descartaba el primer "sí" del usuario
-# (tenía que repetirlo). El eco que se filtre por debajo de esta ventana lo
-# rechaza _looks_like_bot_echo a nivel de texto, así que no hace falta cubrir
-# toda la latencia de fetch aquí.
-_PLAYBACK_GATE_TAIL_SEC = 0.4
+
+def _ensure_tts_prewarm() -> None:
+    """Sintetiza las frases fijas una sola vez (caché → latencia ~0)."""
+    global _prewarm_started
+    if _prewarm_started:
+        return
+    _prewarm_started = True
+    asyncio.create_task(_tts.prewarm(_FIXED_PHRASES))
 
 
 class TestCreateServiceRequest(BaseModel):
@@ -57,111 +75,6 @@ class TestCreateServiceRequest(BaseModel):
     origen: str
     destino: Optional[str] = None
     call_uuid: Optional[str] = None
-
-
-class InboundCallRequest(BaseModel):
-    call_uuid: str
-    caller_number: Optional[str] = None
-    destination_number: Optional[str] = None
-    sip_headers: Optional[Dict[str, Any]] = None
-    source: Optional[str] = None  # entel | freeswitch | manual
-
-
-class ProcessTextRequest(BaseModel):
-    call_uuid: str
-    text: str
-    confidence: float = 1.0
-    digits: str = ""
-
-
-def _normalize_transcript(text: str, confidence: float) -> str:
-    """
-    Limpieza STT compartida con el gateway Twilio (preprocess_stt): elimina
-    fragmentos de eco de Lyra, expande contracciones payanesas ("hágale"/"de una"
-    -> "sí"), repara direcciones y corrige fonética de Popayán.
-
-    Sin esto, el motor recibe el transcript crudo: una confirmación coloquial o
-    contaminada con eco no matchea _parse_si_no -> is_yes None -> repair -> el
-    usuario tiene que confirmar dos veces. Twilio ya aplica esto (twilio.py:1359).
-    """
-    if not text:
-        return text
-    try:
-        from api.routers.twilio import preprocess_stt
-
-        cleaned = preprocess_stt(text, confidence)
-        return cleaned or text
-    except Exception as e:  # nunca romper el turno por un fallo de normalización
-        logger.debug("[freeswitch] preprocess_stt skipped: %s", e)
-        return text
-
-
-def _echo_tokens(text: str) -> list[str]:
-    import re as _re
-
-    return _re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
-
-
-def _transcript_is_known_entity(transcript: str) -> bool:
-    """True si el transcript resuelve a una entidad real del catálogo local
-    (barrio/landmark de Popayán). Una dirección que el usuario REPITE compartiendo
-    palabras con el prompt ("Sí, La Paz" tras "¿Confirmas barrio La Paz?") no es
-    eco: nunca debe descartarse."""
-    try:
-        from core.location_match import Decision, decide, resolve_location_entity
-
-        m = resolve_location_entity(transcript)
-        return bool(m.canonical) and decide(m) in (
-            Decision.ACCEPT,
-            Decision.CONFIRM,
-            Decision.AMBIGUOUS,
-        )
-    except Exception as e:  # nunca bloquear el turno por el catálogo
-        logger.debug("[freeswitch] entity check skipped: %s", e)
-        return False
-
-
-def _looks_like_bot_echo(transcript: str, last_message: str) -> bool:
-    """
-    True si el transcript es un fragmento literal del último mensaje del bot.
-
-    mod_audio_stream reinyecta el eco del TTS de Lyra; si la cola del prompt
-    ("...¿me confirmas?") escapa al gate, el STT la transcribe y el motor la
-    procesa como turno del usuario -> repair/doble confirmación. Solo descarta
-    secuencias contiguas de >=3 palabras del prompt (nunca un "sí"/"no" corto ni
-    una confirmación de 2 palabras como "La Paz" que comparte el nombre del barrio
-    con la pregunta del bot).
-    """
-    t = _echo_tokens(transcript)
-    if len(t) < 3:
-        return False
-    # Excepción catálogo: si el usuario nombró una ubicación conocida, no es eco
-    # aunque comparta palabras con el prompt (el bot acaba de leerle ese barrio).
-    if _transcript_is_known_entity(transcript):
-        return False
-    p = _echo_tokens(last_message)
-    if len(t) > len(p):
-        return False
-    for i in range(len(p) - len(t) + 1):
-        if p[i : i + len(t)] == t:
-            return True
-    return False
-
-
-async def _parse_inbound_body(request: Request) -> dict:
-    """Acepta JSON o form-urlencoded (curl desde dialplan FreeSWITCH)."""
-    ct = (request.headers.get("content-type") or "").lower()
-    if "application/json" in ct:
-        return await request.json()
-    form = await request.form()
-    body = dict(form)
-    sip_raw = body.get("sip_headers")
-    if isinstance(sip_raw, str) and sip_raw.strip().startswith("{"):
-        try:
-            body["sip_headers"] = json.loads(sip_raw)
-        except json.JSONDecodeError:
-            pass
-    return body
 
 
 @freeswitch_router.get("/health")
@@ -180,18 +93,17 @@ async def freeswitch_health():
 
     return {
         "ok": True,
-        "service": "lyra-freeswitch-gateway",
+        "service": "lyra-voice-v2",
         "backend_api": settings.INTELLITAXI_API_BASE,
         "session_store": settings.VOICE_SESSION_STORE,
         "redis_ok": redis_ok,
-        "stt_provider": _stt.provider,
-        "stt_model": _stt.model,
-        "stt_available": _stt.available,
+        "stt_provider": "openai-realtime",
+        "stt_model": settings.VOICE_STT_MODEL,
+        "stt_language": settings.VOICE_STT_LANGUAGE,
+        "stt_available": bool(settings.openai_stt_key()),
+        "nlu_model": settings.VOICE_NLU_MODEL,
         "tts_voice": settings.LYRA_TTS_VOICE,
-        "audio_codec": settings.TELEPHONY_AUDIO_CODEC,
-        "ws_audio_url": settings.FREESWITCH_WS_AUDIO_URL,
         "active_sessions": store.active_count(),
-        "twilio_fallback_active": True,
     }
 
 
@@ -228,1000 +140,39 @@ async def test_create_service(req: TestCreateServiceRequest, request: Request):
     }
 
 
-def _inbound_use_file_mode(channel_source: Optional[str]) -> bool:
-    """FreeSWITCH/Entel: respuesta liviana con audio_url, sin base64."""
-    if not channel_source:
-        return True
-    return channel_source.strip().lower() in ("entel", "freeswitch", "fs", "dialplan")
-
-
-def _resolve_audio_file_path(audio_id: str):
-    clean_id = sanitize_audio_id(audio_id)
-    store = get_tts_file_store()
-    path = store.get_path(clean_id)
-    if not path:
-        raise HTTPException(status_code=404, detail="Audio file not found or expired")
-    return clean_id, path
-
-
-@freeswitch_router.get("/audio-file/{audio_id}")
-async def serve_audio_file(audio_id: str):
-    """
-    Sirve WAV 8 kHz mono generado para playback en FreeSWITCH.
-    URL ejemplo: /freeswitch/audio-file/abc123.wav
-    """
-    clean_id, path = _resolve_audio_file_path(audio_id)
-    return FileResponse(
-        path=str(path),
-        media_type="audio/wav",
-        filename=f"{clean_id}.wav",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@freeswitch_router.head("/audio-file/{audio_id}")
-async def head_audio_file(audio_id: str):
-    """HEAD para que FreeSWITCH valide existencia del WAV sin descargar cuerpo."""
-    clean_id, path = _resolve_audio_file_path(audio_id)
-    return Response(
-        status_code=200,
-        headers={
-            "Content-Type": "audio/wav",
-            "Content-Length": str(path.stat().st_size),
-            "Cache-Control": "no-store",
-            "Accept-Ranges": "bytes",
-        },
-    )
-
-
-@freeswitch_router.post("/inbound-call")
-async def inbound_call(request: Request):
-    raw = await _parse_inbound_body(request)
-    channel_source = str(raw.get("source") or raw.get("channel") or "freeswitch")
-    req = InboundCallRequest(
-        call_uuid=str(raw.get("call_uuid") or raw.get("uuid") or ""),
-        caller_number=raw.get("caller_number") or raw.get("caller_id_number"),
-        destination_number=raw.get("destination_number") or raw.get("destination_number"),
-        sip_headers=raw.get("sip_headers") if isinstance(raw.get("sip_headers"), dict) else None,
-        source=channel_source,
-    )
-    if not req.call_uuid:
-        return {"success": False, "error": "call_uuid required"}
-
-    store = get_session_store()
-    caller, phone_source = resolve_caller_phone(req.caller_number, req.sip_headers)
-
-    session = store.get_or_create(
-        call_uuid=req.call_uuid,
-        caller_phone=caller,
-        destination_number=req.destination_number,
-        sip_metadata=req.sip_headers or {},
-    )
-
-    logger.info(
-        "[freeswitch] inbound-call created call_uuid=%s caller=%s phone_source=%s "
-        "channel_source=%s dest=%s",
-        req.call_uuid,
-        caller,
-        phone_source,
-        channel_source,
-        req.destination_number,
-    )
-
-    turn = _engine.handle_inbound(session)
-    store.save(turn.session or session)
-
-    tts_result = await _tts.synthesize_for_telephony(turn.speak_text)
-    use_file = _inbound_use_file_mode(channel_source)
-
-    if use_file:
-        try:
-            file_store = get_tts_file_store()
-            audio_id, file_path = file_store.save_telephony_audio(
-                tts_result,
-                call_uuid=req.call_uuid,
-                audio_id=sanitize_audio_id(req.call_uuid),
-            )
-            audio_url = build_audio_url(audio_id, request)
-            ws_audio_url = build_ws_audio_url(request)
-            # Diagnóstico: qué WS de captura se le entrega a FreeSWITCH y si el
-            # STT/ESL están listos. Si el usuario "no se escucha", lo primero es
-            # verificar que mod_audio_stream reciba esta ws_audio_url y abra el WS.
-            logger.info(
-                "[freeswitch] inbound-call capture-setup call_uuid=%s ws_audio_url=%s "
-                "(setting=%s) esl_enabled=%s stt_available=%s stt_provider=%s",
-                req.call_uuid,
-                ws_audio_url,
-                settings.FREESWITCH_WS_AUDIO_URL,
-                settings.FREESWITCH_ESL_ENABLED,
-                _stt.available,
-                _stt.provider,
-            )
-            response = {
-                "success": True,
-                "call_uuid": req.call_uuid,
-                "caller_phone": caller,
-                "caller_source": phone_source,
-                "speak_text": turn.speak_text,
-                "action": "play_then_listen",
-                "state": session.state,
-                "audio_id": audio_id,
-                "audio_url": audio_url,
-                "audio_format": "wav",
-                "ws_audio_url": ws_audio_url,
-            }
-            payload = json.dumps(response, ensure_ascii=False)
-            logger.info(
-                "[freeswitch] inbound-call response call_uuid=%s audio_url=%s "
-                "file=%s response_bytes=%d",
-                req.call_uuid,
-                audio_url,
-                file_path,
-                len(payload.encode("utf-8")),
-            )
-            return Response(
-                content=payload,
-                media_type="application/json",
-            )
-        except Exception as e:
-            logger.error(
-                "[freeswitch] inbound-call tts file failed call_uuid=%s err=%s",
-                req.call_uuid,
-                e,
-            )
-            return {
-                "success": True,
-                "call_uuid": req.call_uuid,
-                "speak_text": turn.speak_text,
-                "action": "play_then_listen",
-                "audio_url": None,
-                "error": "tts_file_generation_failed",
-                "ws_audio_url": build_ws_audio_url(request),
-            }
-
-    # Modo manual / pruebas: incluye base64 (no usar desde mod_curl en producción)
-    audio_b64 = ""
-    if tts_result.get("mulaw"):
-        audio_b64 = base64.b64encode(tts_result["mulaw"]).decode("ascii")
-    elif tts_result.get("mp3"):
-        audio_b64 = base64.b64encode(tts_result["mp3"]).decode("ascii")
-
-    response = {
-        "success": True,
-        "call_uuid": req.call_uuid,
-        "caller_phone": caller,
-        "caller_source": phone_source,
-        "speak_text": turn.speak_text,
-        "action": turn.action.value,
-        "state": session.state,
-        "audio_base64": audio_b64,
-        "audio_format": tts_result.get("format", "mp3"),
-        "ws_audio_url": build_ws_audio_url(request),
-    }
-    logger.info(
-        "[freeswitch] inbound-call manual mode response_bytes=%d",
-        len(json.dumps(response).encode("utf-8")),
-    )
-    return response
-
-
-# Por debajo de este pico el audio es silencio/ruido de fondo. El record-loop
-# graba también cuando el usuario NO habla (silencio hasta el timeout), y Whisper
-# ALUCINA sobre silencio (lo amplifica y "oye" frases fantasma). Habla real ronda
-# -3..-30 dBFS; el silencio observado fue -60 dBFS. Gate conservador en -45.
-_SILENCE_DBFS_GATE = -45.0
-
-# Alucinaciones típicas de Whisper sobre silencio/ruido (normalizado, sin tildes).
-_STT_HALLUCINATIONS = (
-    "amara.org",
-    "subtitulos realizados por la comunidad",
-    "subtitulado por la comunidad",
-    "gracias por ver el video",
-    "gracias por ver el vídeo",
-    "suscribete al canal",
-    "www.mooji.org",
-)
-
-
-def _pcm_peak_dbfs(pcm: bytes) -> float:
-    import audioop
-    import math
-
-    if not pcm:
-        return -99.0
-    try:
-        peak = audioop.max(pcm, 2)
-    except Exception:
-        return -99.0
-    if peak <= 0:
-        return -99.0
-    return 20.0 * math.log10(peak / 32768.0)
-
-
-def _is_stt_hallucination(text: str) -> bool:
-    from core.stt_enhancer import strip_accents
-
-    t = strip_accents((text or "").lower())
-    return any(h in t for h in _STT_HALLUCINATIONS)
-
-
-def _wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int]:
-    """Extrae PCM16 mono + sample_rate de un WAV (grabado por FreeSWITCH record).
-
-    Devuelve (b"", 0) si no es un WAV legible. Convierte a mono si viniera
-    estéreo. El STT reaplica el pipeline DSP (resample 16k + HPF + normalize).
-    """
-    import audioop
-    import io
-
-    try:
-        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-            rate = wf.getframerate() or 8000
-            channels = wf.getnchannels() or 1
-            width = wf.getsampwidth() or 2
-            pcm = wf.readframes(wf.getnframes())
-    except Exception as e:
-        logger.warning(
-            "[freeswitch] audio-turn: WAV parse failed err=%r len=%d head=%r",
-            e,
-            len(wav_bytes),
-            wav_bytes[:16],
-        )
-        return b"", 0
-    if width != 2:
-        try:
-            pcm = audioop.lin2lin(pcm, width, 2)
-        except Exception:
-            return b"", 0
-    if channels > 1:
-        try:
-            pcm = audioop.tomono(pcm, 2, 0.5, 0.5)
-        except Exception:
-            pass
-    return pcm, rate
-
-
-async def _read_audio_upload(request: Request) -> bytes:
-    """Lee el WAV subido y devuelve bytes WAV crudos.
-
-    FreeSWITCH sube el audio en base64 (busybox wget --post-file trunca binario
-    en el primer byte nulo; base64 no tiene nulos). Aceptamos también WAV crudo
-    o multipart por compatibilidad. Detección: si empieza con 'RIFF' es WAV
-    directo; si no, se intenta decodificar base64.
-    """
-    import base64 as _b64
-
-    ct = (request.headers.get("content-type") or "").lower()
-    if "multipart/form-data" in ct:
-        form = await request.form()
-        raw = b""
-        for key in ("file", "audio", "recording", "utterance"):
-            up = form.get(key)
-            if up is not None and hasattr(up, "read"):
-                raw = await up.read()
-                break
-    else:
-        raw = await request.body()
-
-    if not raw:
-        return b""
-    if raw[:4] == b"RIFF":
-        return raw
-    # base64 (posible con saltos de línea de busybox base64)
-    try:
-        decoded = _b64.b64decode(raw, validate=False)
-        if decoded[:4] == b"RIFF":
-            return decoded
-        return decoded  # otro formato de audio; el parser decidirá
-    except Exception:
-        return raw
-
-
-@freeswitch_router.post("/audio-turn")
-async def audio_turn(request: Request):
-    """Un turno de conversación desde un WAV grabado (record-loop, sin WS).
-
-    FreeSWITCH graba la locución del usuario y sube el WAV aquí; se transcribe,
-    se ejecuta el motor y se devuelve audio_url + hangup para que el dialplan lo
-    reproduzca. Alternativa a mod_audio_stream con módulos stock.
-    """
-    call_uuid = (
-        request.query_params.get("call_uuid")
-        or request.query_params.get("uuid")
-        or ""
-    )
-    if not call_uuid:
-        return {"success": False, "error": "call_uuid required"}
-
-    wav_bytes = await _read_audio_upload(request)
-    if not wav_bytes:
-        return {"success": False, "call_uuid": call_uuid, "error": "empty audio"}
-
-    store = get_session_store()
-    session = store.get(call_uuid) or _restore_terminal_session(store, call_uuid)
-    if session and (session.service_created or session.state == STATE_FINISHED):
-        logger.info(
-            "[freeswitch] audio-turn skip — call finished call_uuid=%s state=%s",
-            call_uuid,
-            session.state,
-        )
-        return {"success": True, "call_uuid": call_uuid, "hangup": True, "audio_url": None}
-
-    pcm, rate = _wav_to_pcm16(wav_bytes)
-    if not pcm:
-        return {"success": False, "call_uuid": call_uuid, "error": "unreadable wav"}
-
-    peak_dbfs = _pcm_peak_dbfs(pcm)
-    logger.info(
-        "[freeswitch] audio-turn call_uuid=%s wav_bytes=%d pcm_bytes=%d rate=%d peak=%.1fdBFS",
-        call_uuid,
-        len(wav_bytes),
-        len(pcm),
-        rate,
-        peak_dbfs,
-    )
-
-    # Gate de silencio ANTES de STT: no mandar silencio a Whisper (alucina).
-    if peak_dbfs < _SILENCE_DBFS_GATE:
-        logger.info(
-            "[freeswitch] audio-turn silence gate call_uuid=%s peak=%.1fdBFS < %.1f → no_speech",
-            call_uuid,
-            peak_dbfs,
-            _SILENCE_DBFS_GATE,
-        )
-        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
-
-    try:
-        stt = await _stt.transcribe_telephony_chunk(pcm, encoding="pcm16", call_uuid=call_uuid)
-    except Exception:
-        logger.error(
-            "[freeswitch] audio-turn stt error call_uuid=%s traceback=%s",
-            call_uuid,
-            traceback.format_exc(),
-        )
-        return {"success": False, "call_uuid": call_uuid, "error": "stt_error"}
-
-    transcript = (stt.get("text") or "").strip()
-    if not stt.get("success") or not transcript:
-        logger.info(
-            "[freeswitch] audio-turn no speech call_uuid=%s err=%s",
-            call_uuid,
-            stt.get("error", "empty transcript"),
-        )
-        # Sin habla: el dialplan reintenta grabando de nuevo (no cuelga).
-        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
-
-    # Filtro de alucinación de STT (frases fantasma sobre silencio/ruido).
-    if _is_stt_hallucination(transcript):
-        logger.info(
-            "[freeswitch] audio-turn dropped STT hallucination call_uuid=%s text=%r",
-            call_uuid,
-            transcript[:120],
-        )
-        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
-
-    raw_transcript = transcript
-    transcript = _normalize_transcript(transcript, stt.get("confidence", 0.0))
-
-    if session and _looks_like_bot_echo(transcript, session.last_message):
-        logger.info(
-            "[freeswitch] audio-turn dropped bot-echo call_uuid=%s text=%r",
-            call_uuid,
-            transcript[:120],
-        )
-        return {"success": True, "call_uuid": call_uuid, "no_speech": True, "audio_url": None}
-
-    logger.info(
-        '[freeswitch] audio-turn transcript call_uuid=%s raw="%s" norm="%s"',
-        call_uuid,
-        raw_transcript[:200],
-        transcript[:200],
-    )
-
-    http_client = getattr(request.app.state, "http_client", None)
-    try:
-        response = await process_text_turn(
-            store,
-            call_uuid,
-            user_text=transcript,
-            confidence=stt.get("confidence", 0.0),
-            http_client=http_client,
-            create_session_if_missing=True,
-            file_playback=True,
-            request=request,
-        )
-    except Exception:
-        logger.error(
-            "[freeswitch] audio-turn process error call_uuid=%s traceback=%s",
-            call_uuid,
-            traceback.format_exc(),
-        )
-        return {"success": False, "call_uuid": call_uuid, "error": "process_error"}
-
-    # No exponer file_path/base64 al dialplan; solo lo que Lua necesita.
-    out = {
-        k: v
-        for k, v in response.items()
-        if k not in ("file_path", "audio_base64")
-    }
-    out["transcript"] = transcript
-    logger.info(
-        "[freeswitch] audio-turn result call_uuid=%s state=%s action=%s hangup=%s audio_url=%s",
-        call_uuid,
-        response.get("state"),
-        response.get("action"),
-        response.get("hangup"),
-        response.get("audio_url"),
-    )
-    return out
-
-
-def _recording_path(call_uuid: str):
-    from pathlib import Path
-
-    safe = sanitize_audio_id(call_uuid)
-    rec_dir = Path(settings.FREESWITCH_RECORDINGS_DIR or "data/freeswitch_recordings")
-    rec_dir.mkdir(parents=True, exist_ok=True)
-    return safe, rec_dir / f"{safe}.wav"
-
-
-@freeswitch_router.post("/recording")
-async def upload_recording(request: Request):
-    """Recibe la grabación de llamada completa (record_session) al colgar.
-
-    FreeSWITCH sube el WAV con --post-file; se guarda por call_uuid para servirlo
-    luego en el frontend del servicio. Body crudo (audio/wav) o multipart.
-    """
-    call_uuid = (
-        request.query_params.get("call_uuid")
-        or request.query_params.get("uuid")
-        or ""
-    )
-    if not call_uuid:
-        return {"success": False, "error": "call_uuid required"}
-    wav_bytes = await _read_audio_upload(request)
-    if not wav_bytes:
-        return {"success": False, "call_uuid": call_uuid, "error": "empty recording"}
-    safe, path = _recording_path(call_uuid)
-    try:
-        path.write_bytes(wav_bytes)
-    except OSError as e:
-        logger.error("[freeswitch] recording save failed call_uuid=%s err=%s", call_uuid, e)
-        return {"success": False, "call_uuid": call_uuid, "error": "write_failed"}
-    logger.info(
-        "[freeswitch] recording saved call_uuid=%s path=%s bytes=%d",
-        call_uuid,
-        path,
-        len(wav_bytes),
-    )
-    return {
-        "success": True,
-        "call_uuid": call_uuid,
-        "recording_url": f"/freeswitch/recording/{safe}.wav",
-        "bytes": len(wav_bytes),
-    }
-
-
 @freeswitch_router.get("/recording/{call_uuid}.wav")
 async def serve_recording(call_uuid: str):
     """Sirve la grabación de llamada completa por call_uuid (para el frontend)."""
-    safe, path = _recording_path(call_uuid)
+    path = recording_path(call_uuid)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Recording not found")
     return FileResponse(
         path=str(path),
         media_type="audio/wav",
-        filename=f"{safe}.wav",
+        filename=path.name,
     )
-
-
-@freeswitch_router.post("/process-text")
-async def process_text(req: ProcessTextRequest, request: Request):
-    store = get_session_store()
-    http_client = getattr(request.app.state, "http_client", None)
-
-    result = await process_text_turn(
-        store,
-        req.call_uuid,
-        user_text=_normalize_transcript(req.text, req.confidence),
-        confidence=req.confidence,
-        digits=req.digits,
-        http_client=http_client,
-        create_session_if_missing=True,
-    )
-    return result
-
-
-def _ws_resolve_call_uuid(
-    current: Optional[str],
-    *,
-    query_params: Any,
-    data: Optional[dict] = None,
-) -> Optional[str]:
-    """Resuelve call_uuid desde query string o metadata JSON."""
-    if current:
-        return current
-
-    for key in ("call_uuid", "uuid", "callId", "call_id"):
-        val = query_params.get(key)
-        if val:
-            return str(val)
-
-    if not data:
-        return None
-
-    for key in ("call_uuid", "uuid", "callId", "call_id"):
-        val = data.get(key)
-        if val:
-            return str(val)
-
-    start = data.get("start") or {}
-    if isinstance(start, dict):
-        for key in ("callId", "call_uuid", "uuid"):
-            val = start.get(key)
-            if val:
-                return str(val)
-        custom = start.get("customParameters") or {}
-        if isinstance(custom, dict):
-            val = custom.get("call_uuid") or custom.get("uuid")
-            if val:
-                return str(val)
-
-    return None
-
-
-def _ws_resolve_caller_number(
-    current: Optional[str],
-    *,
-    query_params: Any,
-    data: Optional[dict] = None,
-) -> Optional[str]:
-    """Resuelve caller_number desde query string o metadata JSON."""
-    if current:
-        return current
-
-    for key in ("caller_number", "caller_id_number", "caller", "from"):
-        val = query_params.get(key)
-        if val:
-            cleaned = limpiar_numero(str(val))
-            if cleaned:
-                return cleaned
-
-    if not data:
-        return None
-
-    for key in ("caller_number", "caller_id_number", "caller", "from"):
-        val = data.get(key)
-        if val:
-            cleaned = limpiar_numero(str(val))
-            if cleaned:
-                return cleaned
-
-    start = data.get("start") or {}
-    if isinstance(start, dict):
-        for key in ("caller_number", "caller_id_number", "from"):
-            val = start.get(key)
-            if val:
-                cleaned = limpiar_numero(str(val))
-                if cleaned:
-                    return cleaned
-
-    return None
-
-
-def _ws_ensure_session(call_uuid: str, caller_number: Optional[str]) -> None:
-    """Vincula sesión si inbound-call ya la creó o la crea aquí."""
-    store = get_session_store()
-    session = store.get_or_create(call_uuid, caller_phone=caller_number)
-    if caller_number and not session.caller_phone:
-        session.caller_phone = caller_number
-        store.save(session)
-
-
-async def _ws_handle_text_metadata(
-    text: str,
-    *,
-    call_uuid: Optional[str],
-    caller_number: Optional[str],
-    websocket: WebSocket,
-) -> tuple[Optional[str], Optional[str], bool]:
-    """
-    Procesa frame text (JSON metadata o control).
-    Returns: (call_uuid, caller_number, should_stop)
-    """
-    stripped = text.strip()
-    if not stripped:
-        return call_uuid, caller_number, False
-
-    try:
-        data = json.loads(stripped)
-    except json.JSONDecodeError:
-        logger.debug("[freeswitch/ws] non-json text ignored len=%d", len(stripped))
-        return call_uuid, caller_number, False
-
-    logger.info(
-        "[freeswitch/ws] metadata text received keys=%s",
-        list(data.keys()) if isinstance(data, dict) else type(data).__name__,
-    )
-
-    if not isinstance(data, dict):
-        return call_uuid, caller_number, False
-
-    event = data.get("event")
-    qp = {}  # query already applied; metadata may refine ids
-
-    new_uuid = _ws_resolve_call_uuid(call_uuid, query_params=qp, data=data)
-    new_caller = _ws_resolve_caller_number(caller_number, query_params=qp, data=data)
-
-    if new_uuid:
-        if new_uuid != call_uuid:
-            logger.info("[freeswitch/ws] call_uuid resolved=%s", new_uuid)
-        call_uuid = new_uuid
-        _ws_audio.setdefault(
-            call_uuid,
-            WsAudioBuffer(call_uuid=call_uuid, encoding=resolve_ws_encoding()),
-        )
-
-    if call_uuid:
-        _ws_ensure_session(call_uuid, new_caller)
-        if new_caller:
-            caller_number = new_caller
-
-    if event == "connected":
-        logger.info("[freeswitch/ws] protocol connected call_uuid=%s", call_uuid)
-
-    elif event == "start":
-        enc_hint = None
-        start = data.get("start") if isinstance(data.get("start"), dict) else {}
-        media = start.get("mediaFormat") or data.get("mediaFormat") or {}
-        if isinstance(media, dict):
-            enc_hint = media.get("encoding") or media.get("codec")
-        if call_uuid and call_uuid in _ws_audio:
-            _ws_audio[call_uuid].encoding = resolve_ws_encoding(enc_hint)
-        logger.info(
-            "[freeswitch/ws] stream start call_uuid=%s caller=%s encoding=%s",
-            call_uuid,
-            caller_number,
-            _ws_audio.get(call_uuid).encoding if call_uuid in _ws_audio else resolve_ws_encoding(enc_hint),
-        )
-
-    elif event == "media" and call_uuid:
-        payload = (data.get("media") or {}).get("payload", "")
-        if payload:
-            try:
-                chunk = base64.b64decode(payload)
-                await _ws_append_audio(call_uuid, chunk, websocket=websocket)
-            except Exception as e:
-                logger.warning("[freeswitch/ws] media b64 decode failed: %s", e)
-
-    elif event == "stop":
-        logger.info("[freeswitch/ws] stream stop call_uuid=%s", call_uuid)
-        return call_uuid, caller_number, True
-
-    return call_uuid, caller_number, False
-
-
-def _get_ws_buffer(call_uuid: str) -> WsAudioBuffer:
-    if call_uuid not in _ws_audio:
-        _ws_audio[call_uuid] = WsAudioBuffer(
-            call_uuid=call_uuid,
-            encoding=resolve_ws_encoding(),
-        )
-    return _ws_audio[call_uuid]
-
-
-async def _ws_append_audio(
-    call_uuid: str,
-    chunk: bytes,
-    *,
-    websocket: WebSocket,
-) -> None:
-    """Acumula audio y dispara STT al alcanzar duración mínima + silencio o máximo."""
-    if not chunk:
-        return
-
-    acc = _get_ws_buffer(call_uuid)
-    if not acc.first_chunk_logged:
-        acc.first_chunk_logged = True
-        logger.info(
-            "[freeswitch/ws] audio bytes received first time call_uuid=%s len=%d encoding=%s",
-            call_uuid,
-            len(chunk),
-            acc.encoding,
-        )
-
-    acc.append(chunk)
-    should_flush, reason = acc.should_flush()
-    # Heartbeat de diagnóstico: si el audio LLEGA pero nunca dispara STT (VAD no
-    # detecta fin, o sigue por debajo del mínimo, o mute), este log lo revela.
-    if not should_flush and acc.chunk_count and acc.chunk_count % 50 == 0:
-        logger.info(
-            "[freeswitch/ws] buffer heartbeat call_uuid=%s bytes=%d/min=%d/max=%d "
-            "chunks=%d muted=%s reason=%s",
-            call_uuid,
-            len(acc.buffer),
-            acc.min_bytes,
-            acc.max_bytes,
-            acc.chunk_count,
-            acc.is_muted(),
-            reason,
-        )
-    if should_flush:
-        logger.info(
-            "[freeswitch/ws] flush trigger call_uuid=%s bytes=%d reason=%s",
-            call_uuid,
-            len(acc.buffer),
-            reason,
-        )
-        audio_data = acc.take_and_reset()
-        await _flush_audio_turn(websocket, call_uuid, audio_data, encoding=acc.encoding, reason=reason)
 
 
 @freeswitch_router.websocket("/audio")
 async def audio_stream(websocket: WebSocket):
-    """
-    WebSocket mod_audio_stream (FreeSWITCH) ↔ Lyra.
+    """WebSocket mod_audio_stream ↔ Lyra Voice V2 (full-duplex).
 
-    Acepta frames text (JSON metadata) y bytes (audio µ-law raw).
-    Respuesta: JSON con speak_text, action, audio_base64 (µ-law o mp3)
+    Entrada: frames binarios PCM16 8k mono (pata del llamante) + JSON de
+    protocolo. Salida: mensajes streamAudio con el TTS por chunks.
     """
     await websocket.accept()
+    _ensure_tts_prewarm()
     logger.info(
-        "[freeswitch/ws] websocket accepted query=%s headers_uuid=%s",
+        "[freeswitch/ws] websocket accepted query=%s",
         dict(websocket.query_params),
-        websocket.headers.get("x-call-uuid") or websocket.headers.get("call-uuid"),
     )
-
-    call_uuid = _ws_resolve_call_uuid(
-        None, query_params=websocket.query_params, data=None
-    )
-    caller_number = _ws_resolve_caller_number(
-        None, query_params=websocket.query_params, data=None
-    )
-
-    if not call_uuid:
-        for header in ("x-call-uuid", "call-uuid", "x-freeswitch-uuid"):
-            val = websocket.headers.get(header)
-            if val:
-                call_uuid = str(val)
-                logger.info("[freeswitch/ws] call_uuid from header %s", header)
-                break
-
-    if not caller_number:
-        for header in ("x-caller-number", "caller-number", "x-caller-id"):
-            val = websocket.headers.get(header)
-            if val:
-                caller_number = limpiar_numero(str(val))
-                if caller_number:
-                    break
-
-    if call_uuid:
-        logger.info("[freeswitch/ws] call_uuid resolved=%s", call_uuid)
-        _get_ws_buffer(call_uuid)
-        _ws_ensure_session(call_uuid, caller_number)
-
-    try:
-        while True:
-            msg = await websocket.receive()
-
-            if msg.get("type") == "websocket.disconnect":
-                break
-
-            if msg.get("text") is not None:
-                call_uuid, caller_number, should_stop = await _ws_handle_text_metadata(
-                    msg["text"],
-                    call_uuid=call_uuid,
-                    caller_number=caller_number,
-                    websocket=websocket,
-                )
-                if should_stop:
-                    if call_uuid and call_uuid in _ws_audio:
-                        acc = _ws_audio[call_uuid]
-                        if len(acc.buffer) >= acc.min_bytes // 2:
-                            audio_data = acc.take_and_reset()
-                            await _flush_audio_turn(
-                                websocket,
-                                call_uuid,
-                                audio_data,
-                                encoding=acc.encoding,
-                                reason="stream_stop",
-                            )
-                    break
-                continue
-
-            if msg.get("bytes") is not None:
-                chunk = msg["bytes"]
-                if not call_uuid:
-                    logger.warning(
-                        "[freeswitch/ws] audio bytes before call_uuid resolved len=%d — ignored",
-                        len(chunk),
-                    )
-                    continue
-                await _ws_append_audio(call_uuid, chunk, websocket=websocket)
-                continue
-
-    except WebSocketDisconnect:
-        logger.info("[freeswitch/ws] websocket disconnected call_uuid=%s", call_uuid)
-    except Exception:
-        logger.error(
-            "[freeswitch/ws] error call_uuid=%s traceback=%s",
-            call_uuid,
-            traceback.format_exc(),
-        )
-    finally:
-        if call_uuid:
-            _ws_audio.pop(call_uuid, None)
-        logger.info("[freeswitch/ws] websocket closed call_uuid=%s", call_uuid)
-
-
-def _wav_duration_seconds(file_path: Optional[str]) -> float:
-    """Duración del WAV local para esperar a que termine el playback antes de colgar."""
-    if not file_path:
-        return 0.0
-    try:
-        with wave.open(file_path, "rb") as wf:
-            rate = wf.getframerate() or 8000
-            return wf.getnframes() / float(rate)
-    except Exception as e:
-        logger.debug("[freeswitch/ws] wav duration failed path=%s err=%s", file_path, e)
-        return 0.0
-
-
-async def _playback_tts_on_call(call_uuid: str, audio_url: str) -> bool:
-    """Reproduce TTS en la llamada vía ESL uuid_broadcast usando URL HTTP."""
-    if not settings.FREESWITCH_ESL_ENABLED:
-        logger.warning("[freeswitch/ws] ESL disabled — skip playback call_uuid=%s", call_uuid)
-        return False
-
-    if not audio_url:
-        logger.warning("[freeswitch/ws] playback skipped — no audio_url call_uuid=%s", call_uuid)
-        return False
-
-    esl = get_esl_client()
-    ok = await esl.uuid_broadcast(call_uuid, audio_url, leg="aleg")
-    if ok:
-        logger.info("[freeswitch/ws] playback sent call_uuid=%s audio_url=%s", call_uuid, audio_url)
-    else:
-        logger.warning(
-            "[freeswitch/ws] playback failed call_uuid=%s audio_url=%s",
-            call_uuid,
-            audio_url,
-        )
-    return ok
-
-
-async def _flush_audio_turn(
-    websocket: WebSocket,
-    call_uuid: str,
-    audio_buf: bytes,
-    *,
-    encoding: str,
-    reason: str = "",
-) -> None:
-    if not audio_buf:
-        return
-
-    store = get_session_store()
-    session = store.get(call_uuid) or _restore_terminal_session(store, call_uuid)
-    if session and (session.service_created or session.state == STATE_FINISHED):
-        logger.info(
-            "[freeswitch/ws] skip stt — call already finished call_uuid=%s state=%s",
-            call_uuid,
-            session.state,
-        )
-        return
-
-    logger.info(
-        "[freeswitch/ws] stt start call_uuid=%s bytes=%d encoding=%s reason=%s",
-        call_uuid,
-        len(audio_buf),
-        encoding,
-        reason,
-    )
-
-    try:
-        stt = await _stt.transcribe_telephony_chunk(
-            audio_buf,
-            encoding=encoding,
-            call_uuid=call_uuid,
-        )
-    except Exception:
-        logger.error(
-            "[freeswitch/ws] stt error call_uuid=%s traceback=%s",
-            call_uuid,
-            traceback.format_exc(),
-        )
-        return
-
-    transcript = (stt.get("text") or "").strip()
-    if not stt.get("success") or not transcript:
-        logger.info(
-            "[freeswitch/ws] no speech call_uuid=%s err=%s",
-            call_uuid,
-            stt.get("error", "empty transcript"),
-        )
-        return
-
-    raw_transcript = transcript
-    transcript = _normalize_transcript(transcript, stt.get("confidence", 0.0))
-
-    if session and _looks_like_bot_echo(transcript, session.last_message):
-        logger.info(
-            "[freeswitch/ws] dropped bot-echo call_uuid=%s text=%r",
-            call_uuid,
-            transcript[:120],
-        )
-        return
-
-    logger.info(
-        '[freeswitch/ws] transcript call_uuid=%s raw="%s" norm="%s"',
-        call_uuid,
-        raw_transcript[:200],
-        transcript[:200],
-    )
-
     app = websocket.scope.get("app")
     http_client = getattr(app.state, "http_client", None) if app else None
-    store = get_session_store()
-
-    try:
-        response = await process_text_turn(
-            store,
-            call_uuid,
-            user_text=transcript,
-            confidence=stt.get("confidence", 0.0),
-            http_client=http_client,
-            create_session_if_missing=True,
-            file_playback=True,
-            request=websocket,
-        )
-    except Exception:
-        logger.error(
-            "[freeswitch/ws] process error call_uuid=%s traceback=%s",
-            call_uuid,
-            traceback.format_exc(),
-        )
-        return
-
-    logger.info(
-        "[freeswitch/ws] process result state=%s action=%s backend_ok=%s",
-        response.get("state"),
-        response.get("action"),
-        response.get("backend_ok"),
+    runtime = VoiceCallRuntime(
+        websocket,
+        orchestrator=_orchestrator,
+        tts=_tts,
+        nlu=_nlu,
+        http_client=http_client,
     )
-
-    if response.get("backend_ok") is True:
-        logger.info("[freeswitch/ws] backend_ok=true call_uuid=%s", call_uuid)
-
-    audio_url = response.get("audio_url") or ""
-    if audio_url:
-        logger.info("[freeswitch/ws] tts generated audio_url=%s", audio_url)
-        # Silenciar la captura mientras Lyra habla: descarta el eco de su propia
-        # voz (mod_audio_stream lo reinyecta) que disparaba turnos basura y el
-        # bucle "no logré entender / ¿me confirmas?". Ventana = duración + cola
-        # para latencia de fetch del playback + decaimiento del eco.
-        dur = _wav_duration_seconds(response.get("file_path"))
-        buf = _ws_audio.get(call_uuid)
-        if buf is not None:
-            buf.gate_playback(dur + _PLAYBACK_GATE_TAIL_SEC)
-        await _playback_tts_on_call(call_uuid, audio_url)
-
-    if response.get("hangup"):
-        if settings.FREESWITCH_ESL_ENABLED:
-            # uuid_broadcast es fire-and-forget: encola el playback y retorna.
-            # Esperar la duración del audio (+ buffer) antes de uuid_kill, si no
-            # el mensaje de confirmación del servicio se corta antes de oírse.
-            wait_s = _wav_duration_seconds(response.get("file_path"))
-            if wait_s > 0:
-                await asyncio.sleep(wait_s + 0.75)
-            await get_esl_client().uuid_kill(call_uuid)
-
-    ws_payload = {
-        k: v
-        for k, v in response.items()
-        if k not in ("file_path", "audio_base64")
-    }
-    try:
-        await websocket.send_text(json.dumps(ws_payload, ensure_ascii=False))
-    except Exception:
-        logger.debug("[freeswitch/ws] ws notify failed call_uuid=%s", call_uuid)
+    await runtime.run()

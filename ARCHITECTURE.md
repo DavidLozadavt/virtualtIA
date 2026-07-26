@@ -69,7 +69,7 @@ No contiene lógica de negocio. No accede a la base de datos directamente. No co
 ```
 api/
 ├── routers/main.py          → POST /chat
-├── routers/twilio.py        → POST /voice, /process_speech
+├── routers/freeswitch.py    → WS /freeswitch/audio · /recording · /health
 ├── routers/whatsapp.py      → GET|POST /whatsapp
 ├── routers/admin/           → Panel de administración
 ├── schemas/chat.py          → ChatRequest, ChatResponse
@@ -86,14 +86,21 @@ api/
 services/
 ├── chat_service.py          → Historial · trust level · orquestación del agente
 ├── whatsapp_service.py      → Máquina de estados FSM · Meta Graph API
-└── twilio/
-    ├── twilio_service.py    → Máquina de estados de llamada · sesiones async con locks
-    ├── speech_processor.py  → Limpieza de STT · extracción de direcciones via LLM
-    ├── twiml_utils.py       → Generadores de TwiML XML (funciones puras, sin side effects)
-    └── constants.py         → Correcciones fonéticas · lugares de Popayán
+├── voice/                   → Lyra Voice V2: motor conversacional streaming
+│   ├── runtime.py           → Composición full-duplex por llamada
+│   ├── transport.py         → WS mod_audio_stream (frames + playback)
+│   ├── stt_stream.py        → OpenAI Realtime STT (gpt-4o-mini-transcribe, parciales)
+│   ├── endpointing.py       → Endpointing híbrido acústico + semántico
+│   ├── nlu.py               → Extracción de spans (structured outputs)
+│   ├── orchestrator.py      → FSM de negocio de la llamada
+│   ├── tts_stream.py        → edge-tts incremental por oración
+│   ├── aec.py / barge_in.py → Eco servidor + interrupciones reales
+│   └── recorder.py          → Grabación mezclada server-side
+└── telephony/               → Contratos de negocio: sesiones, backend, ESL
 ```
 
-**Nota sobre TwilioService:** Las sesiones de llamada se mantienen en memoria con `asyncio.Lock` para prevenir condiciones de carrera. En producción con múltiples workers, esto debe migrarse a Redis.
+**Nota sobre sesiones de llamada:** se guardan en `session_store` (memoria en
+desarrollo, Redis vía `VOICE_SESSION_STORE=redis` en producción multi-worker).
 
 ### Capa 3 — Orquestación (`orchestrator/`)
 
@@ -283,29 +290,36 @@ class LegacyToolAdapter:
    ChatResponse(reply, conversation_id, trust_level, latency_ms, properties, map_center)
 ```
 
-### Flujo de Voz (IntelliTaxi)
+### Flujo de Voz (IntelliTaxi — Lyra Voice V2)
 
 ```
-1. Twilio llama al webhook
-   POST /voice  →  api/routers/twilio.py
+1. FreeSWITCH abre el WebSocket full-duplex
+   lyra_stream.lua → uuid_audio_stream → WS /freeswitch/audio
 
-2. Delegación al servicio
-   TwilioService.handle_incoming_call(call_sid)
+2. Audio entrante continuo (PCM16 8k → g711_ulaw)
+   frame → OpenAI Realtime STT streaming
+   (nunca se descarta audio del usuario: full-duplex real)
 
-3. Máquina de estados
-   CallSession: greeting → awaiting_pickup → awaiting_dest → confirming → completed
+3. Comprensión del turno
+   parciales STT → endpointing híbrido (acústico + semántico)
+   → NLU structured-output: {intent, pickup_span, landmark_reference, ...}
+   → el span crudo va a core/location_match + core/geocoder_service
+     (el LLM extrae, el resolver resuelve — nunca al revés)
 
-4. Procesamiento de voz (POST /process_speech)
-   form.SpeechResult → SpeechProcessor.clean_text()
-                     → SpeechProcessor.correct_speech()  ← aplica _SPEECH_CORRECTIONS
-                     → SpeechProcessor.extract_address()  ← LLM extrae dirección del texto
+4. Máquina de estados de negocio (idéntica a V1)
+   waiting_origin → confirming_origin / waiting_geo_context
+   → creating_service → finished
 
-5. Generación de TwiML
-   twiml_utils.build_gather_response(mensaje, hints)
-   → <Response><Say>...</Say><Gather>...</Gather></Response>
+5. Respuesta hablada
+   texto → normalización (números/direcciones) → edge-tts por oración
+   → playback streamAudio con pacing (~200 ms/chunk)
+   → si el usuario interrumpe con contenido real: se cancela el playback
+     y el historial se trunca a lo realmente escuchado
 
-6. Respuesta
-   application/xml  →  Twilio ejecuta el TwiML
+6. Cierre
+   backend Laravel crea el servicio (idempotente por call_uuid)
+   → WhatsApp de confirmación → ESL uuid_kill
+   → grabación mezclada en /freeswitch/recording/{uuid}.wav
 ```
 
 ---
