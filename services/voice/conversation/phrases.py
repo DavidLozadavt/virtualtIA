@@ -49,13 +49,15 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
     # Apertura de llamada.
     "greeting": _bank(
         ("plain", ("Hola, buenas.", "Soy Lyra, tu asistente de Tax Belalcázar.",
-                   "Cuéntame, ¿en dónde te recogemos hoy?")),
+                   "Cuéntame, ¿en dónde te recogemos?")),
         ("warm", ("Hola, muy buenas.", "Te habla Lyra, de Tax Belalcázar.",
-                  "Dime, ¿en dónde te recogemos?")),
+                  "Dime, ¿para dónde mandamos el taxi?")),
         ("direct", ("Buenas.", "Soy Lyra, la asistente de Tax Belalcázar.",
-                    "¿En dónde te recogemos hoy?")),
+                    "¿En dónde te recogemos?")),
         ("soft", ("Hola.", "Soy Lyra, de Tax Belalcázar.",
-                  "Cuéntame, ¿dónde te recogemos?")),
+                  "Cuéntame, ¿dónde estás?")),
+        ("service", ("Buenas, bienvenido a Tax Belalcázar.", "Te habla Lyra.",
+                     "¿A qué dirección te mandamos el taxi?")),
     ),
     # Acuse breve de escucha, al retomar la palabra.
     "ack": _bank(
@@ -69,6 +71,8 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("perfecto", ("Perfecto.",)),
         ("ok", ("Ok.",)),
         ("bueno", ("Bueno.",)),
+        ("entiendo", ("Ya te entiendo.",)),
+        ("vale", ("Vale.",)),
     ),
     # Transición hacia una consulta que sí se va a ejecutar.
     "transition": _bank(
@@ -78,6 +82,8 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("allow", ("Permíteme un momento.",)),
         ("here", ("Déjame ver acá.",)),
         ("tell", ("Ya te digo.",)),
+        ("wait", ("Espérame un momentico.",)),
+        ("verify", ("Déjame chequear.",)),
     ),
     # Resultado encontrado (solo tras trabajo real).
     "found": _bank(
@@ -86,35 +92,43 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("here", ("Aquí está.",)),
         ("appeared", ("Ya me apareció.",)),
         ("ready", ("Listo, ya está.",)),
+        ("got", ("Ya lo tengo.",)),
     ),
     # Narración de trabajo en curso, por proceso real.
     "narrate_address": _bank(
-        ("validate", ("Estoy validando esa dirección.",)),
-        ("confirm", ("Déjame confirmar esa dirección.",)),
-        ("verify", ("Estoy verificando la ubicación.",)),
+        ("search", ("Ya mismo te busco esa dirección.",)),
+        ("confirm", ("Déjame buscar esa dirección.",)),
+        ("locate", ("Voy a ubicar esa dirección.",)),
         ("system", ("La estoy buscando en el sistema.",)),
+        ("moment", ("Un momentico que la ubico.",)),
+        ("wait", ("Espérame que la reviso.",)),
     ),
     "narrate_place": _bank(
-        ("check", ("Estoy verificando ese lugar.",)),
-        ("review", ("Estoy revisando lo que me indicaste.",)),
-        ("locate", ("Déjame ubicar ese punto.",)),
+        ("search", ("Ya mismo te busco ese punto.",)),
+        ("confirm", ("Déjame buscar ese lugar.",)),
+        ("locate", ("Voy a ubicar ese punto.",)),
         ("system", ("Lo estoy buscando en el sistema.",)),
+        ("moment", ("Un momentico que lo ubico.",)),
+        ("wait", ("Espérame que lo reviso.",)),
     ),
     "narrate_geo": _bank(
-        ("validate", ("Permíteme validar esa referencia.",)),
-        ("review", ("Estoy revisando el sector.",)),
-        ("verify", ("Estoy verificando esa ubicación.",)),
         ("cross", ("Déjame cruzar esa referencia.",)),
+        ("sector", ("Voy a mirar por ese sector.",)),
+        ("review", ("Ya mismo reviso ese sector.",)),
+        ("locate", ("Espérame que ubico ese sector.",)),
+        ("system", ("Lo estoy mirando en el mapa.",)),
     ),
     "narrate_service": _bank(
         ("register", ("Te estoy registrando el servicio.",)),
-        ("create", ("Estoy creando la solicitud.",)),
-        ("send", ("Ya lo estoy pasando a despacho.",)),
+        ("create", ("Ya mismo te dejo pedido el taxi.",)),
+        ("dispatch", ("Lo estoy pasando a despacho.",)),
+        ("note", ("Te lo estoy anotando.",)),
     ),
     "narrate_generic": _bank(
-        ("moment", ("Un momento por favor.",)),
+        ("moment", ("Un momentico.",)),
         ("second", ("Dame un segundo.",)),
         ("allow", ("Permíteme un momento.",)),
+        ("check", ("Espérame que reviso.",)),
     ),
     # La operación se alargó: mantener viva la conversación, sin repetir.
     "wait_more": _bank(
@@ -123,32 +137,36 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("checking", ("Todavía estoy revisando.",)),
         ("patience", ("Un momentico más, por favor.",)),
         ("holding", ("Aquí sigo contigo, ya te confirmo.",)),
+        ("slow", ("El sistema va un poco lento, ya te digo.",)),
     ),
     # Confirmación de origen CON barrio.
     "confirm_pickup_barrio": _bank(
-        ("appears", ("Me aparece {place}.", "Barrio {barrio}.",
-                     "¿Es ahí donde estás?")),
-        ("point", ("El punto de recogida sería {place}.",
-                   "En el barrio {barrio}.", "¿Correcto?")),
-        ("then", ("Entonces {place}, barrio {barrio}.",
-                  "¿Te recogemos ahí?")),
-        ("have", ("Tengo {place}, barrio {barrio}.", "¿Está bien así?")),
-        ("plain", ("{place}, barrio {barrio}.", "¿Es correcto?")),
+        ("appears", ("Me aparece {place}, barrio {barrio}.", "¿Es ahí?")),
+        ("point", ("El punto quedaría en {place}, barrio {barrio}.",
+                   "¿Confirmas?")),
+        ("then", ("Entonces sería {place}, en {barrio}.", "¿Vamos bien?")),
+        ("have", ("Tengo {place}, barrio {barrio}.", "¿Así es?")),
+        ("plain", ("{place}, barrio {barrio}.", "¿Correcto?")),
+        ("got", ("Aquí lo tengo: {place}, barrio {barrio}.", "¿Te recojo ahí?")),
+        ("stay", ("Quedamos en {place}, barrio {barrio}.", "¿Te parece?")),
     ),
     # Confirmación de origen SIN barrio.
     "confirm_pickup": _bank(
-        ("appears", ("Me aparece {place}.", "¿Es ahí donde te recogemos?")),
-        ("then", ("Entonces {place}.", "¿Te recogemos ahí?")),
-        ("have", ("Tengo {place}.", "¿Está bien así?")),
-        ("plain", ("{place}.", "¿Es correcto?")),
+        ("appears", ("Me aparece {place}.", "¿Es ahí?")),
+        ("then", ("Entonces {place}.", "¿Te recojo ahí?")),
+        ("have", ("Tengo {place}.", "¿Así es?")),
+        ("plain", ("{place}.", "¿Correcto?")),
         ("soft", ("Sería {place}, ¿cierto?",)),
+        ("stay", ("Quedamos en {place}.", "¿Confirmas?")),
+        ("point", ("El punto sería {place}.", "¿Vamos bien?")),
     ),
     # El usuario corrigió: se acepta el cambio y se vuelve a confirmar.
     "confirm_correction": _bank(
-        ("ah", ("Ah, {place}.", "¿Te recogemos ahí?")),
+        ("ah", ("Ah, {place}.", "¿Te recojo ahí?")),
         ("ok", ("Listo, {place} entonces.", "¿Confirmas?")),
         ("change", ("Cambio a {place}.", "¿Así está bien?")),
         ("then", ("Entonces sería {place}.", "¿Correcto?")),
+        ("fix", ("Corrijo: {place}.", "¿Vamos bien?")),
     ),
     # Pedir el punto de recogida.
     "ask_pickup": _bank(
@@ -156,6 +174,7 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("tell", ("Cuéntame, ¿dónde estás?",)),
         ("addr", ("Dime el barrio o la dirección donde te recogemos.",)),
         ("point", ("¿Cuál es el punto de recogida?",)),
+        ("send", ("¿A qué dirección te mandamos el taxi?",)),
     ),
     # Entrega al conductor con barrio (el punto exacto lo afina él).
     "handoff": _bank(
@@ -175,14 +194,44 @@ PHRASE_BANK: dict[str, tuple[Phrase, ...]] = {
         ("ok", ("Perfecto.", "Un momento por favor.")),
         ("go", ("Vale.", "Ya mismo te lo dejo pedido.")),
         ("done", ("Hecho.", "Permíteme un segundo.")),
+        ("note", ("Listo, te lo anoto.", "Un momentico.")),
     ),
     # Lead-in de cierre (el resultado real llega como payload del backend).
     "closing_lead": _bank(
         ("ready", ("Listo.",)),
         ("done", ("Ya quedó.",)),
         ("perfect", ("Perfecto.",)),
+        ("all", ("Todo listo.",)),
     ),
 }
+
+
+# Categorías cuyas formulaciones no llevan datos variables: son un conjunto
+# cerrado y pequeño, así que se pueden pre-sintetizar una vez por proceso y
+# quedar en la caché del TTS. Es lo que permite que un aviso salga al instante
+# en vez de esperar a que el sintetizador responda.
+_FIXED_CATEGORIES = (
+    "ack", "transition", "found",
+    "narrate_address", "narrate_place", "narrate_geo",
+    "narrate_service", "narrate_generic",
+    "wait_more", "ask_pickup", "ack_create", "closing_lead",
+    "greeting",
+)
+
+
+def fixed_phrases() -> list[str]:
+    """Etapas habladas que no dependen de datos de la llamada, sin duplicados.
+
+    Ordenadas por urgencia: primero lo que tiene que sonar de inmediato (avisos
+    y acuses), al final lo que puede permitirse sintetizarse sobre la marcha.
+    """
+    out: list[str] = []
+    for category in _FIXED_CATEGORIES:
+        for phrase in PHRASE_BANK.get(category, ()):
+            for part in phrase.parts:
+                if part not in out:
+                    out.append(part)
+    return out
 
 
 class PhraseManager:

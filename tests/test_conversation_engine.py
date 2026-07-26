@@ -398,19 +398,42 @@ def test_empty_request_produces_no_speech():
 # ── Ambient Sound Manager ─────────────────────────────────────────────────────
 
 
-def test_ambient_bed_is_barely_audible_and_exact_in_length():
+def test_ambient_bed_is_audible_but_stays_under_the_voice():
+    """Tiene que oírse por teléfono y a la vez no competir con la voz."""
     ambient = AmbientSoundManager(random.Random(1), sample_rate=8000)
-    pcm = ambient.bed("search", 0.5)
-    assert len(pcm) == int(0.5 * 8000) * 2
+    for kind in ambient.kinds():
+        pcm = ambient.bed(kind, 0.5)
+        assert len(pcm) == int(0.5 * 8000) * 2
+        samples = array("h")
+        samples.frombytes(pcm)
+        peak = max(abs(s) for s in samples)
+        # Audible: muy por encima del piso de cuantización de la banda estrecha.
+        assert peak >= int(0.03 * 32767), f"{kind} no se oiría por teléfono"
+        # Subordinado: bien por debajo del nivel de la voz sintetizada.
+        assert peak <= int(0.16 * 32767), f"{kind} compite con la voz"
+
+
+def test_ambient_has_transients_over_a_quieter_bed():
+    """No es un zumbido plano: hay golpes (teclas/clics) sobre un lecho tenue."""
+    ambient = AmbientSoundManager(random.Random(4), sample_rate=8000)
     samples = array("h")
-    samples.frombytes(pcm)
+    samples.frombytes(ambient.bed("typing", 1.5))
     peak = max(abs(s) for s in samples)
-    assert 0 < peak <= int(0.02 * 32767), "el fondo contextual llama la atención"
+    mean = sum(abs(s) for s in samples) / len(samples)
+    assert peak > mean * 6, "sin transitorios audibles no suena a trabajo"
+
+
+def test_every_narration_kind_maps_to_a_real_texture():
+    from services.voice.conversation import ambient_for
+
+    ambient = AmbientSoundManager(random.Random(1))
+    for kind in ("address", "place", "geo_context", "service", "generic", ""):
+        assert ambient_for(kind) in ambient.kinds()
 
 
 def test_ambient_bed_is_empty_without_duration():
     ambient = AmbientSoundManager(random.Random(1))
-    assert ambient.bed("search", 0.0) == b""
+    assert ambient.bed("typing", 0.0) == b""
 
 
 # ── Speech Renderer ───────────────────────────────────────────────────────────
@@ -586,3 +609,65 @@ def test_engine_closes_the_backchannel_window_while_user_speaks():
         engine.behavior.decide(request, profile, reaction=0.0).use_ack
         for _ in range(50)
     )
+
+
+# ── Aviso inmediato de trabajo ────────────────────────────────────────────────
+
+
+def test_work_announcement_starts_instantly_and_carries_the_bed():
+    """El aviso de "voy a buscar" no puede empezar con silencio ni con adornos:
+    tiene que sonar antes de que arranque la búsqueda, y detrás va el fondo de
+    trabajo que cubre la consulta real."""
+    for seed in range(15):
+        engine = _engine(seed)
+        engine.begin_turn()
+        plan = engine.plan(engine.narration("address"))
+
+        assert plan.segments[0].kind is SegmentKind.SPEECH, "el aviso arranca con pausa"
+        assert len(plan.speech_segments) == 1, "el aviso trae relleno de más"
+
+        beds = [s for s in plan.segments if s.kind is SegmentKind.AMBIENT]
+        assert len(beds) == 1, "el aviso no lleva fondo de trabajo"
+        assert 1.5 <= beds[0].duration <= 3.5
+        assert beds[0].ambient == "typing"
+
+
+def test_wait_phrases_also_carry_a_bed_and_no_delay():
+    engine = _engine(2)
+    engine.begin_turn()
+    plan = engine.plan(engine.wait_more("geo_context"))
+    assert plan.segments[0].kind is SegmentKind.SPEECH
+    beds = [s for s in plan.segments if s.kind is SegmentKind.AMBIENT]
+    assert len(beds) == 1 and beds[0].ambient == "clicks"
+
+
+def test_a_response_never_carries_more_than_one_decoration():
+    """Dos adornos ya suenan a relleno y retrasan lo que el usuario espera."""
+    from services.voice.conversation import PHRASE_BANK
+
+    decorations = {
+        part
+        for category in ("ack", "transition", "found")
+        for phrase in PHRASE_BANK[category]
+        for part in phrase.parts
+    }
+    for seed in range(40):
+        engine = _engine(seed)
+        engine.begin_turn()
+        plan = engine.plan(
+            SpeechRequest(
+                intent=SpeechIntent.CONFIRM_PICKUP,
+                slots={"place": "Pubenza", "barrio": "Pubenza"},
+                did_work=True,
+                kind="place",
+            )
+        )
+        spoken = _spoken(plan)
+        # Solo cuenta como decoración lo que va ANTES del contenido de negocio.
+        leading = 0
+        for stage in spoken:
+            if stage in decorations and "Pubenza" not in stage:
+                leading += 1
+            else:
+                break
+        assert leading <= 1
