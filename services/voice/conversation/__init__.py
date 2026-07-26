@@ -23,13 +23,18 @@ Componentes, uno por responsabilidad:
   · `engine`    — fachada por llamada
 """
 
-from services.voice.conversation.ambient import AmbientSoundManager
+from services.voice.conversation.ambient import AmbientSoundManager, ambient_for
 from services.voice.conversation.backchannel import BackchannelManager
 from services.voice.conversation.behavior import BehaviorDecision, BehaviorEngine
 from services.voice.conversation.engine import ConversationEngine
 from services.voice.conversation.memory import ConversationMemory
 from services.voice.conversation.pauses import PauseLength, PauseManager
-from services.voice.conversation.phrases import PHRASE_BANK, Phrase, PhraseManager
+from services.voice.conversation.phrases import (
+    PHRASE_BANK,
+    Phrase,
+    PhraseManager,
+    fixed_phrases,
+)
 from services.voice.conversation.plan import (
     SegmentKind,
     SpeechIntent,
@@ -53,6 +58,7 @@ from services.voice.conversation.timing import ConversationTimingEngine
 
 __all__ = [
     "AmbientSoundManager",
+    "ambient_for",
     "BackchannelManager",
     "BehaviorDecision",
     "BehaviorEngine",
@@ -75,6 +81,7 @@ __all__ = [
     "SpeechRequest",
     "SpeechSegment",
     "StateProfile",
+    "fixed_phrases",
     "profile_for",
     "silence",
     "split_ideas",

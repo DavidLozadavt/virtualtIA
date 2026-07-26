@@ -404,3 +404,59 @@ def test_costly_turn_emits_message_before_processing(fast_settings, monkeypatch)
         await asyncio.wait_for(run_task, timeout=5)
 
     asyncio.run(scenario())
+
+
+def test_tts_cache_is_shared_between_calls():
+    """Una instancia de TTS por llamada dejaba la caché vacía siempre: cada
+    aviso se resintetizaba desde cero y llegaba tarde."""
+    from services.voice.runtime import VoiceCallRuntime, get_shared_tts
+
+    a = VoiceCallRuntime(FakeWebSocket(call_uuid="a"))
+    b = VoiceCallRuntime(FakeWebSocket(call_uuid="b"))
+    assert a.tts is b.tts is get_shared_tts()
+
+
+def test_announcement_waits_until_it_is_actually_audible():
+    """El aviso tiene que estar sonando ANTES de arrancar el trabajo pesado: el
+    procesamiento incluye CPU síncrona que bloquea el bucle de eventos."""
+    from services.voice.runtime import VoiceCallRuntime
+
+    rt = VoiceCallRuntime(FakeWebSocket())
+
+    async def scenario():
+        # Mientras no se ordene la reproducción, la espera no retorna.
+        rt._broadcast_event.clear()
+        never = asyncio.create_task(asyncio.sleep(10))
+        try:
+            waiter = asyncio.create_task(rt._wait_until_audible(never, 5.0))
+            await asyncio.sleep(0.1)
+            assert not waiter.done(), "siguió sin esperar a que el aviso sonara"
+
+            # En cuanto el audio se ordena a reproducir, sigue de inmediato.
+            rt._broadcast_event.set()
+            await asyncio.wait_for(waiter, timeout=1.0)
+        finally:
+            never.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_announcement_wait_gives_up_instead_of_blocking_the_turn():
+    """Si la síntesis se demora, el procesamiento arranca igual: el tope existe
+    para que un TTS lento nunca retrase el trabajo."""
+    from services.voice.runtime import VoiceCallRuntime
+
+    rt = VoiceCallRuntime(FakeWebSocket())
+
+    async def scenario():
+        rt._broadcast_event.clear()
+        slow = asyncio.create_task(asyncio.sleep(10))
+        try:
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            await rt._wait_until_audible(slow, 0.2)
+            assert 0.15 <= loop.time() - started < 1.0
+        finally:
+            slow.cancel()
+
+    asyncio.run(scenario())

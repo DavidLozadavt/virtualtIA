@@ -11,9 +11,11 @@ literal: el planner lo trocea y lo rodea, jamás lo reescribe.
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Optional
 
+from services.voice.conversation.ambient import ambient_for
 from services.voice.conversation.behavior import BehaviorDecision, BehaviorEngine
 from services.voice.conversation.memory import ConversationMemory
 from services.voice.conversation.pauses import PauseLength, PauseManager
@@ -30,16 +32,16 @@ from services.voice.conversation.timing import ConversationTimingEngine
 
 # Presupuesto máximo de silencio por respuesta. Por encima de esto la
 # naturalidad se convierte en demora: las pausas se comprimen proporcionalmente.
-_MAX_SILENCE_BUDGET = 1.8
+_MAX_SILENCE_BUDGET = 1.1
 
-# Fondo contextual por matiz de narración.
-_AMBIENT_BY_KIND = {
-    "address": "search",
-    "place": "search",
-    "geo_context": "lookup",
-    "service": "note",
-    "generic": "lookup",
-}
+# Una respuesta admite UNA sola decoración conversacional. Dos ya suenan a
+# relleno y, sobre todo, retrasan el contenido que el usuario está esperando.
+_MAX_DECORATIONS = 1
+
+# Cama de fondo que acompaña una narración: cubre el tiempo real de la consulta
+# para que el usuario oiga que se está trabajando en vez de un silencio.
+_NARRATION_BED_RANGE = (2.0, 3.2)
+_WAIT_BED_RANGE = (1.0, 1.8)
 
 _CLAUSE_SPLIT = re.compile(r",\s+")
 _HAS_DIGIT = re.compile(r"\d")
@@ -88,12 +90,14 @@ class SpeechPlanner:
         timing: ConversationTimingEngine,
         behavior: BehaviorEngine,
         memory: ConversationMemory,
+        rng: Optional[random.Random] = None,
     ):
         self._phrases = phrases
         self._pauses = pauses
         self._timing = timing
         self._behavior = behavior
         self._memory = memory
+        self._rng = rng or random.Random()
 
     # ── contenido central por intención ──
 
@@ -149,16 +153,42 @@ class SpeechPlanner:
     def _prefix_stages(
         self, request: SpeechRequest, decision: BehaviorDecision, budget: int
     ) -> list[str]:
-        stages: list[str] = []
+        """Una sola decoración por respuesta, priorizando la más informativa."""
         if budget <= 0:
-            return stages
-        if decision.use_ack:
-            stages.extend(self._phrases.pick("ack"))
-        if len(stages) < budget and decision.use_transition:
-            stages.extend(self._phrases.pick("transition"))
-        if len(stages) < budget and decision.use_found:
-            stages.extend(self._phrases.pick("found"))
-        return stages[:budget]
+            return []
+        for enabled, category in (
+            (decision.use_found, "found"),
+            (decision.use_transition, "transition"),
+            (decision.use_ack, "ack"),
+        ):
+            if enabled:
+                stages = list(self._phrases.pick(category))
+                if stages:
+                    return stages[:budget]
+        return []
+
+    def _announcement_segments(
+        self, request: SpeechRequest, core: list[str], profile: StateProfile
+    ) -> list[SpeechSegment]:
+        """Aviso inmediato + cama de fondo que acompaña la operación real.
+
+        El usuario tiene que enterarse de que se está buscando ANTES de que la
+        búsqueda termine, así que aquí no hay pausa previa ni adornos: primero
+        la frase, y detrás el sonido de trabajo que llena el tiempo de consulta.
+        """
+        segments = [SpeechSegment.speech(core[0])]
+        if profile.ambient_allowed:
+            low, high = (
+                _NARRATION_BED_RANGE
+                if request.intent is SpeechIntent.NARRATE
+                else _WAIT_BED_RANGE
+            )
+            segments.append(
+                SpeechSegment.ambient_bed(
+                    ambient_for(request.kind), round(self._rng.uniform(low, high), 3)
+                )
+            )
+        return segments
 
     # ── plan completo ──
 
@@ -182,7 +212,18 @@ class SpeechPlanner:
             self._memory.note_turn(used_filler=False)
             return SpeechPlan(request=request, segments=(), state=state)
 
-        decor_budget = max(0, profile.max_stages - len(core))
+        # Narración y espera son AVISOS: tienen que empezar a sonar de
+        # inmediato, sin retardo de reacción ni decoraciones que las alarguen.
+        # Detrás va la cama de fondo que cubre el trabajo real en curso.
+        if request.intent in (SpeechIntent.NARRATE, SpeechIntent.WAIT_MORE):
+            self._memory.note_turn(used_filler=False)
+            return SpeechPlan(
+                request=request,
+                segments=tuple(self._announcement_segments(request, core, profile)),
+                state=state,
+            )
+
+        decor_budget = min(_MAX_DECORATIONS, max(0, profile.max_stages - len(core)))
         prefix = self._prefix_stages(request, decision, decor_budget)
         used_filler = bool(prefix) and decision.uses_filler
 
@@ -207,8 +248,9 @@ class SpeechPlanner:
             hinge = self._pauses.duration(hinge_length, scale=scale)
             segments.pop()  # sustituye la micro-pausa del último prefijo
             if decision.use_ambient:
-                ambient_kind = _AMBIENT_BY_KIND.get(request.kind or "generic", "lookup")
-                segments.append(SpeechSegment.ambient_bed(ambient_kind, hinge))
+                segments.append(
+                    SpeechSegment.ambient_bed(ambient_for(request.kind), hinge)
+                )
             else:
                 segments.append(SpeechSegment.pause(hinge))
 
@@ -228,7 +270,11 @@ class SpeechPlanner:
 
 
 def _fit_silence_budget(segments: list[SpeechSegment]) -> list[SpeechSegment]:
-    """Comprime las pausas si el silencio total excede el presupuesto."""
+    """Comprime las pausas si el silencio total excede el presupuesto.
+
+    El fondo contextual cuenta pero no es silencio muerto: se comprime igual
+    para no alargar el turno, nunca se elimina.
+    """
     total = sum(
         s.duration
         for s in segments

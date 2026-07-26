@@ -63,7 +63,8 @@ class ConversationEngine:
         self.behavior = BehaviorEngine(self.memory, self._rng, self.backchannel)
         self.ambient = AmbientSoundManager(self._rng, sample_rate=sample_rate)
         self.planner = SpeechPlanner(
-            self.phrases, self.pauses, self.timing, self.behavior, self.memory
+            self.phrases, self.pauses, self.timing, self.behavior, self.memory,
+            self._rng,
         )
         self.renderer = SpeechRenderer(self.ambient, sample_rate=sample_rate)
 

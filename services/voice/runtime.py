@@ -69,6 +69,7 @@ from services.voice.conversation import (
     SpeechIntent,
     SpeechPlan,
     SpeechRequest,
+    fixed_phrases,
 )
 from services.voice.endpointing import HybridEndpointer, StablePartial, TurnReady
 from services.voice.nlu import TurnNLU
@@ -107,6 +108,26 @@ _STT_FAILURE_APOLOGY = (
 # encima de esto la espera se vuelve cháchara.
 _MAX_WAIT_PHRASES = 2
 
+# Tope de espera a que un aviso ("ya mismo te busco esa dirección") esté
+# realmente sonando antes de arrancar el trabajo pesado. Con la caché caliente
+# se resuelve en milisegundos; el tope solo evita que una síntesis lenta retrase
+# el procesamiento.
+_ANNOUNCE_AUDIBLE_TIMEOUT = 1.5
+
+# El sintetizador se comparte entre llamadas: su caché de frases es lo que hace
+# que los avisos y acuses salgan al instante en vez de esperar a la red. Una
+# instancia por llamada volvía a sintetizar desde cero cada vez.
+_shared_tts: Optional[StreamingTTS] = None
+# El banco fijo se pre-sintetiza una sola vez por proceso.
+_bank_prewarmed = False
+
+
+def get_shared_tts() -> StreamingTTS:
+    global _shared_tts
+    if _shared_tts is None:
+        _shared_tts = StreamingTTS()
+    return _shared_tts
+
 _STREET_TEXT_RE = re.compile(r"(?:calle|carrera|cl|cra|kr|kra)\s*\.?\s*\d+", re.IGNORECASE)
 
 
@@ -130,7 +151,7 @@ class VoiceCallRuntime:
         self.transport = FreeSwitchTransport(websocket)
         self.store = store or get_session_store()
         self.orchestrator = orchestrator or TurnOrchestrator()
-        self.tts = tts or StreamingTTS()
+        self.tts = tts or get_shared_tts()
         self.nlu = nlu or TurnNLU()
         self.http_client = http_client
 
@@ -164,6 +185,9 @@ class VoiceCallRuntime:
         self._play_started: float = 0.0
         self._sentence_marks: list[tuple[float, str]] = []
         self._playing = False
+        # Se activa cuando el audio del turno ya está ordenado a reproducir:
+        # permite esperar a que un aviso sea audible antes de seguir.
+        self._broadcast_event = asyncio.Event()
 
         self._silence_deadline: Optional[float] = None
 
@@ -457,7 +481,31 @@ class VoiceCallRuntime:
         turn = self.orchestrator.handle_inbound(self.session)
         self.store.save(self.session)
         await self._deliver(turn)
+        self._prewarm_phrase_bank()
         self._arm_silence_timer()
+
+    def _prewarm_phrase_bank(self) -> None:
+        """Pre-sintetiza el banco fijo una vez por proceso, en segundo plano.
+
+        Son ~80 frases cortas y cerradas (acuses, avisos, esperas). Con ellas en
+        la caché compartida del TTS, un aviso sale al instante en lugar de
+        esperar cientos de milisegundos de red. Se lanza después del saludo para
+        no competir con el primer audio de la llamada.
+        """
+        global _bank_prewarmed
+        if _bank_prewarmed:
+            return
+        _bank_prewarmed = True
+        self._tasks.append(asyncio.create_task(self._run_prewarm()))
+
+    async def _run_prewarm(self) -> None:
+        try:
+            await self.tts.prewarm(fixed_phrases())
+            logger.info("[runtime] banco conversacional pre-sintetizado")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — el precalentado nunca rompe la llamada
+            logger.debug("[runtime] prewarm del banco omitido", exc_info=True)
 
     async def _do_silence_turn(self) -> None:
         assert self.session is not None
@@ -544,10 +592,16 @@ class VoiceCallRuntime:
             )
             # Narración emitida YA (antes de arrancar el pipeline). El texto lo
             # decide la capa conversacional, nunca esta capa.
+            self._broadcast_event.clear()
             filler_task = asyncio.create_task(
                 self._speak_request_safe(self.conversation.narration(narration_kind))
             )
-            await asyncio.sleep(0)   # ceder para que la narración empiece a sonar
+            # Se espera a que el aviso esté SONANDO antes de arrancar el trabajo:
+            # el procesamiento incluye tramos de CPU síncrona (parser de
+            # direcciones) que bloquean el bucle de eventos, y sin esta espera la
+            # síntesis del aviso quedaba detrás de ellos — el "ya te la busco"
+            # llegaba cuando la búsqueda ya había terminado.
+            await self._wait_until_audible(filler_task, _ANNOUNCE_AUDIBLE_TIMEOUT)
 
         # Con la narración ya iniciada, arranca todo el procesamiento interno.
         proc = asyncio.create_task(
@@ -569,6 +623,19 @@ class VoiceCallRuntime:
         except asyncio.CancelledError:
             proc.cancel()
             raise
+
+    async def _wait_until_audible(self, task: asyncio.Task, timeout: float) -> None:
+        """Cede el bucle hasta que el audio del turno empiece a sonar.
+
+        Retorna antes si la reproducción ya se ordenó, si la tarea terminó (o
+        falló) o si se agota el tope — nunca deja el procesamiento esperando.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, timeout)
+        while not task.done() and not self._broadcast_event.is_set():
+            if loop.time() >= deadline or self._ending:
+                return
+            await asyncio.sleep(0.02)
 
     async def _keep_alive(self, proc: asyncio.Task, kind: Optional[str]) -> None:
         """Acompaña una operación que se alarga, sin repetir la misma frase."""
@@ -773,6 +840,7 @@ class VoiceCallRuntime:
             ok = await get_esl_client().uuid_broadcast(call_uuid, container_path, "aleg")
             if not ok:
                 raise TTSError(f"uuid_broadcast falló call_uuid={call_uuid}")
+            self._broadcast_event.set()
 
             await asyncio.sleep(duration)
             return rendered

@@ -25,16 +25,16 @@ class PauseLength(str, Enum):
 # Bases en segundos. El techo total por respuesta lo acota el planner: la
 # naturalidad no puede convertirse en latencia perceptible.
 _BASE: dict[PauseLength, float] = {
-    PauseLength.MICRO: 0.12,
-    PauseLength.SHORT: 0.26,
-    PauseLength.MEDIUM: 0.46,
-    PauseLength.LONG: 0.80,
+    PauseLength.MICRO: 0.09,
+    PauseLength.SHORT: 0.19,
+    PauseLength.MEDIUM: 0.32,
+    PauseLength.LONG: 0.52,
 }
 
 _JITTER = 0.32          # ±32 % sobre la base
 _MIN_DELTA = 0.035      # diferencia mínima frente a la pausa anterior
 _FLOOR = 0.06
-_CEIL = 1.20
+_CEIL = 0.80
 
 
 class PauseManager:
