@@ -741,6 +741,86 @@ def extract_destination_address(text: str) -> Tuple[Optional[str], Optional[str]
     return None, None
 
 
+# ── EXTRACCIÓN UNIFICADA (mismo extractor que la llamada telefónica) ──────────
+# WhatsApp-texto y Voz deben producir EXACTAMENTE la misma dirección a partir de
+# un mensaje conversacional. La ÚNICA fuente de verdad del extractor es
+# services.voice.nlu.TurnNLU (el mismo LLM de spans que corre en cada turno de la
+# llamada), y la ÚNICA fuente de verdad del normalizador es
+# core.co_address_parser.parse_co_address. Aquí solo se orquesta la misma
+# secuencia que ya usa el orchestrator de voz: span NLU → catálogo local →
+# reattach de placa/landmark → canónica del parser. No se duplica ni el extractor
+# ni el normalizador.
+
+_SHARED_NLU_SINGLETON = None
+
+
+def _get_shared_nlu():
+    """Instancia compartida del extractor de spans de Voz (lazy, singleton)."""
+    global _SHARED_NLU_SINGLETON
+    if _SHARED_NLU_SINGLETON is None:
+        from services.voice.nlu import TurnNLU
+        _SHARED_NLU_SINGLETON = TurnNLU()
+    return _SHARED_NLU_SINGLETON
+
+
+async def extract_address_llm(
+    text: str,
+    *,
+    kind: str = "pickup",
+    last_bot_message: str = "",
+) -> Optional[str]:
+    """Extrae ÚNICAMENTE la dirección de un mensaje conversacional usando el mismo
+    pipeline que la llamada telefónica.
+
+    Paso 1 — Extracción (idéntica a Voz): el LLM de `TurnNLU` devuelve solo el
+    span de dirección (`pickup_span`/`destination_span`/`landmark_reference`),
+    descartando por diseño saludos, cortesías, "necesito un taxi", "recógeme",
+    "estoy en", etc. Si no hay credencial LLM, `TurnNLU.extract` degrada al
+    clasificador determinista local (mismo comportamiento que Voz).
+
+    Paso 2 — Refinamiento (idéntico a Voz): catálogo local de barrios/landmarks
+    (`resolve_location_entity`) → recuperación de placa/landmark recortados
+    (`reattach_address_details`) → forma canónica del ÚNICO normalizador
+    (`parse_co_address`).
+
+    Retorna la dirección limpia y normalizada, o None si el turno no contiene una
+    dirección (saludo/charla/agradecimiento) — en cuyo caso NO debe geocodificarse.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    nlu = _get_shared_nlu()
+    state = "waiting_destination" if kind == "destination" else "waiting_origin"
+    result = await nlu.extract(raw, state, last_bot_message)
+
+    if kind == "destination":
+        span = result.destination_span or result.best_pickup
+    else:
+        span = result.best_pickup
+
+    if not span:
+        return None
+
+    # Mismo refinamiento que services/voice/orchestrator.py:
+    from core.location_match import resolve_location_entity, decide, Decision
+    from core.co_address_parser import parse_co_address
+
+    m = resolve_location_entity(span)
+    d = decide(m)
+    origen = (
+        m.canonical
+        if d in (Decision.ACCEPT, Decision.CONFIRM) and m.canonical
+        else span
+    )
+    origen = reattach_address_details(raw, origen) or origen
+
+    parsed = parse_co_address(origen)
+    if parsed.canonical:
+        origen = parsed.canonical
+    return origen
+
+
 # ── DATETIME EXTRACTION ───────────────────────────────────────────────────────
 
 def extract_datetime_local(text: str) -> Optional[Dict[str, str]]:
