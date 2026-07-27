@@ -12,6 +12,7 @@ from orchestrator.tool_runner import run_agent_loop
 from core.address_utils import (
     extract_pickup_address,
     extract_destination_address,
+    extract_address_llm,
     _parse_si_no,
     normalize_address,
     _try_local_match,
@@ -296,6 +297,28 @@ _QUESTION_MARKERS = (
     "vale", "cuesta", "precio", "tarifa", "cobran", "valor", "cuanto sale",
     "cuanto cobran", "donde esta", "dónde está", "donde va", "ya llego", "ya llegó",
 )
+
+
+# Intención de cancelar/salir/reiniciar el flujo, aunque venga en una frase
+# ("quiero cancelar el servicio", "mejor cancela", "cancelar servicio").
+_CANCEL_RE = re.compile(
+    r'\b(cancel(?:ar|a|o|e|en|emos)?|an[uú]l(?:ar|a|o|e|en)?|'
+    r'reiniciar|rein[ií]cia|empezar\s+de\s+nuevo|olv[ií]dalo|d[eé]jalo\s+as[ií])\b',
+    re.IGNORECASE,
+)
+# Palabras sueltas de cierre (solo como mensaje corto, evita falsos positivos
+# dentro de una dirección: "avenida los adioses" no debe cancelar).
+_CANCEL_SINGLE = {"cancelar", "salir", "reiniciar", "adios", "adiós", "no más", "no mas"}
+
+
+def is_cancel_request(text: str) -> bool:
+    """True si el usuario pide cancelar/salir/reiniciar el flujo actual."""
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+    if t in _CANCEL_SINGLE:
+        return True
+    return bool(_CANCEL_RE.search(t))
 
 
 def is_conversational_query(text: str) -> bool:
@@ -602,8 +625,26 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         "¡A la orden! Cuando necesites otro taxi o domicilio, me avisas 😊",
     ]
 
+    def is_short_ack(text: str) -> bool:
+        """Confirmaciones/muletillas cortas de cierre ('vale', 'ok', 'listo')."""
+        t = re.sub(r'[^\w\s]', '', text.lower().strip())
+        acks = {
+            "vale", "ok", "oka", "okey", "okay", "listo", "dale", "bueno",
+            "buenisimo", "perfecto", "excelente", "genial", "de una", "va",
+            "chevere", "chere", "de acuerdo", "entendido",
+        }
+        return t in acks
+
+    # Cierre amable tras finalizar el servicio.
+    CLOSING_RESPONSES = [
+        "¡Con mucho gusto! 🙌 Fue un placer atenderte. Esperamos prestarte nuestro servicio muy pronto de nuevo. 🚕",
+        "¡A la orden siempre! 😊 Gracias por preferirnos. Aquí estaremos cuando nos necesites otra vez. 🚕",
+        "¡Con todo gusto! Esperamos volver a atenderte muy pronto. Que tengas un excelente día. 🚕",
+    ]
+
     import hashlib
     _thanks_idx = int(hashlib.md5(sender_phone.encode()).hexdigest(), 16) % len(THANKS_RESPONSES)
+    _closing_idx = int(hashlib.md5(sender_phone.encode()).hexdigest(), 16) % len(CLOSING_RESPONSES)
 
     texto_usuario = message.strip()
     sess = get_wp_session(sender_phone, company_id)
@@ -615,9 +656,17 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     # Clean text to detect cancellations
     t_clean = texto_usuario.lower()
-    if t_clean in ["cancelar", "salir", "reiniciar", "adios", "adiós", "no más"]:
+    if is_cancel_request(texto_usuario):
         reset_wp_session(sender_phone)
         await send_whatsapp_message(sender_phone, "Has cancelado la solicitud. Escríbeme cuando necesites un taxi.")
+        return
+
+    # ── CIERRE AMABLE TRAS FINALIZAR EL SERVICIO ──
+    # Solo en STATE_FINISHED: si agradece o confirma corto ('gracias', 'vale',
+    # 'ok', 'listo'), enviamos una despedida cálida. Fuera de FINISHED un 'ok'
+    # NO se toma como cierre (lo maneja el flujo del estado activo).
+    if sess.state == STATE_FINISHED and (is_thanks(texto_usuario) or is_short_ack(texto_usuario)):
+        await send_whatsapp_message(sender_phone, CLOSING_RESPONSES[_closing_idx])
         return
 
     # ── DETECCIÓN GLOBAL DE AGRADECIMIENTO ──
@@ -782,13 +831,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, "📍 Para continuar necesito tu punto de recogida.\n\n¿En qué dirección, barrio o lugar te recogemos? (Usa el botón o escribe)")
             return
 
-        origen_llm, hint = extract_pickup_address(texto_usuario)
-        origen = (origen_llm or "").strip()
-
-        if origen:
-            normalized = normalize_address(origen)
-            if normalized and len(normalized) > len(origen) * 0.5:
-                origen = normalized
+        # Extracción unificada: mismo extractor + normalizador que la llamada.
+        origen = (await extract_address_llm(texto_usuario, kind="pickup") or "").strip()
 
         # No se pudo extraer un origen válido → re-pedir el origen SIN reenviar el menú.
         if not origen or len(origen) < 2 or not looks_like_place(origen):
@@ -845,13 +889,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             await send_whatsapp_location_request(sender_phone, "📍 Para continuar necesito el punto de recogida del domicilio.\n\n¿En qué dirección lo recogemos? (Usa el botón o escribe)")
             return
 
-        origen_llm, hint = extract_pickup_address(texto_usuario)
-        origen = (origen_llm or "").strip()
-
-        if origen:
-            normalized = normalize_address(origen)
-            if normalized and len(normalized) > len(origen) * 0.5:
-                origen = normalized
+        # Extracción unificada: mismo extractor + normalizador que la llamada.
+        origen = (await extract_address_llm(texto_usuario, kind="pickup") or "").strip()
 
         if not origen or len(origen) < 2 or not looks_like_place(origen):
             await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de recogida.\n\n📍 Escríbela o comparte tu ubicación.")
@@ -872,12 +911,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         if texto_usuario.startswith("Ubicación en mapa:"):
             dest = texto_usuario
         else:
-            dest_llm, hint = extract_destination_address(texto_usuario)
-            dest = (dest_llm or "").strip()
-            if dest:
-                normalized = normalize_address(dest)
-                if normalized and len(normalized) > len(dest) * 0.5:
-                    dest = normalized
+            # Extracción unificada: mismo extractor + normalizador que la llamada.
+            dest = (await extract_address_llm(texto_usuario, kind="destination") or "").strip()
 
         if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
             await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de entrega.\n\n📦 Escríbela o comparte la ubicación.")
