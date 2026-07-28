@@ -34,6 +34,7 @@ from core.address_utils import (
     normalize_colombian_address,
     reattach_address_details,
 )
+from core.address_correction import apply_placa_correction, extract_placa_correction
 from core.co_address_parser import AddressState, parse_co_address
 from core.geo_context_resolver import select_candidate
 from core.conversation_repair import (
@@ -340,39 +341,10 @@ def _select_barrio_by_proximity(
     return best[0]
 
 
-# Placa de corrección: "17-25", "17A-25", "18-25"… (cruce[letra]-distancia).
-_PLACA_TOKEN_RE = re.compile(r"\b(\d{1,3}[A-Za-z]?)\s*-\s*(\d{1,4})\b")
-
-# Preámbulos de corrección / relleno que suelen preceder a la placa corregida.
-_PLACA_PREAMBLE_RE = re.compile(
-    r"\b(?:no|nop|nel|perdon|disculpa|disculpe|es|era|seria|mejor|digo|osea|"
-    r"o\s*sea|mas\s*bien|quise\s*decir|queria\s*decir|el|la|numero|nro)\b",
-    re.IGNORECASE,
-)
-
-
-def _extract_placa_correction(text: str) -> Optional[str]:
-    """Placa de una corrección PARCIAL ("No, 17-25" → "17-25"), o None.
-
-    Solo devuelve algo cuando el turno es exclusivamente una placa (más
-    preámbulos de corrección/relleno): sin nomenclatura de vía ni otro contenido
-    significativo. Así "17-25 en el centro" o "cra 5 #17-25" NO se tratan como
-    corrección de placa."""
-    if not text:
-        return None
-    t = strip_accents(text.strip().lower()).replace("#", " ")
-    if _looks_like_street(t):
-        return None                       # trae vía → dirección nueva, no corrección
-    m = _PLACA_TOKEN_RE.search(t)
-    if not m:
-        return None
-    remainder = _PLACA_TOKEN_RE.sub(" ", t)
-    remainder = _PLACA_PREAMBLE_RE.sub(" ", remainder)
-    remainder = re.sub(r"[^\w]+", " ", remainder)
-    remainder = " ".join(remainder.split()).strip()
-    if len(remainder) > 2:
-        return None                       # queda contenido → no es corrección pura
-    return f"{m.group(1).upper()}-{m.group(2)}"
+# Corrección parcial de placa: la lógica vive en core.address_correction, que es
+# la autoridad compartida con WhatsApp. Aquí solo se reexporta el nombre privado
+# que ya usaban este módulo y sus tests.
+_extract_placa_correction = extract_placa_correction
 
 
 class TurnOrchestrator:
@@ -619,21 +591,14 @@ class TurnOrchestrator:
         stored = session.origen_text
         if not stored:
             return None
-        placa = _extract_placa_correction(text)
+        placa = extract_placa_correction(text)
         if not placa:
             return None
-        # Solo si la dirección previa es una vía con número (algo que corregir).
-        stored_parsed = parse_co_address(stored)
-        ast = stored_parsed.ast
-        if ast is None or ast.via is None or ast.via.numero is None:
+        # Reconstruye conservando la vía previa y valida con el parser (única
+        # autoridad). None → no hay una dirección de vía que corregir.
+        origen = apply_placa_correction(stored, placa)
+        if not origen:
             return None
-        # Reconstruir con la placa corregida, conservando la vía previa. Se pasa
-        # por el parser (única autoridad) para canonicalizar y validar.
-        base = re.sub(r"#.*$", "", stored).strip()
-        new_parsed = parse_co_address(f"{base} #{placa}")
-        if new_parsed.state != AddressState.STREET_ADDRESS or not new_parsed.canonical:
-            return None
-        origen = new_parsed.canonical
         logger.info(
             "[orchestrator] placa correction call_uuid=%s %r + %r -> %r",
             session.call_uuid, stored, placa, origen,
