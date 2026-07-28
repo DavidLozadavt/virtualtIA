@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Catálogo de Puntos de Interés (POI) conocidos de Popayán.",
+    "SOLO afecta la PRESENTACIÓN: el display_name se muestra al usuario cuando",
+    "el texto que él dijo/escribió coincide con un alias. La dirección oficial",
+    "resuelta por el geocoder NUNCA se reemplaza: despacho, coordenadas,",
+    "navegación y payload al backend siguen usando la dirección exacta.",
+    "",
+    "Para agregar un POI no hace falta tocar código: añade una entrada aquí.",
+    "  name         → nombre oficial (informativo / trazabilidad)",
+    "  display_name → lo que ve el usuario (si se omite, se usa name)",
+    "  aliases      → formas coloquiales, abreviaciones y siglas",
+    "Las comparaciones ignoran mayúsculas, tildes y puntuación."
+  ],
+  "pois": [
+    {
+      "name": "Centro Comercial Campanario",
+      "display_name": "Centro Comercial Campanario",
+      "aliases": ["campanario", "cc campanario", "c.c. campanario", "centro comercial campanario", "el campanario", "mall campanario"],
+      "exact_aliases": ["centro comercial"]
+    },
+    {
+      "name": "Terminal de Transportes de Popayán",
+      "display_name": "Terminal de Transportes",
+      "aliases": ["terminal", "el terminal", "terminal de transportes", "terminal de transporte", "terminal de buses", "terminal de transportes de popayan"]
+    },
+    {
+      "name": "Aeropuerto Guillermo León Valencia",
+      "display_name": "Aeropuerto Guillermo León Valencia",
+      "aliases": ["aeropuerto", "el aeropuerto", "aeropuerto de popayan", "aeropuerto guillermo leon valencia", "guillermo leon valencia"]
+    },
+    {
+      "name": "Universidad del Cauca",
+      "display_name": "Universidad del Cauca",
+      "aliases": ["unicauca", "universidad del cauca", "la unicauca", "u del cauca"]
+    },
+    {
+      "name": "Hospital Universitario San José",
+      "display_name": "Hospital Universitario San José",
+      "aliases": ["hospital san jose", "hospital universitario san jose", "san jose hospital", "hospital universitario"]
+    },
+    {
+      "name": "Parque Caldas",
+      "display_name": "Parque Caldas",
+      "aliases": ["parque caldas", "el parque caldas", "parque de caldas"]
+    },
+    {
+      "name": "Centro Comercial Anarkos",
+      "display_name": "Centro Comercial Anarkos",
+      "aliases": ["anarkos", "cc anarkos", "c.c. anarkos", "centro comercial anarkos"]
+    },
+    {
+      "name": "SENA Regional Cauca",
+      "display_name": "SENA Regional Cauca",
+      "aliases": ["sena", "el sena", "sena regional cauca", "sena popayan"]
+    }
+  ]
+}

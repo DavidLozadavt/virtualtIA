@@ -76,6 +76,18 @@ class SessionStore:
         self._store.pop(phone, None)
 
 
+def _display(text: Optional[str]) -> str:
+    """Cómo se le muestra un lugar al usuario.
+
+    Devuelve el display name si el texto nombra un POI del catálogo
+    (config/poi_catalog.json); si no, el texto tal cual. Nunca altera la
+    dirección que se resuelve ni la que se envía al backend.
+    """
+    from core.poi_catalog import poi_display_name
+
+    return poi_display_name(text) or (text or "")
+
+
 # ── Servicio principal ────────────────────────────────────────────────────────
 
 class WhatsappService:
@@ -321,7 +333,7 @@ class WhatsappService:
         sess.state = STATE_WAITING_DEST_OR_SKIP
         await self.send_message(
             phone,
-            f"¡Listo! 📍 Te recogeremos en *{origen}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o escribirme *NO* si prefieres coordinarlo directamente con el conductor. 😊",
+            f"¡Listo! 📍 Te recogeremos en *{_display(origen)}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o escribirme *NO* si prefieres coordinarlo directamente con el conductor. 😊",
         )
 
     async def _try_confirm_barrio(
@@ -342,7 +354,7 @@ class WhatsappService:
                     sess.state         = STATE_CONFIRMING_ORIGIN
                     await self.send_message(
                         phone,
-                        f"Entendido, veo que la dirección es en {origen}. 📍 Eso queda por el barrio *{sess.origen_barrio}*, ¿es correcto? Respóndeme *SÍ*, o por favor cuéntame el nombre de tu barrio para ubicarte de la mejor manera. 😊",
+                        f"Entendido, veo que la dirección es en {_display(origen)}. 📍 Eso queda por el barrio *{sess.origen_barrio}*, ¿es correcto? Respóndeme *SÍ*, o por favor cuéntame el nombre de tu barrio para ubicarte de la mejor manera. 😊",
                     )
                     return
         except Exception as exc:
@@ -351,7 +363,7 @@ class WhatsappService:
         sess.state = STATE_CONFIRMING_ORIGIN
         await self.send_message(
             phone,
-            f"Perfecto, {origen}. ¿Me podrías indicar en qué barrio queda? Cuéntame el nombre del barrio para poder ubicarte muchísimo mejor. 😊",
+            f"Perfecto, {_display(origen)}. ¿Me podrías indicar en qué barrio queda? Cuéntame el nombre del barrio para poder ubicarte muchísimo mejor. 😊",
         )
 
     async def _handle_confirming_origin(
@@ -363,7 +375,7 @@ class WhatsappService:
             sess.state = STATE_WAITING_DEST_OR_SKIP
             await self.send_message(
                 phone,
-                f"¡Perfecto! ✅ Te recogeremos en *{sess.origen_text}*. ¿Hacia dónde viajas hoy? Puedes decirme tu destino o responderme *NO* si prefieres decírselo al conductor. 😊",
+                f"¡Perfecto! ✅ Te recogeremos en *{_display(sess.origen_text)}*. ¿Hacia dónde viajas hoy? Puedes decirme tu destino o responderme *NO* si prefieres decírselo al conductor. 😊",
             )
             return
 
@@ -378,7 +390,7 @@ class WhatsappService:
             sess.state       = STATE_WAITING_DEST_OR_SKIP
             await self.send_message(
                 phone,
-                f"¡Excelente! 📍 Te recogeremos en *{local}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o responderme *NO*. 😊",
+                f"¡Excelente! 📍 Te recogeremos en *{_display(local)}*. ¿Hacia dónde te diriges hoy? Puedes decirme tu destino o responderme *NO*. 😊",
             )
             return
 

@@ -43,8 +43,19 @@ class Settings(BaseSettings):
 
     # WhatsApp Meta Cloud API
     WHATSAPP_VERIFY_TOKEN: str = "token_de_verificacion_123"
+    # Opcional. El token real vive por empresa en telecom_configs del backend, y
+    # las notas de voz se descargan vía /admin/telecom/media. Solo se usa como
+    # respaldo si este microservicio tiene credenciales propias de Meta.
     WHATSAPP_API_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_GRAPH_VERSION: str = "v19.0"
+    # Notas de voz de WhatsApp: descarga + transcripción con el motor STT existente.
+    WHATSAPP_AUDIO_ENABLED: bool = True
+    WHATSAPP_MEDIA_MAX_BYTES: int = 10 * 1024 * 1024   # 10 MB (límite del STT)
+    WHATSAPP_MEDIA_TIMEOUT_SEC: float = 20.0
+
+    # Catálogo de POI (display names). Vacío → config/poi_catalog.json del repo.
+    POI_CATALOG_PATH: str = ""
 
     # Google Maps API (para geocodificación)
     GOOGLE_MAPS_API_KEY: str = ""

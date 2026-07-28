@@ -105,7 +105,25 @@ async def receive_universal_message(request: Request, background_tasks: Backgrou
         print(f"♻️ MENSAJE UNIVERSAL DUPLICADO IGNORADO: {message_id}")
         return {"status": "ignored_duplicate"}
 
-    if not sender_phone or not message_content:
+    if not sender_phone:
+        return {"status": "ignored"}
+
+    # Nota de voz: el Telecom Manager puede reenviar el media_id o una URL
+    # directa. Se transcribe y se procesa como si el usuario la hubiera escrito.
+    if not message_content:
+        media_id = body.get("media_id") or body.get("audio_id")
+        media_url = body.get("media_url") or body.get("audio_url")
+        if media_id or media_url:
+            print(f"🎤 NOTA DE VOZ UNIVERSAL [{company_id}] de {sender_phone}")
+            background_tasks.add_task(
+                process_whatsapp_voice_note,
+                sender_phone,
+                media_id,
+                media_url,
+                body.get("mime_type"),
+                company_id,
+            )
+            return {"status": "success"}
         return {"status": "ignored"}
 
     print(f"📩 MENSAJE UNIVERSAL [{company_id}]:", message_content)
@@ -162,6 +180,26 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                     if interactive.get("type") == "button_reply":
                         message_content = interactive.get("button_reply", {}).get("title", "")
 
+                elif msg_type in ("audio", "voice"):
+                    # Nota de voz: se descarga y transcribe en background (la
+                    # descarga a Meta no puede bloquear el ACK del webhook).
+                    media = msg.get(msg_type) or {}
+                    media_id = media.get("id")
+                    msg_id = msg.get("id")
+                    if msg_id and PROCESSED_MESSAGES.is_processed(msg_id):
+                        print(f"♻️ NOTA DE VOZ DUPLICADA IGNORADA: {msg_id}")
+                        continue
+                    if media_id and sender_phone:
+                        print(f"🎤 NOTA DE VOZ de {sender_phone} (media {media_id})")
+                        background_tasks.add_task(
+                            process_whatsapp_voice_note,
+                            sender_phone,
+                            media_id,
+                            None,
+                            media.get("mime_type"),
+                            1,
+                        )
+                    continue
 
                 else:
                     logger.info(f"Ignored type '{msg_type}' from {sender_phone}")
@@ -393,6 +431,19 @@ def reset_wp_session(phone: str):
 # (Using extract_datetime_with_llm from core.address_utils)
 
 
+# ✅ PRESENTACIÓN: display name de POI conocidos
+def _display(text: Optional[str]) -> str:
+    """Cómo se le muestra un lugar al usuario.
+
+    Si el texto nombra un POI del catálogo (config/poi_catalog.json) se muestra
+    su display name; en cualquier otro caso se muestra el texto tal cual. No
+    toca la resolución ni la dirección que va al backend.
+    """
+    from core.poi_catalog import poi_display_name
+
+    return poi_display_name(text) or (text or "")
+
+
 # ✅ RESOLUCIÓN GEOGRÁFICA UNIFICADA (mismo pipeline que la llamada telefónica)
 async def _resolve_wp_location(raw: str) -> tuple[float, float, str]:
     """Resuelve una ubicación de WhatsApp con el MISMO motor que las llamadas.
@@ -466,6 +517,14 @@ async def _create_wp_service(
 ) -> tuple[bool, str]:
     import re
 
+    from core.poi_catalog import poi_display_name
+
+    # Display name de POI: se calcula sobre lo que ESCRIBIÓ el usuario, antes de
+    # resolver. Solo afecta el texto que se le muestra a él; la dirección oficial
+    # (y por tanto el payload, las coordenadas y el despacho) no cambia.
+    origen_poi = poi_display_name(origen)
+    destino_poi = poi_display_name(destino) if destino else None
+
     # Resolución geográfica UNIFICADA: WhatsApp usa exactamente el mismo pipeline
     # que la llamada telefónica (core.geocoder_service). Una ubicación compartida
     # se convierte primero en dirección completa vía Reverse Geocoding, y las
@@ -476,6 +535,10 @@ async def _create_wp_service(
     dlat, dlng = 0.0, 0.0
     if destino:
         dlat, dlng, destino = await _resolve_wp_location(destino)
+
+    # Texto visible al usuario. Sin POI en el catálogo → la dirección tal cual.
+    origen_display = origen_poi or origen
+    destino_display = destino_poi or destino
 
     clase_v = "TAXI"
     service_type = "TAXI AHORA"
@@ -543,7 +606,7 @@ async def _create_wp_service(
                 f"📅 Fecha: {fecha_programada}\n"
                 f"🕒 Hora: {hora_programada}\n\n"
                 "📍 Recogida:\n"
-                f"{origen}\n\n"
+                f"{origen_display}\n\n"
                 "🚕 Un conductor te recogerá a esa hora.\n"
                 "Gracias por preferirnos."
             )
@@ -551,16 +614,16 @@ async def _create_wp_service(
             return True, (
                 "✅ ¡Domicilio registrado!\n\n"
                 "📍 Recogida:\n"
-                f"{origen}\n\n"
+                f"{origen_display}\n\n"
                 "📦 Entrega:\n"
-                f"{destino or 'Por confirmar'}\n\n"
+                f"{destino_display or 'Por confirmar'}\n\n"
                 "🚕 Un mensajero se comunicará contigo en un momento.\n"
                 "Gracias por preferirnos."
             )
         return True, (
             "✅ Ubicación recibida\n\n"
             "📍 Recogida:\n"
-            f"{origen}\n\n"
+            f"{origen_display}\n\n"
             "🚕 Estamos buscando un conductor para ti.\n"
             "Gracias por preferirnos."
         )
@@ -585,6 +648,41 @@ async def _finalizar_taxi(sender_phone: str, sess: "WpSession"):
     if ok:
         sess.state = STATE_FINISHED
     await send_whatsapp_message(sender_phone, closing)
+
+
+_VOICE_NOTE_UNCLEAR = (
+    "🎤 No logré entender la nota de voz.\n\n"
+    "¿Me la repites hablando un poquito más despacio, o me lo escribes?"
+)
+
+
+# ✅ PROCESAR NOTA DE VOZ (misma conversación, distinta forma de entrada)
+async def process_whatsapp_voice_note(
+    sender_phone: str,
+    media_id: Optional[str] = None,
+    media_url: Optional[str] = None,
+    mime: Optional[str] = None,
+    company_id: int = 1,
+):
+    """Descarga la nota de voz, la transcribe y la entrega al flujo de siempre.
+
+    No hay pipeline nuevo: la transcripción usa el mismo motor STT que el resto
+    del sistema (core.voice_engine) con los mismos filtros de las llamadas, y el
+    texto resultante entra por process_whatsapp_message exactamente igual que un
+    mensaje escrito. Solo cambia la forma de entrada.
+    """
+    from services.whatsapp_media import voice_note_to_text
+
+    texto = await voice_note_to_text(
+        media_id=media_id, media_url=media_url, mime=mime, company_id=company_id
+    )
+
+    if not texto:
+        await send_whatsapp_message(sender_phone, _VOICE_NOTE_UNCLEAR)
+        return
+
+    print("🎤 NOTA DE VOZ TRANSCRITA:", texto)
+    await process_whatsapp_message(sender_phone, texto, company_id)
 
 
 # ✅ PROCESAR MENSAJE (SIN BASE DE DATOS)
@@ -844,7 +942,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
         is_street = bool(re.search(r'(?:calle|carrera|cl|cra|cr|kra|kr)\s*\d+', origen.lower()))
         if is_street:
             sess.state = STATE_CONFIRMING_ORIGIN
-            await send_whatsapp_message(sender_phone, f"📍 Tu dirección de recogida es:\n{origen}\n\n¿Es correcta? Responde *SÍ* o *NO*.")
+            await send_whatsapp_message(sender_phone, f"📍 Tu dirección de recogida es:\n{_display(origen)}\n\n¿Es correcta? Responde *SÍ* o *NO*.")
             return
 
         # Origen válido → crear el servicio de inmediato (sin pedir destino).
@@ -868,7 +966,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
         # Saludo/pregunta/charla → re-preguntar la confirmación, sin tomarlo como dirección.
         if (is_just_greeting(texto_usuario) or is_conversational_query(texto_usuario)) and not _has_address_signal(texto_usuario):
-            await send_whatsapp_message(sender_phone, f"📍 ¿Confirmas que te recogemos en:\n{sess.origen_text}?\n\nResponde *SÍ* o *NO*.")
+            await send_whatsapp_message(sender_phone, f"📍 ¿Confirmas que te recogemos en:\n{_display(sess.origen_text)}?\n\nResponde *SÍ* o *NO*.")
             return
 
         # Si responde otra cosa, lo tomamos como corrección directa → crear el servicio.
