@@ -50,6 +50,11 @@
       "aliases": ["anarkos", "cc anarkos", "c.c. anarkos", "centro comercial anarkos"]
     },
     {
+      "name": "Centro Comercial Terraplaza",
+      "display_name": "Centro Comercial Terraplaza",
+      "aliases": ["terraplaza", "terra plaza", "cc terraplaza", "c.c. terraplaza", "centro comercial terraplaza", "el terraplaza", "mall terraplaza"]
+    },
+    {
       "name": "SENA Regional Cauca",
       "display_name": "SENA Regional Cauca",
       "aliases": ["sena", "el sena", "sena regional cauca", "sena popayan"]

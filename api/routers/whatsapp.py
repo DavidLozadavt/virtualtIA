@@ -3,12 +3,15 @@ routers/whatsapp.py — Webhook integration for Meta WhatsApp Cloud API.
 """
 
 import logging
+import unicodedata
+
 import httpx
 from fastapi import APIRouter, Request, HTTPException, Response, BackgroundTasks
 
 from core.config import settings
 from orchestrator.context_builder import load_project_config
 from orchestrator.tool_runner import run_agent_loop
+from core.address_correction import correct_address
 from core.address_utils import (
     extract_pickup_address,
     extract_destination_address,
@@ -359,6 +362,21 @@ def is_cancel_request(text: str) -> bool:
     return bool(_CANCEL_RE.search(t))
 
 
+def _fold(text: str) -> str:
+    """Texto plegado para comparar: minúsculas, sin tildes, sin puntuación.
+
+    Imprescindible desde que entran notas de voz: el STT devuelve siempre la
+    ortografía correcta ("buenos días", "cuánto"), mientras que los vocabularios
+    de saludos/muletillas están escritos sin tilde. Sin plegar, un "hola buenos
+    días" no se reconocía como saludo y terminaba en el extractor de direcciones
+    respondiendo "no encontré esa dirección".
+    """
+    t = unicodedata.normalize("NFD", (text or "").lower())
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+    t = re.sub(r'[^\w\s]', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+
 def is_conversational_query(text: str) -> bool:
     """
     True si el texto es una pregunta/charla conversacional y NO una dirección.
@@ -366,11 +384,10 @@ def is_conversational_query(text: str) -> bool:
     """
     if "?" in text or "¿" in text:
         return True
-    t = re.sub(r'[^\w\s]', ' ', text.lower().strip())
-    t = re.sub(r'\s+', ' ', t).strip()
+    t = _fold(text)
     if not t:
         return False
-    return any(m in t for m in _QUESTION_MARKERS)
+    return any(_fold(m) in t for m in _QUESTION_MARKERS)
 
 
 # Señal EXPLÍCITA de dirección (número, nomenclatura de calle, barrio, sector…).
@@ -650,6 +667,64 @@ async def _finalizar_taxi(sender_phone: str, sess: "WpSession"):
     await send_whatsapp_message(sender_phone, closing)
 
 
+_CANCEL_OK = "Listo, cancelé tu solicitud. ✅\n\nEscríbeme cuando necesites un taxi."
+_CANCEL_NADA_QUE_CANCELAR = "No tienes ninguna solicitud activa. Escríbeme cuando necesites un taxi."
+_CANCEL_CON_CONDUCTOR = (
+    "Tu servicio ya fue tomado por un conductor, así que no puedo cancelarlo desde aquí. 🚕\n\n"
+    "Por favor coordínalo directamente con él o con la central."
+)
+_CANCEL_FALLO = (
+    "⚠️ No pude confirmar la cancelación con la central.\n\n"
+    "Por favor comunícate con nosotros para asegurarnos de que quede cancelada."
+)
+
+
+async def _cancelar_servicio_backend(sender_phone: str, company_id: int) -> dict:
+    """Cancela en el backend los servicios publicados de este teléfono.
+
+    El backend es el dueño del servicio: cancelar solo en Lyra deja la solicitud
+    publicada para conductores y operadores. Devuelve el resultado tal cual para
+    que el mensaje al usuario refleje lo que realmente pasó.
+
+    Retorna {"ok": bool, "cancelados": int, "con_conductor": int}.
+    """
+    url = f"{settings.INTELLITAXI_API_BASE}/taxi/solicitud-telefonica/cancelar"
+    payload = {
+        "telefono": sender_phone,
+        "company_id": company_id,
+        "motivo": "Servicio cancelado por el cliente desde WhatsApp",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json=payload)
+
+        if resp.status_code >= 400:
+            logger.error("Cancelación backend falló: %s %s", resp.status_code, resp.text)
+            return {"ok": False, "cancelados": 0, "con_conductor": 0}
+
+        data = resp.json() or {}
+        return {
+            "ok": True,
+            "cancelados": int(data.get("cancelados") or 0),
+            "con_conductor": int(data.get("con_conductor") or 0),
+        }
+    except Exception as e:
+        logger.error("Error cancelando servicio en backend: %s", e)
+        return {"ok": False, "cancelados": 0, "con_conductor": 0}
+
+
+def _mensaje_cancelacion(resultado: dict) -> str:
+    """Mensaje honesto: nunca decir 'cancelado' si el backend no lo canceló."""
+    if not resultado.get("ok"):
+        return _CANCEL_FALLO
+    if resultado.get("cancelados"):
+        return _CANCEL_OK
+    if resultado.get("con_conductor"):
+        return _CANCEL_CON_CONDUCTOR
+    return _CANCEL_NADA_QUE_CANCELAR
+
+
 _VOICE_NOTE_UNCLEAR = (
     "🎤 No logré entender la nota de voz.\n\n"
     "¿Me la repites hablando un poquito más despacio, o me lo escribes?"
@@ -690,9 +765,9 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
     import re
 
     def is_just_greeting(text: str) -> bool:
-        t = text.lower().strip()
-        t = re.sub(r'[^\w\s]', '', t)
-        words = t.split()
+        # _fold pliega tildes: el STT de las notas de voz escribe "días",
+        # "buenísimo", y el vocabulario de abajo va sin tilde.
+        words = _fold(text).split()
         greetings = {
             "hola", "holas", "buen", "buenos", "buenas", "dia", "dias", "tarde", "tardes", "noche", "noches", 
             "qhubo", "que", "mas", "saludos", "ola", "holi", "holis", "tal", "mija", "amiga", "mijo", "amigo",
@@ -703,7 +778,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     def is_thanks(text: str) -> bool:
         """Detecta mensajes de agradecimiento."""
-        t = re.sub(r'[^\w\s]', '', text.lower().strip())
+        t = _fold(text)
         thanks_phrases = {
             "gracias", "muchas gracias", "mil gracias", "gracias a ti", "gracias listo",
             "ok gracias", "okey gracias", "ok muchas gracias", "muchas gracias a ti",
@@ -725,7 +800,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     def is_short_ack(text: str) -> bool:
         """Confirmaciones/muletillas cortas de cierre ('vale', 'ok', 'listo')."""
-        t = re.sub(r'[^\w\s]', '', text.lower().strip())
+        t = _fold(text)
         acks = {
             "vale", "ok", "oka", "okey", "okay", "listo", "dale", "bueno",
             "buenisimo", "perfecto", "excelente", "genial", "de una", "va",
@@ -755,8 +830,12 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
     # Clean text to detect cancellations
     t_clean = texto_usuario.lower()
     if is_cancel_request(texto_usuario):
+        # Cancelar de verdad: limpiar la sesión de Lyra NO basta, el servicio ya
+        # está creado en el backend y sigue publicado para conductores y
+        # operadores hasta que este llamado lo cancele allá.
+        resultado = await _cancelar_servicio_backend(sender_phone, company_id)
         reset_wp_session(sender_phone)
-        await send_whatsapp_message(sender_phone, "Has cancelado la solicitud. Escríbeme cuando necesites un taxi.")
+        await send_whatsapp_message(sender_phone, _mensaje_cancelacion(resultado))
         return
 
     # ── CIERRE AMABLE TRAS FINALIZAR EL SERVICIO ──
@@ -951,6 +1030,19 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
 
     # ── STATE: confirming_origin ──
     if sess.state == STATE_CONFIRMING_ORIGIN:
+        # ── Corrección PARCIAL ("no, es 3C-6") ──
+        # El usuario no repite la dirección completa, solo el pedazo malo. Se
+        # conserva la vía y se reemplaza la placa. Va ANTES de _parse_si_no
+        # porque el turno empieza por "no" y si no se perdería la corrección.
+        corregida = correct_address(sess.origen_text, texto_usuario)
+        if corregida:
+            sess.origen_text = corregida
+            await send_whatsapp_message(
+                sender_phone,
+                f"📍 Corrijo, entonces es:\n{_display(corregida)}\n\n¿Así está bien? Responde *SÍ* o *NO*.",
+            )
+            return
+
         is_yes = _parse_si_no(texto_usuario)
 
         if is_yes is True:
@@ -959,6 +1051,20 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             return
 
         if is_yes is False:
+            # ── Corrección COMPLETA en el mismo mensaje ──
+            # "no, es en la calle 5 #12-20": el usuario ya dio la dirección
+            # buena. Volver a preguntarla sería hacérsela repetir.
+            if _has_address_signal(texto_usuario):
+                nueva = (await extract_address_llm(texto_usuario, kind="pickup") or "").strip()
+                if nueva and len(nueva) >= 2 and looks_like_place(nueva):
+                    sess.origen_text = nueva
+                    await send_whatsapp_message(
+                        sender_phone,
+                        f"📍 Corrijo, entonces es:\n{_display(nueva)}\n\n¿Así está bien? Responde *SÍ* o *NO*.",
+                    )
+                    return
+
+            # "No" a secas → sí hay que pedir la dirección de nuevo.
             sess.state = STATE_WAITING_ORIGIN
             sess.origen_text = None
             await send_whatsapp_location_request(sender_phone, "📍 ¿En qué dirección te recogemos entonces?\n\n(Escríbela o comparte tu ubicación)")

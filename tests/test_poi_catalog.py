@@ -59,6 +59,24 @@ def test_alias_generico_solo_como_texto_completo():
     assert poi_display_name("centro comercial anarkos") == "Centro Comercial Anarkos"
 
 
+@pytest.mark.parametrize("texto", [
+    "Terraplaza",
+    "terraplaza",
+    "Terra Plaza",
+    "CC Terraplaza",
+    "C.C. Terraplaza",
+    "Centro Comercial Terraplaza",
+    "recógeme en el terraplaza",
+])
+def test_alias_de_terraplaza_devuelven_display_name(texto):
+    assert poi_display_name(texto) == "Centro Comercial Terraplaza"
+
+
+def test_terraplaza_no_colisiona_con_campanario():
+    assert poi_display_name("centro comercial terraplaza") == "Centro Comercial Terraplaza"
+    assert poi_display_name("centro comercial campanario") == "Centro Comercial Campanario"
+
+
 def test_otros_poi_del_catalogo():
     assert poi_display_name("terminal") == "Terminal de Transportes"
     assert poi_display_name("unicauca") == "Universidad del Cauca"
