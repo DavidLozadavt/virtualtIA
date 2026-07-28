@@ -861,7 +861,10 @@ class TurnOrchestrator:
                     if barrio:
                         session.origen_barrio = barrio
                         session.state = STATE_CONFIRMING_ORIGIN
-                        msg = f"El punto de recogida es {origen}, barrio {barrio}."
+                        # El turno queda esperando sí/no (short_answer): la frase
+                        # DEBE terminar en pregunta o el usuario no sabe que le
+                        # toca confirmar y se queda callado.
+                        msg = f"El punto de recogida es {origen}, barrio {barrio}. ¿Está correcto?"
                         session.last_message = msg
                         return VoiceTurnResult(
                             speak_text=msg,

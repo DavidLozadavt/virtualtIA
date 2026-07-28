@@ -342,24 +342,59 @@ _QUESTION_MARKERS = (
 
 # Intención de cancelar/salir/reiniciar el flujo, aunque venga en una frase
 # ("quiero cancelar el servicio", "mejor cancela", "cancelar servicio").
+# Se evalúa sobre texto plegado (_fold): sin tildes ni puntuación, así "anúlalo"
+# y "anulalo" son el mismo caso. El sufijo de pronombre enclítico es obligatorio
+# contemplarlo: sin él, "cancélalo" y "anúlalo" —la forma más común— no casaban,
+# porque el \b caía en medio de "cancela|lo".
+_ENCLITIC = r'(?:me|te|lo|la|los|las|le|nos)?'
 _CANCEL_RE = re.compile(
-    r'\b(cancel(?:ar|a|o|e|en|emos)?|an[uú]l(?:ar|a|o|e|en)?|'
-    r'reiniciar|rein[ií]cia|empezar\s+de\s+nuevo|olv[ií]dalo|d[eé]jalo\s+as[ií])\b',
+    r'\b(?:cancel(?:ar|a|o|e|en|emos|amos)?' + _ENCLITIC + r'|'
+    r'anul(?:ar|a|o|e|en|emos|amos)?' + _ENCLITIC + r'|'
+    r'reinici(?:ar|a|o|e|emos)?|empezar\s+de\s+nuevo|'
+    r'olvid(?:ar|a|e|emos)?' + _ENCLITIC + r'|'
+    r'dej(?:ar|a|e|emos)?' + _ENCLITIC + r'\s+as[ií]?)\b',
     re.IGNORECASE,
 )
 # Palabras sueltas de cierre (solo como mensaje corto, evita falsos positivos
 # dentro de una dirección: "avenida los adioses" no debe cancelar).
 _CANCEL_SINGLE = {"cancelar", "salir", "reiniciar", "adios", "adiós", "no más", "no mas"}
 
+# Desistir SIN decir "cancelar": "ya no necesito el servicio", "ya no lo quiero",
+# "ya conseguí otro carro", "ya me voy en otro". Es como habla la mayoría.
+#
+# Precision-first: "ya no" a secas NO alcanza —podría ser "ya no, mejor en la
+# calle 5"—. Se exige un verbo de necesidad/uso, o un hecho que cierra el
+# servicio (ya conseguí / ya me fui). Se compara sobre texto plegado (_fold),
+# así funciona igual con las tildes que escribe el STT de las notas de voz.
+_GIVE_UP_RE = re.compile(
+    r'\bya\s+no\s+(?:\w+\s+){0,3}?'
+    r'(?:necesito|necesita|necesitamos|nesecito|ocupo|preciso|requiero|'
+    r'quiero|queremos|va|van|voy|vamos|sirve|hace\s+falta)\b'
+    r'|\bno\s+(?:lo|la|los|las)\s+(?:necesito|nesecito|quiero|ocupo|voy\s+a\s+necesitar)\b'
+    r'|\bno\s+(?:necesito|nesecito|quiero|ocupo)\s+(?:\w+\s+){0,2}?'
+    r'(?:servicio|taxi|carro|domicilio|mensajero|conductor|vehiculo)\b'
+    r'|\bya\s+(?:consegui|conseguimos|cogi|tome|tomamos|pedi|pedimos)\s+'
+    r'(?:\w+\s+){0,2}?(?:otro|otra|uno|una)\b'
+    r'|\bya\s+me\s+(?:voy|fui|vine|iba)\b'
+    r'|\bya\s+no\s+(?:sera|va\s+a\s+ser|hay\s+necesidad)\b',
+    re.IGNORECASE,
+)
+
 
 def is_cancel_request(text: str) -> bool:
-    """True si el usuario pide cancelar/salir/reiniciar el flujo actual."""
-    t = (text or "").lower().strip()
-    if not t:
+    """True si el usuario pide cancelar el servicio, lo diga como lo diga.
+
+    Cubre dos formas:
+      - explícita: "cancelar", "anúlalo", "olvídalo"
+      - desistir:  "ya no necesito el servicio", "ya conseguí otro"
+    """
+    raw = (text or "").strip()
+    if not raw:
         return False
-    if t in _CANCEL_SINGLE:
+    if raw.lower() in _CANCEL_SINGLE:
         return True
-    return bool(_CANCEL_RE.search(t))
+    folded = _fold(raw)
+    return bool(_CANCEL_RE.search(folded) or _GIVE_UP_RE.search(folded))
 
 
 def _fold(text: str) -> str:

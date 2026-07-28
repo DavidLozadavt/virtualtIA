@@ -397,6 +397,28 @@ def _strip_preamble(text: str) -> str:
 
 # ── INTENT PARSING ────────────────────────────────────────────────────────────
 
+# Confirmaciones que valen como "sí" SOLO si son la respuesta completa. Van
+# aparte porque como substring dentro de una frase serían falsos positivos
+# ("de una calle", "ya está en la esa"). Sin tildes: _normalize_text las pliega.
+_CONFIRM_EXACT = {
+    "sipi", "sip", "sipis", "simon", "seguro que si", "obvio que si",
+    "ujum", "ujumm", "ajam", "aja", "ahi esta", "ahi es", "ahi mismo",
+    "esa es", "ese es", "eso es", "eso mero", "ese mismo", "esa misma",
+    "de una", "hagale", "hagale pues", "tal cual", "asi mismo", "asi tal cual",
+    "correcto si", "si correcto", "todo bien", "va bien", "quedamos asi",
+}
+
+# Muletillas y conectores que no aportan intención: si al quitarlos la respuesta
+# solo contiene palabras de confirmación, es un "sí" aunque tenga varias
+# palabras ("mmm sí, está bien así", "eso está bien").
+_CONFIRM_FILLER = {
+    "mmm", "mm", "mmmm", "mhm", "este", "pues", "ya", "eso", "esa", "ese",
+    "ahi", "es", "esta", "esta", "muy", "todo", "que", "y", "o", "la", "el",
+    "senor", "senora", "señor", "señora", "papi", "papa", "mija", "mijo",
+    "gracias", "entonces", "quedamos",
+}
+
+
 def _parse_si_no(text: str) -> Optional[bool]:
     t         = _normalize_text(text)
     # Positivos FUERTES: confirman aunque vengan en una frase más larga.
@@ -422,10 +444,25 @@ def _parse_si_no(text: str) -> Optional[bool]:
         return False
     if words & positivos:
         return True
-    # Débiles: solo si la respuesta es corta (≤2 palabras) y no parece un lugar.
-    # Evita falsos "sí" cuando el usuario en realidad nombra/corrige un destino.
-    if (words & positivos_debiles) and len(words) <= 2 and not _PLACE_SIGNAL_RE.search(t):
+
+    # Confirmaciones coloquiales completas ("ahí está", "de una", "hágale").
+    if t.strip() in _CONFIRM_EXACT:
         return True
+
+    if _PLACE_SIGNAL_RE.search(t):
+        # Nombra un lugar/dirección: no es una confirmación, es contenido.
+        return None
+
+    # Débiles: solo si la respuesta es corta (≤2 palabras).
+    # Evita falsos "sí" cuando el usuario en realidad nombra/corrige un destino.
+    if (words & positivos_debiles) and len(words) <= 2:
+        return True
+
+    # …o si la respuesta ENTERA está hecha de confirmación + muletillas, sin
+    # importar el largo: "mmm sí, está bien así", "eso está bien", "pues bien".
+    if (words & positivos_debiles) and words <= (positivos | positivos_debiles | _CONFIRM_FILLER):
+        return True
+
     return None
 
 
