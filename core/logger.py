@@ -17,7 +17,16 @@ def setup_logger(name: str, log_file: str = "lyra.log", level=logging.INFO):
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # Handler para consola
+    # Handler para consola.
+    # La consola de Windows usa cp1252 por defecto, así que cualquier mensaje con
+    # acentos, flechas o emojis reventaba con UnicodeEncodeError y en su lugar se
+    # imprimía el volcado del error de logging. Se fuerza UTF-8 y, si el flujo no
+    # admite reconfigurarse, se sustituyen los caracteres que no encajen en vez de
+    # perder la línea entera.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
 

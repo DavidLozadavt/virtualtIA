@@ -142,14 +142,30 @@ def update_conversation_timestamp(conversation_id: str) -> None:
 
 
 def update_conversation_final_data(conversation_id: str, final_data: dict) -> None:
-    """Persist final_data JSON in the conversation."""
-    with get_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "UPDATE lyra_conversations SET final_data = %s WHERE id = %s",
-                (json.dumps(final_data), conversation_id),
-            )
-        conn.commit()
+    """
+    Persist final_data JSON in the conversation.
+
+    Guardar el estado es un efecto secundario del turno, no el turno. Si algún
+    valor no es serializable —los precios llegan de MySQL como `Decimal`— se
+    convierte en su representación textual en vez de dejar caer la petición: el
+    usuario no debe perder su respuesta porque no se pudo escribir el contexto.
+    """
+    try:
+        payload = json.dumps(final_data, default=str)
+    except (TypeError, ValueError) as exc:
+        logger.error("No se pudo serializar final_data (%s); se guarda vacío.", exc)
+        payload = "{}"
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE lyra_conversations SET final_data = %s WHERE id = %s",
+                    (payload, conversation_id),
+                )
+            conn.commit()
+    except Exception as exc:
+        logger.error("No se pudo persistir el contexto de la conversación: %s", exc)
 
 
 # ─── Messages ────────────────────────────────────────────────────

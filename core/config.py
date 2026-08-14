@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""          # OpenAI directo (sk-... / sk-proj-...). Tambien STT.
     OPENROUTER_API_KEY: str = ""      # OpenRouter (sk-or-...). Credencial distinta a OpenAI.
     OPENAI_MODEL: str = "openai/gpt-4o-mini"
+
+    # ¿Puede Lyra salir a un modelo externo para responder?
+    #
+    # Apagado, el asistente funciona entero con lo que tiene aquí: la capa de
+    # comprensión, el catálogo leído de la base y las respuestas propias. No se
+    # hace ninguna llamada de red para conversar, y por tanto no hay saldo que
+    # se agote ni latencia de terceros. Encendido, el modelo se usa como AYUDA
+    # —redactar una respuesta, resolver una necesidad que el catálogo no
+    # reconoce—, nunca como requisito: si falla, Lyra responde igual.
+    LLM_EXTERNAL_ENABLED: bool = False
     
     # STT Settings (because OpenRouter does not support audio)
     STT_PROVIDER: str = ""  # openai | groq | deepgram (alias global; telefonía usa TELEPHONY_STT_PROVIDER)
