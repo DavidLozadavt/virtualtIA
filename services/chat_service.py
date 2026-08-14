@@ -21,6 +21,7 @@ from orchestrator.memory_manager import (
     update_user_personality,
 )
 from core.logger import setup_logger
+from core.semantic import ConversationState
 
 logger = setup_logger("lyra.services.chat")
 import re
@@ -118,11 +119,18 @@ class ChatService:
                 break
                 
         # FIX 3: Unify intent detection to avoid duplicate logs
+        # El estado semántico viaja dentro de final_data (que ya se persiste por
+        # conversación), así que la comprensión de este turno cuenta con lo que
+        # los turnos anteriores dejaron establecido: qué se mostró, qué está en
+        # foco y qué ranuras de reserva ya se llenaron.
         local_intent = detect_intent(
-            payload.message, 
-            payload.project_id, 
+            payload.message,
+            payload.project_id,
             mentioned_city=payload.active_city,
-            current_context={"last_assistant_msg": last_assistant_msg}
+            current_context={
+                "last_assistant_msg": last_assistant_msg,
+                "semantic_state": final_data.get(ConversationState.STORAGE_KEY),
+            }
         )
         
         messages = build_system_prompt(
@@ -195,10 +203,16 @@ class ChatService:
         latency_ms = int((time.time() - start_time) * 1000)
 
         _fd = agent_data.get("final_data") or {}
+        _llm_failed = bool(_fd.get("llm_error"))
         _last_biz = _fd.get("_last_businesses") or []
         _properties = agent_data.get("properties") or _fd.get("properties") or []
 
-        if _last_biz and not _properties:
+        # Los negocios de una búsqueda anterior sólo acompañan a una respuesta
+        # real. Colgarlos de un mensaje de error deja al usuario mirando fichas
+        # que no tienen nada que ver con lo que acaba de leer.
+        if _llm_failed:
+            _properties = []
+        elif _last_biz and not _properties:
             _properties = [{"businesses": _last_biz}]
 
         audio_url = None
@@ -243,6 +257,8 @@ class ChatService:
             needs_input=(_fd.get("needs_input", False)),
             clarification_question=agent_data.get("clarification_question") or _fd.get("clarification_question"),
             audio_url=audio_url,
+            needs_auth=bool(_fd.get("needs_auth")),
+            pending_reservation=_fd.get("_pending_reservation"),
         )
 
 

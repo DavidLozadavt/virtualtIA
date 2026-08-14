@@ -40,6 +40,7 @@ from tools.shared.utils import (
 
 from orchestrator.tool_registry import ToolRegistry
 from orchestrator.interceptors import manager as interceptor_manager
+from core.llm_engine import LLMUnavailable
 from core.logger import setup_logger
 
 logger = setup_logger("lyra.tool_runner")
@@ -638,6 +639,21 @@ def _resp(project_config: dict, conv_id: str, intent: str, scenario: str = "defa
     return generate_response(conv_id, personality, intent, scenario, variables)
 
 
+def _local_default_reply(user_text: str) -> str:
+    """
+    Qué decir cuando no hay nada preparado y no se sale a un modelo.
+
+    Es el último recurso del modo local: no se sabe qué quiere el usuario, así
+    que se le pregunta en vez de inventarle una intención.
+    """
+    if not (user_text or "").strip():
+        return "¿En qué te puedo ayudar?"
+    return (
+        "No estoy seguro de haberte entendido. ¿Buscas un negocio, quieres ver "
+        "servicios o prefieres agendar una cita?"
+    )
+
+
 async def run_agent_loop(
     engine,
     messages: list[dict],
@@ -694,7 +710,15 @@ async def run_agent_loop(
     # This step handles many queries without calling the LLM.
     if local_intent is None:
         from orchestrator.intent_router import detect_intent
-        intent_result = detect_intent(user_text, project_id=project_id)
+        from core.semantic import ConversationState
+        # Los canales que entran por aquí sin pasar por ChatService (WhatsApp,
+        # voz) también merecen el contexto que la conversación ya estableció.
+        intent_result = detect_intent(
+            user_text,
+            project_id=project_id,
+            mentioned_city=active_city,
+            current_context={"semantic_state": final_data.get(ConversationState.STORAGE_KEY)},
+        )
     else:
         intent_result = local_intent
     intent_name = intent_result.get("intent")
@@ -711,9 +735,23 @@ async def run_agent_loop(
         return {**intercepted, "final_data": final_data}
 
     # 3. LLM REASONING LOOP
-    # We use the tool registry to provide schemas to the LLM.
+    # NOTA: para nexiservice el registry viene vacío —`tools/nexiservice.py` no
+    # declara SCHEMAS—, así que el modelo responde en texto y son los
+    # interceptores quienes ejecutan las capacidades. No se cae aquí a las
+    # herramientas del YAML: están declaradas sin parámetros y sin registrar, de
+    # modo que ofrecérselas al modelo sólo produciría llamadas que fallan.
     tools_schema = tool_registry.get_schemas() if tool_registry else project_config.get("tools", [])
-    
+
+    # Modo local: no se sale a ningún modelo externo. Si algo llegó hasta aquí
+    # sin respuesta, se usa la que dejó preparada el interceptor antes que
+    # colgarse de una API que puede no estar.
+    from core.config import settings
+    if not settings.LLM_EXTERNAL_ENABLED:
+        fallback = final_data.pop("_fallback_reply", None)
+        final_data["reply"] = fallback or _local_default_reply(user_text)
+        logger.info("Modo local: respuesta resuelta sin modelo externo.")
+        return {"final_data": final_data, "reply": final_data["reply"]}
+
     for iteration in range(max_iterations):
         logger.info(f"Agent iteration {iteration + 1}/{max_iterations}")
 
@@ -722,14 +760,38 @@ async def run_agent_loop(
                 result = engine.generate_with_tools(messages, tools_schema)
             else:
                 result = {"type": "text", "content": engine.generate(messages)}
+        except LLMUnavailable as e:
+            # El modelo no respondió. Se le dice al usuario algo humano y, sobre
+            # todo, NO se le entrega el texto del error: acabaría impreso en el
+            # chat y leído en voz alta.
+            logger.error("LLM no disponible (%s): %s", e.status_code, e.reason)
+            # Si el turno era conversacional, hay una respuesta preparada que
+            # sirve perfectamente: el usuario recibe un saludo, no una disculpa.
+            fallback = final_data.pop("_fallback_reply", None)
+            final_data["reply"] = fallback or (
+                "Ahora mismo no puedo responderte con normalidad. "
+                "Dame un momento e inténtalo de nuevo."
+                if e.is_quota else
+                "Tuve un problema técnico al procesar tu mensaje. ¿Lo intentamos otra vez?"
+            )
+            final_data["llm_error"] = True
+            # Los resultados de búsquedas anteriores no acompañan a un error:
+            # mostrar tarjetas de negocios bajo un mensaje de fallo confunde.
+            final_data["properties"] = []
+            final_data["voice_action"] = None
+            final_data["voice_action_payload"] = None
+            return {"final_data": final_data, "reply": final_data["reply"]}
         except Exception as e:
-            logger.error(f"LLM Error: {e}")
+            logger.error("Error inesperado en el bucle del agente: %s", e, exc_info=True)
             final_data["reply"] = "Lo siento, tuve un problema al procesar tu solicitud. ¿Podrías intentarlo de nuevo?"
+            final_data["llm_error"] = True
+            final_data["properties"] = []
             return {"final_data": final_data, "reply": final_data["reply"]}
 
         # Case A: LLM responded with Text
         if result["type"] == "text":
             final_data["reply"] = result["content"]
+            final_data.pop("_fallback_reply", None)
             break
 
         # Case B: LLM requested a Tool Call

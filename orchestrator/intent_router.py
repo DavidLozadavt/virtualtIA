@@ -33,8 +33,61 @@ from tools.shared.utils import (
 )
 
 from core.logger import setup_logger
+from core.semantic import Act, ConversationState, build_understanding
+from core.semantic import temporal as semantic_temporal
+from core.semantic.dialogue import read_answer
+from core.semantic.speech_act import analyze as analyze_speech_act
+from core.semantic.types import Disposition
 
 logger = setup_logger("lyra.intent_router")
+
+
+def _temporal_slots(text: str, mentioned_date: Optional[str]) -> dict:
+    """Fecha y hora ya reconocidas, para que la comprensión decida qué hacer con ellas."""
+    slots = {}
+    if mentioned_date:
+        slots["date"] = mentioned_date
+    time_str = _extract_time(text)
+    if time_str:
+        slots["time"] = time_str
+    return slots
+
+
+def _semantic_result(understanding) -> dict:
+    """
+    Traduce una comprensión a la forma que espera el orquestador.
+
+    `_expects` y `_corrections` viajan DENTRO de `args` a propósito: el bucle
+    del agente sólo le pasa `args` al interceptor, así que un campo colgado del
+    objeto `Understanding` no llegaría a quien tiene que persistirlo.
+    """
+    logger.info(
+        "SEMÁNTICA: acto=%s disposición=%s intent=%s expects=%s | %s",
+        understanding.act, understanding.disposition, understanding.intent,
+        understanding.expects, " ; ".join(understanding.trace),
+    )
+
+    extra = {}
+    if understanding.expects:
+        extra["_expects"] = understanding.expects
+    if understanding.corrections:
+        extra["_corrections"] = understanding.corrections
+
+    if understanding.disposition == Disposition.CLARIFY:
+        return {
+            "intent": "semantic_clarify",
+            "args": {"message": understanding.clarification, **extra},
+            "_understanding": understanding,
+        }
+    if not understanding.intent:
+        # Comprendido, pero se responde mejor con el modelo y el historial
+        # delante que con una plantilla.
+        return {"intent": None, "args": dict(extra), "_understanding": understanding}
+    return {
+        "intent": understanding.intent,
+        "args": {**understanding.args, **extra},
+        "_understanding": understanding,
+    }
 
 def _extract_service_name(text: str) -> Optional[str]:
     """
@@ -102,6 +155,17 @@ def _extract_service_name(text: str) -> Optional[str]:
 def _normalize(text: str) -> str:
     """Thin wrapper — delegates to tools.shared.utils.normalize_text with punctuation stripping."""
     return _normalize_shared(text, strip_punctuation=True)
+
+
+def _extract_time(text: str) -> Optional[str]:
+    """
+    Hora del texto en formato 24h, o None.
+
+    La lectura vive en `core.semantic.temporal`, que es la autoridad única: tres
+    capas leían la hora con reglas distintas y acabaron discrepando. Aquí sólo
+    queda el nombre que el resto del router ya usaba.
+    """
+    return semantic_temporal.read_time(text).value
 
 
 def _extract_city(text: str) -> Optional[str]:
@@ -215,58 +279,14 @@ def _is_spam(text: str) -> bool:
 
 def _extract_date(text: str) -> Optional[str]:
     """
-    Extrae la fecha del texto. Soporta relativos y fechas específicas.
+    Extrae la fecha del texto. Soporta relativos, días de la semana y fechas.
+
+    Delega en `core.semantic.temporal`, que además distingue el adverbio
+    "mañana" (día siguiente) de la franja "de la mañana" (meridiano). Aquí se
+    daban por lo mismo, y una cita pedida "a las 9 de la mañana" se agendaba
+    para el día siguiente sin que nadie lo hubiera pedido.
     """
-    if "manana" in text: return "tomorrow"
-    if "hoy" in text: return "today"
-    
-    # Soporte para "el 30 de abril", "el 5 de mayo", etc.
-    months = {
-        "enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06",
-        "julio": "07", "agosto": "08", "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"
-    }
-    # Ordinales textuales en español
-    _ordinal_to_day = {
-        "primero": 1, "primera": 1, "uno": 1,
-        "segundo": 2, "segunda": 2, "dos": 2,
-        "tercero": 3, "tercera": 3, "tres": 3,
-        "cuarto": 4, "cuarta": 4, "cuatro": 4,
-        "quinto": 5, "quinta": 5, "cinco": 5,
-        "sexto": 6, "sexta": 6, "seis": 6,
-        "septimo": 7, "septima": 7, "siete": 7,
-        "octavo": 8, "octava": 8, "ocho": 8,
-        "noveno": 9, "novena": 9, "nueve": 9,
-        "decimo": 10, "decima": 10, "diez": 10,
-    }
-    
-    # "el primero de mayo", "el tres de junio"
-    ord_match = re.search(r"(?:el\s+)?([a-z]+)\s+de\s+([a-z]+)", text, re.IGNORECASE)
-    if ord_match:
-        day_word = ord_match.group(1).lower()
-        month_name = ord_match.group(2).lower()
-        if day_word in _ordinal_to_day and month_name in months:
-            from datetime import datetime
-            year = datetime.now().year
-            return f"{year}-{months[month_name]}-{_ordinal_to_day[day_word]:02d}"
-
-    date_match = re.search(r"(\d{1,2})\s+de\s+([a-z]+)", text, re.IGNORECASE)
-    if date_match:
-        day = int(date_match.group(1))
-        month_name = date_match.group(2).lower()
-        if month_name in months:
-            from datetime import datetime
-            year = datetime.now().year
-            return f"{year}-{months[month_name]}-{day:02d}"
-            
-    # Solo número: "el 30" (asumimos mes actual)
-    day_match = re.search(r"\bel\s+(\d{1,2})\b", text, re.IGNORECASE)
-    if day_match:
-        from datetime import datetime
-        day = int(day_match.group(1))
-        now = datetime.now()
-        return f"{now.year}-{now.month:02d}-{day:02d}"
-
-    return None
+    return semantic_temporal.read_date(text)
 
 def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] = None, current_context: dict = None) -> dict:
     """
@@ -298,7 +318,14 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     # --- [TIME/DATE DETECTION] ---
     is_time_or_date = mentioned_date is not None or re.search(r"\b\d{1,2}(?::\d{2})?\s*(am|pm|tarde|noche)\b", text, re.IGNORECASE)
 
-    # (Context-aware block moved down for priority or integrated)
+    semantic_analysis = None
+    semantic_state = ConversationState.from_dict(current_context.get("semantic_state"))
+
+    def _act_is(*acts) -> bool:
+        return semantic_analysis is not None and semantic_analysis.act in acts
+
+    def _has_frame(name: str) -> bool:
+        return semantic_analysis is not None and name in semantic_analysis.frames
 
     # --- [FAST PATH] GREETINGS / FAREWELLS (0 TOKENS) ---
     if any(text == kw for kw in _FAREWELL_KEYWORDS):
@@ -308,7 +335,16 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     _is_pure_greeting = any(text == kw for kw in _GREETING_KEYWORDS)
     _is_identity = any(text == kw for kw in _IDENTITY_KEYWORDS)
 
-    if (len(text) <= 3 and text not in ["si", "ok", "no", "dale", "vale", "zoom", "ver", "ir", "voy"]) or _is_pure_greeting:
+    # Un mensaje muy corto sólo es un saludo cuando no hay nada esperándolo. Con
+    # una pregunta abierta ("¿a qué hora?"), ese mismo "9" es la respuesta — y
+    # devolverle un saludo es exactamente lo que hacía que el usuario tuviera
+    # que repetirse.
+    _too_short = (
+        len(text) <= 3
+        and text not in ["si", "ok", "no", "dale", "vale", "zoom", "ver", "ir", "voy"]
+        and not semantic_state.pending_slot
+    )
+    if _too_short or _is_pure_greeting:
         logger.info(f"DETECCION: intent='greeting' (Fast Path) | is_pure={_is_pure_greeting}")
         return {"intent": "greeting", "args": {}}
 
@@ -345,9 +381,12 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     _early_is_am = any(kw in text for kw in ["madrugada", "am"]) and not _early_is_pm
     _early_time_match = re.search(r"(?:a las|las)?\s*(\d{1,2})(?::(\d{2}))?(?:\s+de\s+la)?\s*(am|pm|tarde|noche|manana|madrugada)?", message, re.IGNORECASE)
     _early_date = mentioned_date
-    if _early_time_match and _early_date and project_id == "nexiservice":
+    # Con una ranura abierta manda la lectura dialógica, más abajo: este atajo
+    # toma cualquier cifra del mensaje como la hora, y en "el 30 de abril" se
+    # quedaba con el día — agendando a las "30:00".
+    if _early_time_match and _early_date and project_id == "nexiservice" and not semantic_state.pending_slot:
         _has_appointment_kw = any(kw in text for kw in ["agendar", "reservar", "cita", "turno", "agendame"])
-        if not _has_appointment_kw:
+        if not _has_appointment_kw and 0 <= int(_early_time_match.group(1)) <= 23:
             h = int(_early_time_match.group(1))
             m = _early_time_match.group(2) or "00"
             p = (_early_time_match.group(3) or "").lower()
@@ -366,7 +405,9 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         return {"intent": "zoom_out", "args": {}}
     if any(kw in text for kw in _ZOOM_IN_KEYWORDS):
         # SI el texto dice algo como "negocio mas cercano" o "la mas cercana", priorizamos busqueda de proximidad
-        if any(kw in text for kw in ["cerca", "cercan", "cercano", "mas cerca"]):
+        # Con límite de palabra: "acercar" contiene "cerca" como subcadena y
+        # acababa desviando el zoom hacia una búsqueda por proximidad.
+        if re.search(r"\b(?:cerca|cercan\w*|mas cerca)\b", text):
             cat_match = next((cat for cat, kws in _CATEGORY_KEYWORDS.items() if any(k in text for k in kws)), "negocios")
             logger.info(f"DETECCION: intent='search_businesses' (singular mas cercano) | cat={cat_match} | city={mentioned_city}")
             return {"intent": "search_businesses", "args": {"category": cat_match, "near_me": True, "city": mentioned_city}}
@@ -417,10 +458,96 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         logger.info("DETECCION: intent='compare_businesses'")
         return {"intent": "compare_businesses", "args": {}}
 
+    # Mostrar u ordenar el mapa. Van con el resto de órdenes de pantalla, antes
+    # de la comprensión: "ver mapa" es un botón dicho en voz alta, no una
+    # consulta sobre el catálogo.
+    if any(kw in text for kw in _MAP_FIT_KEYWORDS):
+        logger.info("DETECCION: intent='fit_all_businesses'")
+        return {"intent": "fit_all_businesses", "args": {}}
+
+    if any(kw in text for kw in _MAP_SHOW_KEYWORDS):
+        _has_category = any(any(kw in text for kw in kws) for kws in _CATEGORY_KEYWORDS.values())
+        if not _has_category and not re.search(r"\ben\s+el\s+mapa\b", text):
+            logger.info("DETECCION: intent='show_map'")
+            return {"intent": "show_map", "args": {}}
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PRIORIDAD: EL MENSAJE RESPONDE A LO QUE LYRA PREGUNTÓ
+    # ═══════════════════════════════════════════════════════════════════════
+    # Va justo después de las órdenes de pantalla —"zoom", "ver mapa" son
+    # botones dichos en voz alta y mandan siempre— y antes que cualquier regla
+    # de palabras clave.
+    #
+    # Mientras haya una pregunta abierta, el turno siguiente le pertenece: ésa
+    # es la evidencia contextual más fuerte que existe en un diálogo. Sin este
+    # paso, "9 am" se analizaba como si nadie hubiera preguntado nada, no se
+    # anclaba a ningún negocio del catálogo y terminaba en conversación
+    # genérica — con la reserva a medias y el usuario repitiendo el dato.
+    #
+    # El lector se aparta solo si el mensaje no trae un valor del tipo
+    # esperado, así que un cambio de tema legítimo sigue su camino normal.
+    if project_id == "nexiservice" and semantic_state.pending_slot:
+        semantic_analysis = analyze_speech_act(message)
+        _answer = read_answer(
+            message, semantic_analysis, semantic_state,
+            _temporal_slots(text, mentioned_date),
+        )
+        if _answer is not None:
+            logger.info(
+                "DIÁLOGO: '%s' responde a la ranura '%s'",
+                message[:60], semantic_state.pending_slot,
+            )
+            return _semantic_result(_answer)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # COMPRENSIÓN SEMÁNTICA (NexiService)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Se sitúa DESPUÉS de los comandos técnicos (zoom, mapa, GPS): ésos son
+    # órdenes a la interfaz, no actos de habla sobre el catálogo, y conviene que
+    # sigan resolviéndose de forma literal y sin coste.
+    #
+    # A partir de aquí manda la comprensión.
+    #
+    # El acto de habla se calcula una sola vez, y se consulta en dos momentos:
+    # aquí, para atajar lo que NO es una petición al catálogo, y más abajo como
+    # decisión general. Las reglas deterministas que quedan detrás buscan
+    # palabras sueltas: no distinguen función, y por eso "tienen" disparaba el
+    # catálogo de servicios lo mismo en "¿qué servicios tiene X?" que en "¿qué
+    # negocios tienen?". El acto de habla las arbitra.
+    if project_id == "nexiservice":
+        semantic_analysis = analyze_speech_act(message)
+        _is_social = semantic_analysis.act in Act.CONVERSATIONAL
+        _is_noise = semantic_analysis.act == Act.UNPARSEABLE
+        if _is_social or _is_noise:
+            return _semantic_result(build_understanding(
+                message=message,
+                analysis=semantic_analysis,
+                state=semantic_state,
+                mentioned_city=mentioned_city,
+                temporal=_temporal_slots(text, mentioned_date),
+            ))
+
+    _is_discovery = _act_is(*Act.DISCOVERY)
+
 
     # --- [CONTEXT-AWARE] FAST PATHS FOR CONVERSATIONAL BOOKING FLOW (PRIORITY) ---
     # We enter these if we are in a booking flow and the input is short.
-    if project_id == "nexiservice" and len(text.split()) <= 5 and not is_time_or_date:
+    #
+    # Guarda: estos atajos toman el mensaje ENTERO como el dato pendiente (un
+    # servicio, un nombre). Eso vale para "corte de cabello", pero no para "el
+    # primero" ni "quiénes trabajan ahí": ahí el usuario está eligiendo o
+    # preguntando, y tratarlo como texto literal buscaba un servicio llamado "el
+    # primero". Cuando la comprensión ve una selección o una pregunta, manda ella.
+    _is_selection_or_question = (
+        _act_is(Act.REFERENCE, Act.PERSON_QUERY, Act.ATTRIBUTE)
+        or (semantic_analysis is not None and semantic_analysis.ordinal is not None)
+    )
+    if (
+        project_id == "nexiservice"
+        and len(text.split()) <= 5
+        and not is_time_or_date
+        and not _is_selection_or_question
+    ):
         asking_time = any(kw in last_assistant_msg for kw in ["hora", "cuándo", "cuando", "momento", "tiempo"])
         asking_prof = any(kw in last_assistant_msg for kw in ["profesional", "quién", "quien", "atender"])
         
@@ -441,6 +568,34 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
              logger.info(f"DETECCION: intent='request_appointment' (vía context: servicio) -> '{text}'")
              return {"intent": "request_appointment", "args": {"service_name": text}}
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # DECISIÓN PRINCIPAL: LA COMPRENSIÓN VA PRIMERO
+    # ═══════════════════════════════════════════════════════════════════════
+    # Todo lo que sigue son reglas de palabras clave. Cada una supone que su
+    # palabra decide por el mensaje entero, y ese supuesto falla en cuanto la
+    # persona habla con naturalidad: "En Consultorio Médico Vida Sana" contiene
+    # "médico" y acababa devolviendo la lista de la categoría en vez de ese
+    # negocio; "hospital" dentro de una petición de cita hacía lo mismo.
+    #
+    # Por eso la comprensión decide primero. Sólo cuando no llega a una lectura
+    # clara (CLARIFY) se deja pasar a las reglas de abajo, que siguen cubriendo
+    # lo suyo. Si tampoco aciertan, al final se devuelve la aclaración.
+    _semantic_fallback = None
+    if project_id == "nexiservice":
+        if semantic_analysis is None:
+            semantic_analysis = analyze_speech_act(message)
+        _understanding = build_understanding(
+            message=message,
+            analysis=semantic_analysis,
+            state=semantic_state,
+            mentioned_city=mentioned_city,
+            temporal=_temporal_slots(text, mentioned_date),
+        )
+        if _understanding.disposition != Disposition.CLARIFY:
+            return _semantic_result(_understanding)
+        _semantic_fallback = _understanding
+        logger.info("SEMÁNTICA: sin lectura clara → se consultan las reglas específicas")
+
     # --- [NORMAL] BUSINESS NAVIGATION ---
     # Detectar "ver perfil de X" o "ir al negocio X"
     # Skip if we are likely in a booking flow (to avoid hijacking service names)
@@ -458,21 +613,11 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             logger.info(f"DETECCION: intent='navigate_to_company' -> '{name}' | city={mentioned_city}")
             return {"intent": "navigate_to_company", "args": {"business_name": name, "city": mentioned_city}}
 
-    # --- Fallback: Nombre de negocio directo (ej: 'Parrilla y Carbon' o 'Parrilla y Carbon Popayan') ---
-    if project_id == "nexiservice":
-        # Si hay ciudad, la removemos para el nombre del negocio
-        clean_text = text
-        if mentioned_city:
-            clean_text = re.sub(rf"\b{re.escape(mentioned_city)}\b", "", text, flags=re.IGNORECASE).strip()
-            
-        # Si queda algo sustancial que no parece spam ni categoría pura
-        # GUARD: Si estamos en flujo de reserva, NO detectamos navegación por nombre directo
-        # para evitar que nombres de servicios (ej: 'pechuga a la plancha') sean tomados como negocios.
-        if len(clean_text) >= 4 and not _is_spam(clean_text) and not is_in_booking_flow:
-            is_cat = any(any(kw in clean_text.lower() for kw in kws) for kws in _CATEGORY_KEYWORDS.values())
-            if not is_cat:
-                logger.info(f"DETECCION: intent='navigate_to_company' (direct match) -> '{clean_text}' | city={mentioned_city}")
-                return {"intent": "navigate_to_company", "args": {"business_name": clean_text, "city": mentioned_city}}
+    # NOTA: aquí vivía un "si el texto no es una categoría conocida, entonces es
+    # el nombre de una empresa". Cualquier frase de cuatro caracteres acababa en
+    # navigate_to_company y de ahí en un LIKE con la oración entera. Se eliminó:
+    # la identificación de nombres propios la hace ahora el anclaje al catálogo,
+    # que sólo afirma que algo es una empresa si esa empresa existe.
 
     # --- NUEVO: REVIEWS ---
     if any(kw in text for kw in _REVIEWS_KEYWORDS):
@@ -843,13 +988,22 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     # --- NUEVO: BÚSQUEDA POR CATEGORÍA (Prioridad Crítica para evitar consumo de tokens) ---
     # Si detectamos una categoría canónica, es prioritario sobre servicios o regex.
     # Ej: "que barberias tienes" -> search_businesses(cat=barberia)
-    for cat, kws in _CATEGORY_KEYWORDS.items():
-        if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in kws):
-            logger.info(f"DETECCION: intent='search_businesses' (vía categoría canónica) | cat={cat} | city={mentioned_city}")
-            return {
-                "intent": "search_businesses",
-                "args": {"category": cat, "city": mentioned_city}
-            }
+    # Guarda: una sola palabra de categoría no puede decidir por todo el mensaje.
+    # "quisiera hacer una reserva para un hospital con una profesional" contiene
+    # "hospital", pero lo que pide es una cita; devolver la lista de centros
+    # médicos y nada más deja la petición sin atender. Cuando el mensaje pide
+    # cita, elige o pregunta por alguien, decide la comprensión.
+    _category_block_applies = not _act_is(
+        Act.BOOKING, Act.PERSON_QUERY, Act.REFERENCE, Act.ATTRIBUTE
+    )
+    if _category_block_applies:
+        for cat, kws in _CATEGORY_KEYWORDS.items():
+            if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in kws):
+                logger.info(f"DETECCION: intent='search_businesses' (vía categoría canónica) | cat={cat} | city={mentioned_city}")
+                return {
+                    "intent": "search_businesses",
+                    "args": {"category": cat, "city": mentioned_city}
+                }
             
     # Búsqueda difusa para atrapar typos (ej. "barbebrias" -> "barberias")
     words = text.split()
@@ -860,7 +1014,7 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     
     all_kws = [kw for kw in all_kws if len(kw) > 4]
     
-    for word in words:
+    for word in words if _category_block_applies else []:
         if len(word) > 4:
             matches = difflib.get_close_matches(word, all_kws, n=1, cutoff=0.85)
             if matches:
@@ -880,7 +1034,13 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     # --- NUEVO: SERVICIOS Y PRECIOS ---
     # Usamos límites de palabra para evitar que "tienes" en "que barberias tienes" coincida 
     # si ya fue procesado como categoría.
-    if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in _SERVICES_KEYWORDS):
+    # Guarda: "tienen"/"ofrecen" sólo piden un catálogo si el mensaje habla de
+    # lo que alguien OFRECE. En "¿qué negocios tienen?" ese mismo verbo pregunta
+    # por el directorio, y devolver un catálogo sería responder otra cosa.
+    _services_block_applies = (
+        semantic_analysis is None or _has_frame("offering") or _act_is(Act.ATTRIBUTE)
+    )
+    if _services_block_applies and any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in _SERVICES_KEYWORDS):
         biz_match = re.search(r"(?:servicio|servicios|servico|servicos|serviocio|serviocios|precio|precios|catalogo|cuanto cobran|que ofrecen|que venden|que ofrece|que tiene|que tienen|ofrece|ofrecen|tiene|tienen)\s+(?:\bde\b|\ben\b|sobre|del negocio|de la empresa|del local|\bdel\b)?\s*(.+)", text, re.IGNORECASE)
         biz_name = biz_match.group(1).strip() if biz_match else None
         
@@ -1028,7 +1188,10 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     # --- 3. NAVEGACIÓN DIRECTA ---
     # Detectar navegación a admin (ej: llevame a inventario)
     nav_admin_pattern = r"\b(lleva|vamos|llevame|llévame|les?go|les'?t?\s*go|let'?s\s*go|navega|ir a|ir al|ir a la|abre|abrir|ver|dirigeme|redirige|redirigueme|entrar)\b\s+(.*)"
-    admin_nav_match = re.search(nav_admin_pattern, text)
+    # Guarda: pedir una cita no es navegar al módulo de agenda del panel. Los
+    # destinos de administración comparten palabras con el habla del cliente
+    # ("cita", "agenda", "catálogo"), y sin este filtro se las quedaban.
+    admin_nav_match = None if _act_is(Act.BOOKING) else re.search(nav_admin_pattern, text)
     if admin_nav_match:
         target_text = admin_nav_match.group(2).strip()
         for url, kws in _ADMIN_NAV_TARGETS.items():
@@ -1102,7 +1265,15 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         "que hay disponibles", "que tienes disponibles", "que opciones tienes",
         "las disponibles", "los disponibles", "que hay", "cuales son"
     ]
-    if any(re.search(r"\b" + kw + r"\b", text) for kw in _conversation_continuations):
+    # Guarda: ni un descubrimiento ni una selección son "continuación". "¿Qué
+    # hay por aquí?" abre una búsqueda, y "ese me sirve" elige algo mostrado;
+    # ambos acababan en `confirm_navigation`, un intent que ya nadie atiende, y
+    # el usuario se quedaba sin respuesta. Cuando la comprensión reconoce el
+    # acto, decide ella.
+    _handled_by_comprehension = _is_discovery or _act_is(
+        Act.REFERENCE, Act.ATTRIBUTE, Act.PERSON_QUERY, Act.BOOKING
+    )
+    if not _handled_by_comprehension and any(re.search(r"\b" + kw + r"\b", text) for kw in _conversation_continuations):
         # Si también incluye palabras de navegación, confirmar
         if any(v in text for v in ["ver", "ir", "lleva", "muestra", "mostrar", "quiero", "vamos", "visitar", "abrir"]):
             logger.info("DETECCION: intent='confirm_navigation' (continuación de contexto navegable)")
@@ -1128,7 +1299,9 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             }
             
     # Caso directo para inventario si dice solo "inventario", "pos", etc.
-    if len(text.split()) <= 3:
+    # Misma guarda: "quiero una cita" son tres palabras y contiene "cita", pero
+    # es una petición del cliente, no un atajo al módulo de agenda del panel.
+    if len(text.split()) <= 3 and not _act_is(Act.BOOKING):
         for url, kws in _ADMIN_NAV_TARGETS.items():
             if any(kw == text or kw in text for kw in kws):
                 return {
@@ -1142,7 +1315,10 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         "sacar una cita", "quiero agendar", "necesito agendar", "hacer reserva",
         "hacer cita", "pedir cita", "pedir turno", "agendar una cita"
     ]
-    if any(comp in text for comp in _APPOINTMENT_COMPOSITE):
+    # Guarda: reconocer "hacer una reserva" y devolver una cita vacía descarta el
+    # resto del mensaje. Si la comprensión está disponible, ella extrae además
+    # dónde, con quién y cuándo; este atajo queda para los demás proyectos.
+    if semantic_analysis is None and any(comp in text for comp in _APPOINTMENT_COMPOSITE):
         logger.info("DETECCION: intent='request_appointment' (vía composite natural)")
         return {"intent": "request_appointment", "args": {"business_name": None, "time": None, "service_name": None, "date": mentioned_date, "professional_name": None}}
 
@@ -1155,6 +1331,22 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
                 "intent": "get_general_info",
                 "args": {"topic": text}
             }
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # COMPRENSIÓN SEMÁNTICA — RESOLUCIÓN ABIERTA (NexiService)
+    # ═══════════════════════════════════════════════════════════════════════
+    # Punto único de decisión para todo lo que las reglas deterministas de
+    # arriba no reconocieron. Sustituye a los cuatro "catch-all" que asumían un
+    # nombre de empresa: aquí la frase sólo se convierte en consulta si su
+    # contenido se ancla a algo que existe de verdad en el catálogo.
+    #
+    # Ninguna regla específica reconoció el mensaje. Se devuelve la aclaración
+    # que la comprensión había preparado, salvo dentro de un flujo de reserva:
+    # ahí un texto suelto suele ser la respuesta a una pregunta del asistente
+    # (un servicio, una hora, un nombre) y lo resuelve el interceptor con el
+    # estado del proceso a la vista.
+    if _semantic_fallback is not None and not is_in_booking_flow:
+        return _semantic_result(_semantic_fallback)
 
     # --- 6. EXTRACCIÓN POR PATRÓN (SELECT PATTERN) ---
     select_pattern = r"\b(e[lnñ]\s+de|ver\s+a|ver\s+el|ver\s+la|quien\s+es|que\s+es|busca\s+a|muestrame\s+a|donde\s+esta|donde\s+queda|info\s+de|info\s+sobre|informacion\s+de|necesito|quiero|busco)\b\s+(.+)"
@@ -1228,40 +1420,13 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             logger.info(f"DETECCION: intent='search_businesses' (regex-match) | cat={final_cat} | city={city_candidate}")
             return {"intent": "search_businesses", "args": {"category": final_cat, "city": city_candidate}}
 
-    # --- NAVEGACIÓN Y BÚSQUEDA (ESPECÍFICO DE NEXISERVICE) ---
-    if project_id == "nexiservice":
-        # Catch-all para "en [Negocio]" (ej: "en fs", "en barberia vip")
-        if re.search(r"^en\s+(.+)$", text) and len(text.split()) <= 4:
-            biz_name = re.search(r"^en\s+(.+)$", text).group(1).strip()
-            # Si no es una ciudad, asumimos negocio
-            if not _extract_city(biz_name):
-                 logger.info(f"DETECCION: intent='navigate_to_company' (vía 'en X') -> '{biz_name}' | city={mentioned_city}")
-                 return {"intent": "navigate_to_company", "args": {"business_name": biz_name, "city": mentioned_city}}
-
-        # Catch-all para búsquedas directas por nombre de negocio (ej: "fogon criollo norte")
-        _exclude_words = _HELP_KEYWORDS + _GREETING_KEYWORDS + _SERVICES_KEYWORDS + ["ver", "buscar", "mostrar", "ir", "lleva"]
-        has_exclude = any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in _exclude_words)
-        if len(text.split()) <= 6 and not has_exclude:
-            logger.info(f"DETECCION: intent='navigate_to_company' (vía nombre directo) -> '{text}'")
-            return {"intent": "navigate_to_company", "args": {"business_name": text, "city": mentioned_city}}
-
-        if re.search(dir_pattern, text):
-            logger.info(f"DETECCION: intent='search_businesses' (genérica/directorio) | city={mentioned_city}")
-            return {"intent": "search_businesses", "args": {"category": "", "city": mentioned_city}}
-
-        # --- 8. ÚLTIMO RECURSO: NOMBRE DIRECTO (NEXISERVICE) ---
-        # Si el texto es muy corto (1-2 palabras) y no es una confirmación ni saludo,
-        # probablemente sea un nombre de negocio que el usuario escribió solo.
-        # Excluimos palabras reservadas.
-        if len(text.split()) <= 2:
-            _stop_words = {"si", "no", "ok", "vale", "dale", "ver", "ir", "mas", "menos", "mapa", "hola", "chao", "bye", "gracias", "por", "fa", "esta", "ese", "eso", "esa", "este", "uno", "dos", "tres"}
-            # Excluir si parece una hora
-            is_time = re.search(r'\d{1,2}(?::\d{2})?\s*(?:am|pm)?', text, re.IGNORECASE)
-            # Excluir si es una ciudad conocida
-            is_city = _extract_city(text)
-            
-            if text not in _stop_words and any(c.isalpha() for c in text) and not is_time and not is_city:
-                logger.info(f"DETECCION: intent='navigate_to_company' (nombre directo) -> '{text}' | city={mentioned_city}")
-                return {"intent": "navigate_to_company", "args": {"business_name": text, "city": mentioned_city}}
+    # --- BÚSQUEDA GENÉRICA DE DIRECTORIO (NEXISERVICE) ---
+    # Sólo se alcanza durante un flujo de reserva, donde la compuerta semántica
+    # cede el paso al interceptor. Los tres "catch-all" que había aquí —"en X",
+    # texto corto = nombre de empresa, y una o dos palabras = nombre de empresa—
+    # se eliminaron: adivinaban una entidad sin comprobar que existiera.
+    if project_id == "nexiservice" and re.search(dir_pattern, text):
+        logger.info(f"DETECCION: intent='search_businesses' (genérica/directorio) | city={mentioned_city}")
+        return {"intent": "search_businesses", "args": {"category": "", "city": mentioned_city}}
 
     return {"intent": None}

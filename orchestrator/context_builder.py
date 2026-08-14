@@ -377,12 +377,17 @@ def build_system_prompt(
     # Detección de respuesta trivial (Lite)
     # IMPORTANTE: Si es una intención de NexiService (reseñas, navegación, etc.), NO es trivial.
     protected_intents = {
-        "confirm_navigation", "confirm_general", "get_business_reviews", "navigate_to_company", 
+        "confirm_navigation", "confirm_general", "get_business_reviews", "navigate_to_company",
         "get_business_services", "get_business_availability", "get_business_web",
-        "get_business_mission_vision", "request_appointment"
+        "get_business_mission_vision", "request_appointment",
+        "get_business_professionals", "search_businesses", "semantic_clarify",
+        # Conversación: también necesita el hilo. Un "gracias" o un "¿y eso cómo
+        # funciona?" sólo se responden bien sabiendo de qué se venía hablando;
+        # sin historial, el asistente vuelve a presentarse en cada turno.
+        "greeting", "conversation", "capabilities", "identity",
     }
     is_trivial = _is_trivial_input(user_message)
-    
+
     if intent_name in protected_intents:
         is_trivial = False # Forzamos historial para mantener contexto de negocio
     

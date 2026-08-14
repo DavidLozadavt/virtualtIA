@@ -36,4 +36,16 @@ class ChatResponse(BaseModel):
     needs_input: bool = Field(default=False, description="Whether the UI should show an input field (e.g. for name)")
     clarification_question: Optional[str] = Field(default=None, description="Question to ask the user")
     audio_url: Optional[str] = Field(default=None, description="URL to the generated TTS audio file")
+    needs_auth: bool = Field(
+        default=False,
+        description=(
+            "La acción quedó a la espera de que el usuario inicie sesión o se "
+            "registre. El frontend debe abrir el acceso; lo acordado queda "
+            "guardado y se completa solo cuando vuelva autenticado."
+        ),
+    )
+    pending_reservation: Optional[dict] = Field(
+        default=None,
+        description="Reserva acordada que espera autenticación (negocio, servicio, día y hora).",
+    )
 

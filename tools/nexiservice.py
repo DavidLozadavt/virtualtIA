@@ -242,6 +242,31 @@ def _format_logo(path):
     return f"{base}{clean_path}"
 
 
+#: Una consulta con más de esto ya no nombra una cosa: es una oración. Ningún
+#: negocio ni servicio del catálogo se llama con tantas palabras de contenido.
+_MAX_QUERY_WORDS = 4
+
+
+def _looks_like_sentence(query: str) -> bool:
+    """
+    True si la consulta parece una frase conversacional y no el nombre de algo.
+
+    Es la última barrera contra el defecto que originó este trabajo: que
+    "que me puedes ofrecer" llegara a la base como `%que%me%puedes%ofrecer%`.
+    La comprensión semántica ya debería impedirlo antes, pero la herramienta es
+    pública y cualquier ruta (LLM incluido) puede invocarla.
+    """
+    words = [w for w in (query or "").split() if w]
+    if len(words) > _MAX_QUERY_WORDS:
+        return True
+    # Un verbo conjugado en 1ª o 2ª persona indica que esto es habla, no un
+    # nombre. Se comprueba con la morfología, no con una lista de frases.
+    from core.semantic.lexicon import FUNCTION_STEMS
+    from core.semantic.morphology import phonetic_stem
+
+    return any(phonetic_stem(w) in FUNCTION_STEMS for w in words)
+
+
 async def search_businesses(
     category: str = "",
     near_me: bool = False,
@@ -249,11 +274,16 @@ async def search_businesses(
     user_lng: float = None,
     city: str = None,
     active_city: str = None,
+    grounded: bool = False,
     **kwargs,
 ) -> dict:
     """
     Busca negocios en la base de datos real por TÍTULO (razonSocial) y CATEGORÍA asignada.
     Soporta priorización geográfica: mención explícita > ubicación GPS > ciudad activa.
+
+    `grounded=True` declara que `category` ya proviene del catálogo (lo garantiza
+    la capa de comprensión). Sin esa garantía, una consulta que parece una frase
+    hablada se rechaza en vez de convertirse en un LIKE literal.
     """
     from core.database import get_connection
 
@@ -261,6 +291,20 @@ async def search_businesses(
 
     # --- LIMPIEZA AGRESIVA DE LA CONSULTA ---
     query_norm = _clean_search_query(category or "")
+
+    # --- GUARDA: la consulta debe nombrar algo, no ser una frase ---
+    if query_norm and not grounded and _looks_like_sentence(query_norm):
+        logger.warning(
+            "search_businesses rechazó una consulta conversacional: %r", category
+        )
+        return {
+            "success": False,
+            "unresolved_query": True,
+            "message": (
+                "No logré identificar qué negocio o servicio necesitas. "
+                "¿Me lo puedes decir con otras palabras?"
+            ),
+        }
 
     # CASE: Búsqueda Global (si el usuario pregunta "¿qué hay?" o "lista de empresas")
     is_global_search = not query_norm or query_norm in {
@@ -1076,7 +1120,9 @@ async def get_business_availability(
                 busy_slots = []
                 for r in rows:
                     h_init = str(r["horaInicial"])[:5]
-                    h_end = str(r["horaFinal"])[:5]
+                    # La hora de fin puede venir vacía; sin esta comprobación se
+                    # imprimía literalmente "07:00 - None" en la respuesta.
+                    h_end = str(r["horaFinal"])[:5] if r["horaFinal"] else None
                     f_init = str(r["fechaInicial"])
 
                     label = (
@@ -1317,6 +1363,199 @@ async def get_service_professionals(service_id: int) -> list:
     except Exception as e:
         logger.error(f"Error en get_service_professionals: {e}")
         return []
+
+
+async def find_businesses_offering(service_term: str, city: str = None, **kwargs) -> dict:
+    """
+    Negocios que prestan un servicio concreto.
+
+    `search_businesses` mira el nombre y la categoría de la empresa, así que una
+    necesidad que se expresa por el servicio ("alguna medicina", "un masaje")
+    no encontraba nada aunque hubiera negocios prestándolo. Esta consulta cierra
+    ese hueco entrando por la tabla de servicios.
+
+    El término debe venir del catálogo (lo garantiza la capa de comprensión);
+    aquí nunca llega una frase cruda del usuario.
+    """
+    from core.database import get_connection
+
+    term = _normalize(service_term or "").strip()
+    if not term:
+        return {"success": False, "message": "Necesito saber qué servicio buscas."}
+
+    like = f"%{term.replace(' ', '%')}%"
+
+    # Mismo criterio geográfico que search_businesses: una caja alrededor de la
+    # ciudad. En Popayán, que es la ciudad raíz, los negocios sin coordenadas se
+    # consideran locales en lugar de desaparecer.
+    city_filter = ""
+    resolved_city = city or "Popayan"
+    try:
+        from services.geo import resolve_city_coords_async
+
+        c_lat, c_lng, official = await resolve_city_coords_async(resolved_city)
+    except Exception:
+        c_lat, c_lng, official = None, None, resolved_city
+
+    if c_lat and c_lng:
+        is_home = _normalize(resolved_city) == "popayan"
+        box = (
+            f"e.latitud BETWEEN {c_lat - 0.1} AND {c_lat + 0.1} "
+            f"AND e.longitud BETWEEN {c_lng - 0.1} AND {c_lng + 0.1}"
+        )
+        city_filter = (
+            f"AND (({box}) OR e.latitud IS NULL OR e.longitud IS NULL)"
+            if is_home else f"AND ({box})"
+        )
+
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT e.id, e.razonSocial, e.latitud, e.longitud, e.direccion,
+                           e.rutaLogo, e.facebookUrl, e.instagramUrl, e.tiktokUrl,
+                           e.whatsappNumber,
+                           COALESCE(MAX(ce.nombre), 'Negocio') AS categoria,
+                           GROUP_CONCAT(DISTINCT s.nombre SEPARATOR ', ') AS servicios
+                    FROM servicios s
+                    JOIN empresa e ON s.idCompany = e.id
+                    LEFT JOIN categoriaempresa ce ON e.idCategoriaEmpresa = ce.id
+                    LEFT JOIN categoriaservicios cs ON s.idCategoriaServicio = cs.id
+                    WHERE s.idEstado = 1
+                      AND e.idEstado = 1 AND e.publicado = 1
+                      AND (LOWER(s.nombre) LIKE %s OR LOWER(cs.nombre) LIKE %s)
+                      {city_filter}
+                    GROUP BY e.id, e.razonSocial, e.latitud, e.longitud, e.direccion,
+                             e.rutaLogo, e.facebookUrl, e.instagramUrl, e.tiktokUrl,
+                             e.whatsappNumber
+                    LIMIT 20
+                    """,
+                    (like, like),
+                )
+                rows = cur.fetchall() or []
+
+        businesses = [
+            {
+                "id": r["id"],
+                "name": r["razonSocial"] or f"Negocio #{r['id']}",
+                "razonSocial": r["razonSocial"],
+                "category": r["categoria"],
+                "lat": float(r["latitud"]) if r["latitud"] else None,
+                "lng": float(r["longitud"]) if r["longitud"] else None,
+                "address": r["direccion"],
+                "logo": _format_logo(r["rutaLogo"]),
+                "facebook": r["facebookUrl"],
+                "instagram": r["instagramUrl"],
+                "tiktok": r["tiktokUrl"],
+                "whatsapp": r["whatsappNumber"],
+                "matched_services": r["servicios"],
+            }
+            for r in rows
+        ]
+
+        return {
+            "success": True,
+            "count": len(businesses),
+            "businesses": businesses,
+            "category": service_term,
+            "city": official or resolved_city,
+            "matched_by": "service",
+        }
+    except Exception as e:
+        logger.error(f"Error en find_businesses_offering: {e}")
+        return {
+            "success": False,
+            "message": "Tuve un problema al consultar los servicios.",
+        }
+
+
+def _format_slot(slot: dict) -> str:
+    """
+    Un tramo ocupado, dicho como lo diría una persona.
+
+    Si no consta la hora de fin —que pasa— se menciona sólo la de inicio en vez
+    de escribir "07:00 - None", que es lo que salía antes.
+    """
+    start, end = slot.get("start"), slot.get("end")
+    if start and end and start != end:
+        return f"de {start} a {end}"
+    valor = str(start or end or "").strip()
+    return f"a las {valor}" if valor else ""
+
+
+def _natural_list(items: list) -> str:
+    """
+    Enumera como se enumera al hablar: "a, b y c".
+
+    Con comas hasta el final quedaba "hoy de 07:00, 07:00 a 07:30, 10:00", que
+    no se entiende ni leído en voz alta.
+    """
+    limpios = [str(i).strip() for i in items if str(i).strip()]
+    if not limpios:
+        return ""
+    if len(limpios) == 1:
+        return limpios[0]
+    return ", ".join(limpios[:-1]) + " y " + limpios[-1]
+
+
+async def get_business_professionals(business_id: int) -> dict:
+    """
+    Lista el equipo que presta servicios en un negocio.
+
+    Existía la consulta por servicio (`get_service_professionals`), pero no una
+    por negocio, y el usuario suele preguntar "¿quiénes trabajan ahí?" antes de
+    haber elegido servicio.
+    """
+    from core.database import get_connection
+
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT razonSocial FROM empresa WHERE id = %s", (business_id,)
+                )
+                biz = cur.fetchone()
+                if not biz:
+                    return {
+                        "success": False,
+                        "message": "No encontré ese negocio.",
+                    }
+
+                cur.execute(
+                    """
+                    SELECT DISTINCT t.id, t.nombre, p.perfil
+                    FROM responsableservicio rs
+                    JOIN tercero t ON rs.idPersona = t.id
+                    LEFT JOIN persona p ON t.id = p.id
+                    JOIN prestador_servicios ps ON ps.responsable_servicio_id = rs.id
+                    JOIN servicios s ON ps.servicio_id = s.id
+                    WHERE s.idCompany = %s AND ps.estado = 'activo'
+                    ORDER BY t.nombre ASC
+                    """,
+                    (business_id,),
+                )
+                rows = cur.fetchall() or []
+
+                return {
+                    "success": True,
+                    "business_id": business_id,
+                    "business_name": biz["razonSocial"],
+                    "professionals": [
+                        {
+                            "id": r["id"],
+                            "name": r["nombre"],
+                            "perfil": r.get("perfil"),
+                        }
+                        for r in rows
+                    ],
+                }
+    except Exception as e:
+        logger.error(f"Error en get_business_professionals: {e}")
+        return {
+            "success": False,
+            "message": "Ocurrió un error al consultar el equipo del negocio.",
+        }
 
 
 async def get_professional_info(
@@ -1644,6 +1883,7 @@ async def request_appointment(
     if not target_id:
         return {
             "success": False,
+            "asking": "business",
             "message": "¿En qué negocio te gustaría agendar tu cita?",
         }
 
@@ -1652,10 +1892,15 @@ async def request_appointment(
         return {
             "success": False,
             "needs_input": True,
+            "asking": "date",
+            # La hora viaja en su propio marcador `[HORA:…]`. Suelta al final
+            # ("Hora: 08:30") el usuario la veía impresa, y metida dentro del
+            # texto del marcador de confirmación dejaba de ser reconocible para
+            # el limpiador, que sólo retira etiquetas en mayúsculas.
             "message": (
-                f"¡Excelente! Tengo disponibilidad en **{real_name}** para las **{time}**. "
-                "¿Qué día te gustaría agendar tu cita? (ej: mañana, el viernes, 30 de abril)\n\n"
-                f"[BIZ:{target_id}] [CONFIRMACIÓN NECESARIA] Hora: {time}"
+                f"Perfecto, a las **{time}** hay espacio en **{real_name}**. "
+                "¿Para qué día lo dejamos? Puedes decirme *hoy*, *mañana* o una fecha.\n\n"
+                f"[BIZ:{target_id}] [CONFIRMACIÓN NECESARIA] [HORA:{time}]"
             ),
             "reservation_name": reservation_name,  # ← parámetro que ya llega a la función
         }
@@ -1697,14 +1942,15 @@ async def request_appointment(
                     "service_name": srv_data["nombre"],
                     "time": time,
                     "date": date,
+                    "asking": "professional_name",
                     "professionals": [p["nombre"] for p in professionals],
                     "message": (
                         f"Para el servicio de **{srv_data['nombre']}** en **{real_name}** "
                         f"({date_label} a las **{time}**), ¿con quién te gustaría agendar?\n\n"
                         + "\n".join(prof_items)
                         + "\n\n¿Con quién prefieres, o te asigno a cualquiera disponible?"
-                        f"\n\n[BIZ:{target_id}] [CONFIRMACIÓN NECESARIA] Reserva: **{srv_data['nombre']}** "
-                        f"Hora solicitada: {time}"
+                        f"\n\n[BIZ:{target_id}] [CONFIRMACIÓN NECESARIA] "
+                        f"[SERVICIO:{srv_data['nombre']}] [HORA:{time}]"
                     ),
                 }
 
@@ -1745,6 +1991,7 @@ async def request_appointment(
 
             return {
                 "success": False,
+                "asking": "service_name",
                 "message": f"{msg}{similar_msg}{contact_msg}\n\n¿Deseas que busque en otro negocio o prefieres ver su catálogo completo?",
             }
 
@@ -1767,35 +2014,31 @@ async def request_appointment(
             professional_name=professional_name,
             professional_ids=p_ids,
         )
-        busy_msg = ""
+        # Se arma UNA sola respuesta, con una única pregunta al final. Antes se
+        # encadenaban dos ("¿En qué otro horario…?" y "¿A qué hora…?") y sonaba
+        # a formulario, no a alguien atendiendo.
+        que_agenda = f"tu **{srv_real_name}**" if service_name else f"tu cita en **{real_name}**"
+        partes = [f"Con gusto te ayudo a agendar {que_agenda}."]
+
         if avail.get("success") and avail.get("busy_slots"):
-            slots = avail["busy_slots"]
-            by_day = {}
-            for s in slots:
-                label = s["date_label"]
-                if label not in by_day:
-                    by_day[label] = []
-                by_day[label].append(f"{s['start']} - {s['end']}")
+            by_day: dict = {}
+            for s in avail["busy_slots"]:
+                tramo = _format_slot(s)
+                if tramo and tramo not in by_day.setdefault(s["date_label"], []):
+                    by_day[s["date_label"]].append(tramo)
 
-            prof_ctx = f" con **{professional_name}**" if professional_name else ""
-            if not professional_name and service_name:
-                prof_ctx = f" para el servicio de **{srv_real_name}**"
-
-            busy_msg = f"\n\n**Horarios ocupados actualmente{prof_ctx}:**\n"
-            for day, times in by_day.items():
-                busy_msg += f"• **{day}**: " + ", ".join(times) + "\n"
-            busy_msg += "\n¿En qué otro horario te gustaría agendar?"
+            dias = _natural_list([
+                f"{day.lower()} {_natural_list(times)}"
+                for day, times in by_day.items() if times
+            ])
+            if dias:
+                partes.append(f"Ya tienen ocupado {dias}.")
+            partes.append("¿A qué hora te viene bien?")
         else:
-            if not busy_msg:
-                busy_msg = f"\n\nHe verificado la agenda de **{real_name}** y no tienen citas registradas para el periodo solicitado, por lo que hay plena disponibilidad. ✨\n\n¿A qué hora te gustaría agendar? O si prefieres, puedes ver sus servicios y recomendaciones abajo."
+            partes.append("Tienen la agenda libre, así que puedes elegir la hora que prefieras.")
+            partes.append("¿A qué hora te gustaría?")
 
-        srv_ctx = f"**{service_name}** en " if service_name else ""
         _srv_anchor = f" [SERVICIO:{service_name}]" if service_name else ""
-
-        # Determine if we need to be more aggressive in asking for time
-        prompt_time = "¿A qué hora te gustaría agendar? O si prefieres, puedes ver sus servicios abajo."
-        if service_name:
-            prompt_time = f"Para agendar tu **{srv_real_name}**, por favor dime la **hora** que prefieres."
 
         return {
             "success": True,
@@ -1803,7 +2046,11 @@ async def request_appointment(
             "business_name": real_name,
             "action": "navigate_to_booking",
             "url": f"/empresa/{target_id}#servicios",
-            "message": f"Con gusto te ayudo a agendar {srv_ctx}**{real_name}**.{busy_msg}\n\n{prompt_time}\n\n[BIZ:{target_id}]{_srv_anchor}",
+            # Declarar QUÉ se está preguntando es lo que permite que el turno
+            # siguiente se lea como su respuesta. Deducirlo buscando subcadenas
+            # dentro del texto ya redactado fallaba en cuanto cambiaba una palabra.
+            "asking": "time",
+            "message": " ".join(partes) + f"\n\n[BIZ:{target_id}]{_srv_anchor}",
         }
 
     srv_data = await get_business_services(business_id=target_id)
@@ -1825,6 +2072,7 @@ async def request_appointment(
 
     return {
         "success": True,
+        "asking": "service_name",
         "business_id": target_id,
         "business_name": real_name,
         "time": time,
@@ -1982,30 +2230,35 @@ async def confirm_appointment(
                 )
 
                 if not user_id:
-                    # Usuario anónimo: el nombre es obligatorio
-                    is_generic = (
-                        reservation_name
-                        and reservation_name.lower().strip() in _GENERIC_NAMES
+                    # Sin sesión no se crea la reserva.
+                    #
+                    # Un nombre escrito en el chat no identifica a nadie: no hay
+                    # forma de avisar al cliente, de que consulte su cita ni de
+                    # que la cancele, y el negocio recibe una reserva que no
+                    # puede verificar. Se conserva todo lo acordado y se pide
+                    # entrar; en cuanto haya sesión, la cita se confirma sola.
+                    logger.info(
+                        "Reserva pendiente de autenticación | biz=%s srv=%s time=%s date=%s",
+                        business_id, service_name, time, date,
                     )
-                    if (
-                        not reservation_name
-                        or len(reservation_name.strip()) < 3
-                        or is_generic
-                    ):
-                        logger.warning(
-                            "Reservation blocked: invalid/missing name. Provided: '%s'",
-                            reservation_name,
-                        )
-                        return {
-                            "success": False,
-                            "needs_input": True,
-                            "message": (
-                                "Para completar tu reserva, necesito saber a nombre de quién "
-                                "la realizamos. Por favor, indícame tu nombre completo."
-                            ),
-                        }
-                    user_name = reservation_name.strip()
-                    logger.info("Anonymous reservation for: %s", user_name)
+                    return {
+                        "success": False,
+                        "needs_auth": True,
+                        "pending_reservation": {
+                            "business_id": business_id,
+                            "business_name": real_name,
+                            "service_name": service_name,
+                            "professional_name": professional_name,
+                            "time": time,
+                            "date": date,
+                        },
+                        "message": (
+                            "Tengo todo listo para dejarla agendada. Sólo falta que "
+                            "entres a tu cuenta —o que crees una si aún no la tienes— "
+                            "para poder confirmarla a tu nombre. En cuanto lo hagas, "
+                            "termino de reservarla sin que tengas que repetirme nada."
+                        ),
+                    }
 
                 else:
                     # ✅ Usuario logueado: user_name ya fue resuelto desde DB en el Paso 1.
@@ -2060,10 +2313,10 @@ async def confirm_appointment(
                         "success": False,
                         "needs_input": True,
                         "message": (
-                            f"Para confirmar tu cita de **{srv_real_name}** en **{real_name}**, "
-                            f"¿qué día te gustaría? (hoy, mañana o una fecha específica)."
-                            f"\\n\\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
-                            f"Reserva: **{srv_real_name}** Hora solicitada: {time}"
+                            f"Para dejar tu **{srv_real_name}** en **{real_name}**, "
+                            "¿qué día te viene bien? Dime *hoy*, *mañana* o una fecha."
+                            f"\n\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
+                            f"[SERVICIO:{srv_real_name}] [HORA:{time}]"
                         ),
                     }
 
@@ -2082,10 +2335,9 @@ async def confirm_appointment(
                         "success": False,
                         "needs_input": True,
                         "message": (
-                            f"Dime la **hora** en la que deseas tu **{srv_real_name}** "
-                            f"en **{real_name}**."
-                            f"\\n\\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
-                            f"Reserva: **{srv_real_name}**"
+                            f"¿A qué hora quieres tu **{srv_real_name}** en **{real_name}**?"
+                            f"\n\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
+                            f"[SERVICIO:{srv_real_name}]"
                         ),
                     }
 
@@ -2188,9 +2440,9 @@ async def confirm_appointment(
                     "action": "navigate",
                     "url": "/perfil/mis-reservas",
                     "message": (
-                        f"¡Listo, **{user_name}**! He agendado tu **{srv_real_name}**"
-                        f"{prof_msg} para {date_msg} a las **{start_time[:5]}**. \\n\\n"
-                        "Te llevé a tu sección de '**Mis Reservas**' para verificarlo. ¡Nos vemos allá! ✨"
+                        f"¡Listo, **{user_name}**! Tu **{srv_real_name}**"
+                        f"{prof_msg} queda para {date_msg} a las **{start_time[:5]}**.\n\n"
+                        "Te dejo en **Mis Reservas** por si quieres revisarla. ¡Nos vemos! ✨"
                     ),
                 }
 
