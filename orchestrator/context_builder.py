@@ -98,23 +98,24 @@ def load_project_config(project_id: str, user_personality_override: Optional[str
 
         # ── SISTEMA DE PERSONALIDADES DINÁMICAS ──
         active_persona = user_personality_override or config.get("active_personality")
+        config["active_personality"] = active_persona  # Always persist override choice
         if active_persona and personalities_path.exists():
             with open(personalities_path, "r", encoding="utf-8") as pf:
                 personas = yaml.safe_load(pf) or {}
                 persona = personas.get(active_persona)
-                
+
                 if persona:
                     # Inyectamos los valores al vuelo para abstraerlos del YAML original
                     if "personality" not in config:
                         config["personality"] = {}
                     config["personality"]["base"] = persona.get("system_prompt", config["personality"].get("base", ""))
-                    
+
                     if "voice" not in config:
                         config["voice"] = {}
                     config["voice"]["tts_voice"] = persona.get("tts_voice", config["voice"].get("tts_voice"))
-                    
+
                     # Metadatos extra para el Frontend / Tool Runner
-                    config["assistant_name"] = persona.get("assistant_name", "Asistente")
+                    config["assistant_name"] = persona.get("assistant_name", active_persona.capitalize())
                     config["greeting"] = persona.get("greeting", "¡Hola! ¿En qué te puedo ayudar?")
                     logger.info(f"CONFIG LOADED | Project: {project_id} | Persona: {active_persona} | Name: {config['assistant_name']}")
 
