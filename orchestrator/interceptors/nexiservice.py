@@ -82,7 +82,7 @@ def clear_booking_state(final_data: Dict) -> None:
     for key in ("_pending_biz_id", "_pending_service", "_pending_time",
                 "_pending_date", "_pending_prof", "reservation_name",
                 "booking_time", "booking_date", "booking_service",
-                "_pending_reservation", "needs_auth"):
+                "_pending_reservation", "_pending_reservation_offered", "needs_auth"):
         final_data.pop(key, None)
 
 
@@ -427,8 +427,17 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
     # PRIORIDAD ABSOLUTA: reserva esperando que el usuario entre a su cuenta
     # Si ya inició sesión, se confirma sola: no se le vuelve a preguntar nada.
     # ══════════════════════════════════════════════════════════════════════════
+    # Sólo se cierra sola cuando el usuario vuelve A LO SUYO. Antes bastaba
+    # cualquier mensaje: quien entraba a su cuenta y escribía "hola, ¿cómo
+    # estás?" recibía "tu cita ya ha sido agendada" por una reserva que había
+    # dejado a medias días atrás. Una cita no se crea sin que el usuario lo pida
+    # en ese turno.
     if current_state == BookingState.WAITING_AUTH and is_authenticated(user_data):
-        return await _resume_pending_reservation(user_data, final_data)
+        if intent_name in _CONTINUES_BOOKING:
+            return await _resume_pending_reservation(user_data, final_data)
+        oferta = _offer_pending_reservation(final_data)
+        if oferta:
+            return oferta
 
     # ══════════════════════════════════════════════════════════════════════════
     # PRIORIDAD ABSOLUTA: Estado WAITING_FOR_NAME
@@ -527,6 +536,9 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
     if intent_name == "get_business_professionals":
         return await _handle_get_business_professionals(args, messages, final_data, sem_state)
 
+    if intent_name == "recommend_businesses":
+        return await _handle_recommend_businesses(args, context, final_data, sem_state)
+
     if intent_name == "get_business_reviews":
         return await _handle_get_business_reviews(args, messages, final_data)
 
@@ -610,6 +622,45 @@ def _remember_pending_reservation(pending: Dict, final_data: Dict) -> Dict:
     sem_state.save(final_data)
     logger.info("[STATE] Reserva guardada a la espera de sesión: %s", pending)
     return final_data
+
+
+def _offer_pending_reservation(final_data: Dict) -> Optional[Dict]:
+    """
+    Le recuerda al usuario la reserva que dejó a medias, y le deja decidir.
+
+    Se pregunta UNA vez: repetirlo en cada mensaje convierte el recordatorio en
+    un obstáculo. Si no contesta, la conversación sigue su curso y la reserva
+    queda guardada hasta que él la retome.
+    """
+    pending = final_data.get("_pending_reservation") or {}
+    if not pending.get("business_id"):
+        clear_booking_state(final_data)
+        return None
+    if final_data.get("_pending_reservation_offered"):
+        return None
+
+    final_data["_pending_reservation_offered"] = True
+    partes = [p for p in (
+        pending.get("service_name"),
+        f"en {pending['business_name']}" if pending.get("business_name") else None,
+        f"a las {pending['time']}" if pending.get("time") else None,
+    ) if p]
+    detalle = " ".join(partes) or "tu reserva"
+    logger.info("[STATE] Reserva pendiente ofrecida al usuario: %s", pending)
+
+    sem_state = ConversationState.load(final_data)
+    sem_state.expect("confirm_pending", "¿Confirmo la reserva que dejaste pendiente?",
+                     goal="booking")
+    sem_state.save(final_data)
+
+    return {
+        "reply": (
+            f"Antes de seguir: dejaste pendiente **{detalle}**. "
+            "¿Quieres que la confirme?"
+        ),
+        "voice_action": None,
+        "final_data": final_data,
+    }
 
 
 async def _resume_pending_reservation(user_data: Dict, final_data: Dict) -> Optional[Dict]:
@@ -1175,7 +1226,7 @@ async def _handle_navigate_to_company(
         }
 
     b = businesses[0]
-    final_data["_last_businesses"] = businesses
+    _present_businesses(final_data, businesses)
     sem_state.remember_list(ConceptKind.BUSINESS, businesses)
     _focus_business(final_data, sem_state, b)
     sem_state.save(final_data)
@@ -1192,6 +1243,19 @@ async def _handle_navigate_to_company(
         "voice_action_payload": {"url": f"/empresa/{b['id']}"},
         "final_data": final_data,
     }
+
+
+def _present_businesses(final_data: Dict, businesses: List[Dict]) -> None:
+    """
+    Deja una lista de negocios lista para pintarse Y disponible como contexto.
+
+    Son dos cosas distintas y hay que escribirlas por separado: `properties` es
+    lo que se dibuja EN ESTE turno, `_last_businesses` es lo que la conversación
+    recuerda haber mostrado. Reconstruir lo primero a partir de lo segundo era
+    lo que hacía que las mismas fichas reaparecieran en cada respuesta.
+    """
+    final_data["_last_businesses"] = businesses
+    final_data["properties"] = [{"businesses": businesses}] if businesses else []
 
 
 def _focus_business(final_data: Dict, sem_state: ConversationState, business: Dict) -> None:
@@ -1325,7 +1389,7 @@ async def _handle_search_businesses(
         return None
 
     businesses = tool_output.get("businesses", [])
-    final_data["_last_businesses"] = businesses
+    _present_businesses(final_data, businesses)
 
     # Lo mostrado queda registrado como contexto: el turno siguiente puede decir
     # "el segundo" o "ese" y el sistema sabrá a qué apunta.
@@ -1463,6 +1527,134 @@ async def _handle_get_business_services(
     }
 
 
+def _rating_label(business: Dict) -> str:
+    """Cómo se dice en voz alta la nota de un negocio."""
+    if not business.get("rating"):
+        return "todavía sin reseñas"
+    reseñas = business.get("reviews") or 0
+    plural = "reseña" if reseñas == 1 else "reseñas"
+    return f"⭐ {business['rating']} de {reseñas} {plural}"
+
+
+async def _handle_recommend_businesses(
+    args: Dict, context: Dict, final_data: Dict, sem_state: ConversationState = None
+) -> Optional[Dict]:
+    """
+    Recomienda de verdad: mira quién presta lo pedido y qué dicen sus clientes.
+
+    Este intent estaba enrutado pero no atendido, así que "recomiéndame uno para
+    medicina general" caía al final del bucle y salía por el mensaje de último
+    recurso —"¿buscas un negocio, servicios o agendar?"—, que es justo la
+    pregunta que el usuario acababa de contestar.
+
+    La respuesta dice también POR QUÉ ese y no otro. Una recomendación sin
+    motivo no se puede discutir, y el usuario no tiene forma de saber si le
+    sirve.
+    """
+    from tools.nexiservice import rank_businesses_for
+
+    sem_state = sem_state if sem_state is not None else ConversationState.load(final_data)
+    termino = (args.get("category") or "").strip()
+    ciudad = args.get("city") or context.get("active_city")
+
+    if not termino:
+        return {
+            "reply": "¿Sobre qué quieres que te recomiende? Dime el servicio o el tipo de negocio.",
+            "final_data": final_data,
+        }
+
+    salida = await rank_businesses_for(termino, city=ciudad)
+    if not salida.get("success"):
+        return {"reply": salida.get("message"), "final_data": final_data}
+
+    negocios = salida.get("businesses") or []
+    ciudad_real = salida.get("city") or ciudad or "tu zona"
+
+    if not negocios:
+        return {
+            "reply": (
+                f"No encontré quién preste **{termino}** en **{ciudad_real}**. "
+                "¿Quieres que busque algo parecido o en otra ciudad?"
+            ),
+            "final_data": final_data,
+        }
+
+    con_nota = [b for b in negocios if b.get("rating")]
+    # El recomendado es el mejor valorado. Si nadie tiene reseñas no se elige a
+    # ciegas: se dice que no hay con qué elegir y se nombra lo que sí hay.
+    elegido = con_nota[0] if con_nota else negocios[0]
+    servicio = elegido.get("matched_service")
+
+    _present_businesses(final_data, negocios)
+    sem_state.remember_list(ConceptKind.BUSINESS, negocios)
+    # El recomendado queda en foco: el "sí" que suele venir después continúa la
+    # reserva sobre él en vez de empezar una conversación nueva.
+    _focus_business(final_data, sem_state, elegido)
+
+    # Y el servicio por el que se preguntó queda anotado con él.
+    #
+    # La recomendación ERA sobre un servicio concreto: quien pide "el mejor para
+    # medicina general" ya dijo qué quiere. Sin anotarlo, el flujo llegaba hasta
+    # el final —negocio, hora, día— y remataba con "¿qué servicio deseas
+    # agendar?" enseñando un catálogo de nueve, incluida la respuesta que el
+    # usuario había dado en su primer mensaje.
+    if servicio:
+        sem_state.booking["service_name"] = servicio
+        final_data["_pending_service"] = servicio
+        final_data["booking_service"] = servicio
+        logger.info("[RECOMENDAR] servicio arrastrado a la reserva: '%s'", servicio)
+
+    sem_state.save(final_data)
+
+    partes = [f"Miré las opciones de **{termino}** en **{ciudad_real}** y lo que dicen sus clientes.\n"]
+
+    if not con_nota:
+        partes.append(
+            "Ninguno tiene reseñas todavía, así que no puedo decirte cuál es el mejor "
+            f"sin inventármelo. El que lo ofrece es **{elegido['name']}**"
+            + (f", con su **{servicio}**" if servicio else "")
+            + "."
+        )
+    else:
+        razon = (
+            f"la mejor nota de las {len(negocios)} opciones que encontré"
+            if len(negocios) > 1 else "el único que encontré por aquí"
+        )
+        partes.append(
+            f"Me quedo con **{elegido['name']}** — {_rating_label(elegido)}, {razon}"
+            + (f", y sí ofrece **{servicio}**" if servicio else "")
+            + "."
+        )
+        if elegido.get("comment"):
+            partes.append(f"\n> «{elegido['comment']}»")
+
+        otros = con_nota[1:3]
+        if otros:
+            listado = " y ".join(
+                f"**{b['name']}** ({_rating_label(b)})" for b in otros
+            )
+            partes.append(f"\nSi ese no te sirve, después van {listado}.")
+
+    if servicio:
+        partes.append(f"\n¿Te agendo la **{servicio}** en **{elegido['name']}**?")
+    else:
+        partes.append(f"\n¿Te agendo en **{elegido['name']}**?")
+    partes.append(f"\n[BIZ:{elegido['id']}]")
+
+    mejor = elegido
+    logger.info(
+        "[RECOMENDAR] '%s' en %s → %s (nota=%s, reseñas=%s) entre %d candidatos",
+        termino, ciudad_real, mejor["name"], mejor.get("rating"),
+        mejor.get("reviews"), len(negocios),
+    )
+
+    return {
+        "reply": "\n".join(partes),
+        "voice_action": None,
+        "final_data": final_data,
+    }
+
+
 async def _handle_get_business_reviews(args: Dict, messages: List, final_data: Dict) -> Dict:
     from tools.nexiservice import get_business_reviews
 
@@ -1500,25 +1692,14 @@ async def _resolve_logged_user_name(ext_id, user_data: Dict) -> Optional[str]:
     logger.info("[INTERCEPTOR] user_data keys: %s", list(user_data.keys()))
     if name:
         return name
-    try:
-        from core.database import get_connection
-        with get_connection("vt_inventario") as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT t.nombre
-                    FROM usuario u
-                    JOIN tercero t ON u.idpersona = t.id
-                    WHERE u.id = %s LIMIT 1
-                    """,
-                    (ext_id,)
-                )
-                row = cur.fetchone()
-                if row and row.get("nombre"):
-                    return row["nombre"]
-    except Exception as e:
-        logger.warning("[INTERCEPTOR] No pudo resolver nombre: %s", e)
-    return None
+    # La misma traducción de identidades que usa la confirmación. Aquí se leía
+    # el id de la persona como si fuera el de la cuenta y se unía contra
+    # `tercero`: la reserva salía a nombre de una empresa que no tenía nada que
+    # ver con quien estaba escribiendo.
+    from tools.nexiservice import resolve_booking_identity
+
+    identidad = await resolve_booking_identity(ext_id)
+    return identidad["nombre"] if identidad else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1535,7 +1716,7 @@ async def post_execution_interceptor(
 
     if tool_name == "search_businesses" and output.get("success"):
         businesses = output.get("businesses", [])
-        final_data["_last_businesses"] = businesses
+        _present_businesses(final_data, businesses)
         final_data["filters_applied"] = {
             "city": output.get("city"),
             "search": output.get("category"),

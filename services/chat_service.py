@@ -17,6 +17,8 @@ from orchestrator.memory_manager import (
     get_conversation_history,
     get_conversation_message_count,
     update_conversation_timestamp,
+    carry_over_context,
+    is_stale,
     update_trust_level,
     update_user_personality,
 )
@@ -92,11 +94,23 @@ class ChatService:
             user_id=user["id"],
             project_slug=payload.project_id,
         )
-        final_data = conversation.get("final_data") or {}
+        # Lo que sigue vigente de los turnos anteriores. La respuesta del turno
+        # pasado no entra —es una salida, no memoria— y un hilo abandonado hace
+        # horas entra vacío: retomarlo hacía que un "hola" recibiera el desenlace
+        # de una reserva que el usuario había dejado a medias otro día.
+        last_message_at = conversation.get("last_message_at")
+        thread_is_stale = is_stale(last_message_at)
+        final_data = carry_over_context(conversation.get("final_data"), last_message_at)
 
         # Fetch conversation history
+        # Un hilo caducado tampoco arrastra sus mensajes: si el contexto empieza
+        # de cero, el modelo tiene que verlo igual, o volvería a hablar de la
+        # cita de hace días leyéndola en el historial.
         history_limit = 14 if payload.project_id == "nexiservice" else 20
-        history = get_conversation_history(conversation_id, limit=history_limit)
+        history = (
+            [] if thread_is_stale
+            else get_conversation_history(conversation_id, limit=history_limit)
+        )
 
         # Save user message
         save_message(conversation_id, "user", payload.message)
@@ -204,16 +218,14 @@ class ChatService:
 
         _fd = agent_data.get("final_data") or {}
         _llm_failed = bool(_fd.get("llm_error"))
-        _last_biz = _fd.get("_last_businesses") or []
         _properties = agent_data.get("properties") or _fd.get("properties") or []
 
-        # Los negocios de una búsqueda anterior sólo acompañan a una respuesta
-        # real. Colgarlos de un mensaje de error deja al usuario mirando fichas
-        # que no tienen nada que ver con lo que acaba de leer.
+        # Las fichas acompañan al turno que las produjo y a ninguno más. Antes
+        # se reconstruían desde `_last_businesses`, que vive en el contexto: una
+        # sola búsqueda dejaba las mismas tarjetas colgando de cada respuesta
+        # posterior, incluidos los saludos y los mensajes de error.
         if _llm_failed:
             _properties = []
-        elif _last_biz and not _properties:
-            _properties = [{"businesses": _last_biz}]
 
         audio_url = None
         if getattr(payload, "voice", False) and app_state:

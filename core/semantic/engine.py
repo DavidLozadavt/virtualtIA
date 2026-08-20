@@ -17,6 +17,7 @@ interceptores ni las herramientas.
 """
 
 import logging
+from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence
 
 from core.semantic import dialogue
@@ -114,6 +115,56 @@ def build_understanding(
         answered.trace = u.trace + answered.trace
         return answered
 
+    # ── 0a. "Sí" seguido de ruido sigue siendo un sí ────────────────────────
+    #
+    # "Sí por favot". La errata convierte una palabra en contenido desconocido,
+    # el mensaje deja de agotarse en fórmulas sociales y el análisis lo lee como
+    # un sintagma nominal: el usuario acepta la cita que se le acaba de ofrecer
+    # y recibe un "¿cuál es tu solicitud?".
+    #
+    # La condición que lo hace seguro es doble: tiene que haber una pregunta
+    # abierta —si no, nadie está afirmando nada— y lo que sigue al "sí" no puede
+    # nombrar nada del catálogo. "Sí, un restaurante" sí nombra algo y sigue su
+    # camino normal.
+    apertura = _opens_with(message)
+    if (
+        apertura
+        and act not in (Act.AFFIRM, Act.DENY)
+        and not analysis.frames
+        and analysis.content_terms
+        and (state.pending_slot or state.booking or state.focus_id)
+    ):
+        if not _resolve_domain(
+            analysis, message, mentioned_city=mentioned_city,
+            catalog=catalog, allow_llm=False,
+        ):
+            u.note(f"{apertura} con ruido detrás → se lee como respuesta a lo pendiente")
+            analysis = replace(analysis, act=apertura, content_terms=[])
+            return _contextual(
+                u, analysis, state, message, temporal,
+                mentioned_city=mentioned_city, catalog=catalog, allow_llm=allow_llm,
+            )
+
+    # ── 0b. Un superlativo pelado sigue siendo una petición de criterio ─────
+    #
+    # "¿cuál es el mejor?", "el mejor", "recomiéndame uno". El análisis los
+    # clasifica de tres formas distintas —capacidad del agente, atributo, sin
+    # analizar— porque por sí solos no nombran nada. Lo que sí traen es el
+    # marco: piden que alguien se moje. Con opciones sobre la mesa hay de qué
+    # hablar; sin ellas, el mensaje sigue su curso normal.
+    #
+    # Antes, "¿cuál es el mejor?" justo después de una lista de seis médicos
+    # respondía con el catálogo de capacidades del asistente.
+    if "recommend" in analysis.frames and not analysis.content_terms:
+        rubro = state.active_domain or next(
+            (p.extra.get("category") for p in state.presented if p.extra.get("category")),
+            None,
+        )
+        if rubro:
+            u.args = {"category": rubro, "city": mentioned_city}
+            u.note(f"superlativo sin contenido → recomendación sobre '{rubro}'")
+            return _finish(u, Disposition.ACT, "recommend_businesses")
+
     # ── 1. Actos sociales y dirigidos al asistente ──────────────────────────
     if act in Act.CONVERSATIONAL:
         return _conversational(u, act)
@@ -130,7 +181,10 @@ def build_understanding(
     # ── 2. Referencias a lo ya mostrado ─────────────────────────────────────
     if act in (Act.REFERENCE, Act.ATTRIBUTE, Act.PERSON_QUERY, Act.TEMPORAL,
                Act.AFFIRM, Act.DENY):
-        return _contextual(u, analysis, state, message, temporal)
+        return _contextual(
+            u, analysis, state, message, temporal,
+            mentioned_city=mentioned_city, catalog=catalog, allow_llm=allow_llm,
+        )
 
     # ── 3. Agendamiento ─────────────────────────────────────────────────────
     if act == Act.BOOKING:
@@ -166,6 +220,18 @@ _CONVERSATIONAL_INTENT = {
 }
 
 
+def _opens_with(message: str) -> Optional[str]:
+    """El acto que abre el mensaje, cuando es un sí o un no."""
+    palabras = normalize(message).split()
+    if not palabras:
+        return None
+    if palabras[0] in lx.AFFIRMATIVE_FORMS:
+        return Act.AFFIRM
+    if palabras[0] in lx.NEGATIVE_FORMS:
+        return Act.DENY
+    return None
+
+
 def _conversational(u: Understanding, act: str) -> Understanding:
     intent = _CONVERSATIONAL_INTENT.get(act, "conversation")
     u.note(f"acto social → {intent} (sin herramientas)")
@@ -175,6 +241,9 @@ def _conversational(u: Understanding, act: str) -> Understanding:
 def _contextual(
     u: Understanding, analysis: Analysis, state: ConversationState, message: str,
     temporal: Dict[str, Any],
+    mentioned_city: Optional[str] = None,
+    catalog: Optional[SemanticCatalog] = None,
+    allow_llm: bool = True,
 ) -> Understanding:
     """Actos que sólo significan algo contra lo que ya ocurrió en la conversación."""
     target = reference.resolve(analysis, state, message)
@@ -195,6 +264,29 @@ def _contextual(
     if analysis.act == Act.ATTRIBUTE:
         biz_id = _business_id_from(target, state)
         label = _business_label(target, state)
+
+        # "¿Cuál es el mejor para medicina general?" pide un criterio, no una
+        # propiedad de lo que hubiera en pantalla. Antes caía al final de esta
+        # rama y salía como conversación: con un negocio en foco el usuario
+        # recibía un "no estoy seguro de haberte entendido" por preguntar algo
+        # perfectamente claro.
+        if "recommend" in analysis.frames:
+            dominio = _resolve_domain(
+                analysis, message, mentioned_city=mentioned_city,
+                catalog=catalog, allow_llm=allow_llm,
+            )
+            if dominio:
+                u.grounding = dominio["grounding"]
+                u.args = {"category": dominio["args"]["category"], "city": mentioned_city}
+                u.note(f"superlativo sobre '{dominio['label']}' → recomendación")
+                return _finish(u, Disposition.ACT, "recommend_businesses")
+            if state.active_domain:
+                # "¿y cuál es el mejor?" justo después de una lista: el rubro es
+                # el que ya estaba sobre la mesa.
+                u.args = {"category": state.active_domain, "city": mentioned_city}
+                u.note("superlativo sobre el rubro que ya estaba en juego")
+                return _finish(u, Disposition.ACT, "recommend_businesses")
+
         # Marcos que nombran una capacidad concreta sobre un negocio.
         for frame, intent in (
             ("identity", "get_business_mission_vision"),
@@ -302,14 +394,27 @@ def _booking(
     # Con el negocio ya elegido, lo que nombre el usuario es el servicio.
     # "Quiero una consulta de medicina general" en mitad de una reserva no es
     # una búsqueda nueva: está diciendo QUÉ quiere que le agenden.
-    if (biz_id or biz_name) and not args.get("service_name"):
+    #
+    # Se mira SIEMPRE, aunque ya hubiera un servicio acordado. Antes se miraba
+    # sólo cuando la ranura estaba vacía, y una reserva vieja que siguiera en
+    # memoria se imponía sobre lo que el usuario acababa de pedir: "reservar una
+    # medicina general" agendaba el cambio de aceite de la conversación
+    # anterior. Lo que el usuario dice ahora manda sobre lo que dijo antes.
+    if biz_id or biz_name:
         servicio = _resolve_service_in_message(
             analysis, message, mentioned_city=mentioned_city,
             catalog=catalog, allow_llm=allow_llm,
         )
-        if servicio:
+        if servicio and servicio.label != args.get("service_name"):
+            anterior = args.get("service_name")
             args["service_name"] = servicio.label
-            u.note(f"servicio nombrado durante la reserva: {servicio.label}")
+            if anterior:
+                u.corrections.append(
+                    {"slot": "service_name", "from": anterior, "to": servicio.label}
+                )
+                u.note(f"el servicio nombrado reemplaza al anterior: {anterior} → {servicio.label}")
+            else:
+                u.note(f"servicio nombrado durante la reserva: {servicio.label}")
 
     # El usuario quiere reservar pero todavía no hay un negocio: si en el mismo
     # mensaje describió dónde ("...para un hospital"), hay que enseñarle esos
@@ -523,6 +628,17 @@ def _discovery(
 
     best = grounding.best
 
+    # Marcos que cambian QUÉ se hace con el rubro identificado.
+    #
+    # Va por delante de la reserva en curso: "recomiéndame el mejor para corte
+    # de cabello" pide una opinión, no elige un servicio. Cuando se miraba
+    # después, un negocio que hubiera quedado en foco se llevaba la petición y
+    # el usuario acababa agendando en un sitio que nadie le había recomendado.
+    if "recommend" in analysis.frames:
+        u.args = {"category": _search_terms_for(best, grounding)[0], "city": mentioned_city}
+        u.note("recomendación sobre el rubro anclado")
+        return _finish(u, Disposition.ACT, "recommend_businesses")
+
     # Hay una reserva abierta y el usuario nombra un servicio: lo está eligiendo,
     # no buscando otra cosa. Antes esto reiniciaba la búsqueda y el proceso se
     # quedaba dando vueltas sin llegar nunca a la cita.
@@ -533,12 +649,6 @@ def _discovery(
         u.args = _booking_args(state, service_name=best.label)
         u.note(f"servicio elegido para la reserva en curso: {best.label}")
         return _finish(u, Disposition.ACT, "request_appointment")
-
-    # Marcos que cambian QUÉ se hace con el rubro identificado.
-    if "recommend" in analysis.frames:
-        u.args = {"category": _search_terms_for(best, grounding)[0], "city": mentioned_city}
-        u.note("recomendación sobre el rubro anclado")
-        return _finish(u, Disposition.ACT, "recommend_businesses")
 
     if "map" in analysis.frames and best.kind == ConceptKind.BUSINESS:
         u.args = {"business_id": best.entity_id, "business_name": best.label, "city": mentioned_city}

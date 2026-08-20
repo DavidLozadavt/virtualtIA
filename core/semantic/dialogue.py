@@ -349,7 +349,11 @@ def _looks_like_a_name(message: str, analysis: Analysis) -> bool:
     if not 1 <= len(palabras) <= 6:
         return False
     # Si todas las palabras son andamiaje gramatical, no nombra nada.
-    return any(not lx.is_function_word(p) for p in palabras)
+    if not any(not lx.is_function_word(p) for p in palabras):
+        return False
+    # Ni tampoco si sólo describen el acto de agendar: "agendar cita" contesta
+    # a "¿qué servicio?" repitiendo la pregunta, no dando el dato.
+    return not lx.names_nothing_concrete(texto)
 
 
 def _apply(state: ConversationState, updates: Dict[str, Any]) -> List[Dict[str, Any]]:

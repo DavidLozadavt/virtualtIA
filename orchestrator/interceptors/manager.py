@@ -48,7 +48,9 @@ async def run_post_execution_interceptors(tool_name: str, tool_args: Dict[str, A
         businesses = tool_output.get("businesses", [])
         if businesses:
             final_data["_last_businesses"] = businesses
-            
+            final_data["properties"] = [{"businesses": businesses}]
+
+
         coords = tool_output.get("target_city_coords")
         if coords:
             final_data["map_center"] = {"lat": coords.get("lat"), "lng": coords.get("lng"), "zoom": 13}

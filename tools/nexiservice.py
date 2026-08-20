@@ -11,6 +11,7 @@ import math
 import re
 from typing import Optional
 from core.config import settings
+from core.semantic.lexicon import names_nothing_concrete
 from tools.shared.utils import normalize_text as _normalize_shared
 
 logger = logging.getLogger("lyra.tools.nexiservice")
@@ -1859,6 +1860,227 @@ async def recommend_businesses(
         }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECOMENDAR: quién presta esto, y a quién le fue bien con ellos
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Una recomendación no es una búsqueda ordenada por nota. Es lo que hace una
+# persona cuando le preguntan "¿cuál me recomiendas para medicina general?":
+# primero mira QUIÉN presta eso, luego mira QUÉ dicen los que ya fueron, y sólo
+# entonces se moja. Las dos mitades tienen que ir juntas; `recommend_businesses`
+# sólo hacía la segunda, y contra el nombre de la empresa y su rubro, así que un
+# servicio concreto no llegaba a encontrarse nunca.
+
+
+def _significant_words(term: str) -> list:
+    """Las palabras del término que de verdad nombran algo."""
+    from core.semantic.lexicon import is_function_word
+
+    return [
+        w for w in _normalize(term or "").split()
+        if len(w) > 2 and not is_function_word(w)
+    ]
+
+
+def _word_matches(word: str, haystack_words: set) -> bool:
+    """
+    ¿Esta palabra aparece en el texto, aunque esté dicha de otra forma?
+
+    "medicina general" y "Consulta Médica General" son lo mismo para cualquiera
+    que hable español, y para un `LIKE '%medicina%'` no lo son. Por eso se
+    compara por raíz y por parecido, que es lo que ya usa el resto del sistema.
+    """
+    from core.semantic.morphology import similarity, stem_compatible
+
+    return any(
+        w == word or stem_compatible(w, word) or similarity(w, word) >= 0.84
+        for w in haystack_words
+    )
+
+
+async def _city_box(city: str) -> tuple:
+    """Recuadro geográfico de la ciudad, con la regla de casa para Popayán."""
+    resolved = city or "Popayan"
+    try:
+        from services.geo import resolve_city_coords_async
+
+        lat, lng, official = await resolve_city_coords_async(resolved)
+    except Exception:
+        lat, lng, official = None, None, resolved
+
+    if not (lat and lng):
+        return "", official or resolved
+
+    box = (
+        f"e.latitud BETWEEN {lat - 0.1} AND {lat + 0.1} "
+        f"AND e.longitud BETWEEN {lng - 0.1} AND {lng + 0.1}"
+    )
+    # En Popayán, que es la ciudad raíz, los negocios sin coordenadas cuentan
+    # como locales en vez de desaparecer del listado.
+    if _normalize(resolved) == "popayan":
+        return f"AND (({box}) OR e.latitud IS NULL OR e.longitud IS NULL)", official or resolved
+    return f"AND ({box})", official or resolved
+
+
+async def rank_businesses_for(term: str, city: str = None, limit: int = 6, **kwargs) -> dict:
+    """
+    Negocios que prestan `term`, ordenados por lo que opinan quienes ya fueron.
+
+    Devuelve además la reseña que sostiene la recomendación: decir "es el mejor"
+    sin poder decir por qué es una opinión, y aquí no se opina, se cuenta lo que
+    hay en la base.
+    """
+    from core.database import get_connection
+
+    palabras = _significant_words(term)
+    if not palabras:
+        return {"success": False, "message": "Necesito saber de qué quieres la recomendación."}
+
+    city_filter, official_city = await _city_box(city)
+
+    # Prefiltro amplio en SQL —la raíz recortada, que la colación ignora los
+    # acentos— y la decisión fina en Python, donde sí se puede comparar por
+    # morfología en vez de por subcadena.
+    from core.semantic.morphology import stem
+
+    prefijos = [stem(w)[:5] for w in palabras if len(stem(w)) >= 4]
+    if not prefijos:
+        prefijos = [w[:5] for w in palabras]
+
+    campos = ("s.nombre", "cs.nombre", "ce.nombre", "e.razonSocial")
+    condiciones, params = [], []
+    for prefijo in prefijos:
+        condiciones.append("(" + " OR ".join(f"LOWER({c}) LIKE %s" for c in campos) + ")")
+        params.extend([f"%{prefijo}%"] * len(campos))
+
+    sql = f"""
+        SELECT e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud, e.longitud,
+               e.whatsappNumber,
+               COALESCE(MAX(ce.nombre), 'Negocio') AS categoria,
+               GROUP_CONCAT(DISTINCT s.nombre  SEPARATOR '||') AS servicios,
+               GROUP_CONCAT(DISTINCT cs.nombre SEPARATOR '||') AS categorias_servicio
+        FROM empresa e
+        LEFT JOIN servicios s          ON s.idCompany = e.id AND s.idEstado = 1
+        LEFT JOIN categoriaservicios cs ON s.idCategoriaServicio = cs.id
+        LEFT JOIN categoriaempresa ce  ON e.idCategoriaEmpresa = ce.id
+        WHERE e.idEstado = 1 AND e.publicado = 1
+          AND ({" OR ".join(condiciones)})
+          {city_filter}
+        GROUP BY e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud,
+                 e.longitud, e.whatsappNumber
+        LIMIT 60
+    """
+
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+
+                candidatos = []
+                for row in rows:
+                    texto = " ".join(filter(None, (
+                        row.get("servicios") or "",
+                        row.get("categorias_servicio") or "",
+                        row.get("categoria") or "",
+                        row.get("razonSocial") or "",
+                    ))).replace("||", " ")
+                    vocabulario = set(_normalize(texto).split())
+                    aciertos = sum(1 for w in palabras if _word_matches(w, vocabulario))
+                    if aciertos:
+                        # Qué servicio suyo es el que encaja, para poder nombrarlo.
+                        servicio = None
+                        for nombre in (row.get("servicios") or "").split("||"):
+                            palabras_srv = set(_normalize(nombre).split())
+                            if nombre and sum(
+                                1 for w in palabras if _word_matches(w, palabras_srv)
+                            ) == aciertos:
+                                servicio = nombre.strip()
+                                break
+                        candidatos.append({"row": row, "aciertos": aciertos, "servicio": servicio})
+
+                if not candidatos:
+                    return {
+                        "success": True, "businesses": [], "city": official_city,
+                        "category": term,
+                    }
+
+                ids = [c["row"]["id"] for c in candidatos]
+                marcas = ", ".join(["%s"] * len(ids))
+                cur.execute(
+                    f"""SELECT idCompany, AVG(calificacion) AS avg_rating,
+                               COUNT(*) AS review_count
+                        FROM calificacionCompany
+                        WHERE idCompany IN ({marcas})
+                        GROUP BY idCompany""",
+                    ids,
+                )
+                notas = {r["idCompany"]: r for r in (cur.fetchall() or [])}
+
+                # Un comentario de verdad por negocio: es lo que convierte la
+                # recomendación en una razón y no en un número.
+                cur.execute(
+                    f"""SELECT c.idCompany, c.calificacion, c.comentario
+                        FROM calificacionCompany c
+                        WHERE c.idCompany IN ({marcas})
+                          AND c.comentario IS NOT NULL AND c.comentario <> ''
+                        ORDER BY c.calificacion DESC, c.created_at DESC""",
+                    ids,
+                )
+                comentarios = {}
+                for r in (cur.fetchall() or []):
+                    texto = (r["comentario"] or "").strip()
+                    # Hay reseñas que son un teclazo ("123333"). Citarlas como
+                    # razón para elegir un negocio es peor que no citar nada.
+                    if sum(c.isalpha() for c in texto) >= 8:
+                        comentarios.setdefault(r["idCompany"], texto)
+
+        negocios = []
+        for c in candidatos:
+            row = c["row"]
+            nota = notas.get(row["id"]) or {}
+            negocios.append({
+                "id": row["id"],
+                "name": row["razonSocial"] or f"Negocio #{row['id']}",
+                "category": row["categoria"],
+                "address": row["direccion"],
+                "logo": _format_logo(row["rutaLogo"]),
+                "lat": float(row["latitud"]) if row["latitud"] else None,
+                "lng": float(row["longitud"]) if row["longitud"] else None,
+                "whatsapp": row["whatsappNumber"],
+                "matched_service": c["servicio"],
+                "match_score": c["aciertos"],
+                "rating": round(float(nota["avg_rating"]), 1) if nota.get("avg_rating") else None,
+                "reviews": int(nota.get("review_count") or 0),
+                "comment": comentarios.get(row["id"]),
+            })
+
+        # Primero quien mejor encaja con lo pedido; entre esos, quien mejor
+        # calificado está; y a igualdad de nota, quien tiene más gente detrás.
+        # Un negocio sin reseñas no puede ir por delante de uno valorado: no es
+        # que sea peor, es que todavía no hay nada que lo respalde.
+        negocios.sort(
+            key=lambda b: (b["match_score"], b["rating"] or -1, b["reviews"]),
+            reverse=True,
+        )
+
+        # Sólo los que encajan del todo. Con dos de tres palabras sueltas se
+        # colaba un hotel para mascotas entre las opciones de medicina general:
+        # coincidía en las palabras accesorias y en ninguna que importara.
+        mejor = negocios[0]["match_score"]
+        negocios = [b for b in negocios if b["match_score"] == mejor]
+
+        return {
+            "success": True,
+            "city": official_city,
+            "category": term,
+            "businesses": negocios[:limit],
+        }
+    except Exception as e:
+        logger.error(f"Error en rank_businesses_for: {e}")
+        return {"success": False, "message": "No pude revisar las reseñas en este momento."}
+
+
 async def request_appointment(
     business_name: str = None,
     business_id: int = None,
@@ -1874,11 +2096,14 @@ async def request_appointment(
     """
     target_id, real_name = await _resolve_business_id(business_name, business_id)
 
-    # Limpiar servicio si es un término genérico de reserva
-    if service_name:
-        _GENERIC_SRV = {"reservar", "reserva", "cita", "turno", "agendar", "servicio", "servicios"}
-        if _normalize(service_name) in _GENERIC_SRV:
-            service_name = None
+    # Limpiar servicio si sólo nombra el acto de reservar.
+    #
+    # La comprobación era contra una lista de palabras sueltas, así que
+    # "agendar" se limpiaba y "agendar cita" seguía adelante como si fuera el
+    # nombre de un servicio. Ahora se mira palabra por palabra.
+    if service_name and names_nothing_concrete(service_name):
+        logger.info("Servicio genérico descartado: '%s'", service_name)
+        service_name = None
 
     if not target_id:
         return {
@@ -1986,7 +2211,10 @@ async def request_appointment(
             )
 
             msg = f"Lo siento, no encontré el servicio '**{service_name}**' en **{real_name}**."
-            if not service_name or _normalize(service_name) in {"reservar", "reserva", "cita", "turno", "agendar", "servicio", "servicios"}:
+            if names_nothing_concrete(service_name):
+                # El usuario pidió una cita sin decir de qué. Devolverle "no
+                # encontré el servicio 'agendar cita'" le echa la culpa de una
+                # pregunta que todavía no se le ha hecho.
                 msg = f"¿Qué servicio deseas agendar en **{real_name}**?"
 
             return {
@@ -2086,6 +2314,111 @@ async def request_appointment(
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUIÉN ESTÁ RESERVANDO
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# La aplicación tiene tres tablas de identidad y cada parte del sistema estaba
+# leyendo una distinta:
+#
+#   usuario   la cuenta con la que se entra (email + contraseña)
+#   persona   quién es esa cuenta          (usuario.idpersona → persona.id)
+#   tercero   la ficha de cliente          (se cruza por email con persona)
+#
+# El chat recibe `persona.id` —es lo que el login le entrega al frontend— y aquí
+# se leía como si fuera `usuario.id`, uniéndolo además contra `tercero` en vez
+# de contra `persona`. Los tres rangos de ids se solapan, así que no fallaba:
+# acertaba a otra persona. El 55 es a la vez la persona que reserva y una cuenta
+# ajena cuyo tercero es "Comercializadora Cauca", y con ese nombre salía la cita.
+#
+# El daño no era sólo el nombre. "Mis Reservas" busca por
+# `tercero.email = persona.email`, así que la reserva quedaba archivada bajo un
+# tercero que no era el suyo y no aparecía nunca en su lista.
+
+
+async def resolve_booking_identity(external_user_id) -> Optional[dict]:
+    """
+    Traduce el id que llega del chat a las tres identidades que hacen falta.
+
+    Devuelve `persona_id`, `nombre`, `tercero_id` (el que lee "Mis Reservas") y
+    `usuario_id`, o None si el id no corresponde a nadie.
+    """
+    from core.database import get_connection
+
+    if external_user_id in (None, ""):
+        return None
+
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                # 1. Como persona, que es lo que manda el chat.
+                cur.execute(
+                    """
+                    SELECT p.id AS persona_id,
+                           TRIM(CONCAT_WS(' ', p.nombre1, p.nombre2,
+                                               p.apellido1, p.apellido2)) AS nombre,
+                           p.email,
+                           u.id AS usuario_id
+                    FROM persona p
+                    LEFT JOIN usuario u ON u.idpersona = p.id
+                    WHERE p.id = %s
+                    LIMIT 1
+                    """,
+                    (external_user_id,),
+                )
+                row = cur.fetchone()
+                via = "persona"
+
+                # 2. Respaldo: los canales que envían el id de la cuenta.
+                if not row:
+                    cur.execute(
+                        """
+                        SELECT p.id AS persona_id,
+                               TRIM(CONCAT_WS(' ', p.nombre1, p.nombre2,
+                                                   p.apellido1, p.apellido2)) AS nombre,
+                               p.email,
+                               u.id AS usuario_id
+                        FROM usuario u
+                        JOIN persona p ON p.id = u.idpersona
+                        WHERE u.id = %s
+                        LIMIT 1
+                        """,
+                        (external_user_id,),
+                    )
+                    row = cur.fetchone()
+                    via = "usuario"
+
+                if not row:
+                    logger.warning("Identidad no resuelta para id=%s", external_user_id)
+                    return None
+
+                # 3. La ficha de cliente, que es por donde el perfil lee sus
+                #    reservas. Sin ella la cita existe pero nadie la ve.
+                tercero_id = None
+                if row.get("email"):
+                    cur.execute(
+                        "SELECT id FROM tercero WHERE email = %s LIMIT 1",
+                        (row["email"],),
+                    )
+                    t = cur.fetchone()
+                    if t:
+                        tercero_id = t["id"]
+
+        identidad = {
+            "persona_id": row["persona_id"],
+            "usuario_id": row.get("usuario_id"),
+            "tercero_id": tercero_id,
+            "nombre": " ".join((row.get("nombre") or "").split()) or None,
+            "email": row.get("email"),
+            "via": via,
+        }
+        logger.info("[IDENTIDAD] id=%s vía %s → %s", external_user_id, via, identidad)
+        return identidad
+    except Exception as exc:
+        logger.error("Error resolviendo identidad de %s: %s", external_user_id, exc)
+        return None
+
+
 async def confirm_appointment(
     business_id: int,
     time: str,
@@ -2167,34 +2500,33 @@ async def confirm_appointment(
                         or user_data.get("display_name")
                     )
 
-                    # 2. Resolver Tercero ID vía idpersona (Relación Directa en vt_inventario)
-                    cur.execute(
-                        """
-                        SELECT t.id, t.nombre 
-                        FROM usuario u
-                        JOIN tercero t ON u.idpersona = t.id
-                        WHERE u.id = %s
-                        LIMIT 1
-                        """,
-                        (external_user_id,),
-                    )
-                    tercero_row = cur.fetchone()
-                    
-                    if tercero_row:
-                        # idtercero_final es el ID del perfil físico (tercero)
-                        idtercero_final = tercero_row["id"]
-                        # Si no vino nombre en user_data, usar el de la DB
+                    # 2. Resolver las tres identidades a partir del id recibido.
+                    #    Ver `resolve_booking_identity`: aquí se leía el id de la
+                    #    persona como si fuera el de la cuenta, y se unía contra
+                    #    `tercero` en vez de contra `persona`. No fallaba, que
+                    #    habría sido lo bueno: acertaba a otra persona.
+                    identidad = await resolve_booking_identity(external_user_id)
+
+                    if identidad:
                         if not user_name:
-                            user_name = tercero_row["nombre"]
+                            user_name = identidad["nombre"] or "Usuario"
+                        # La ficha de cliente es por donde el perfil lista las
+                        # reservas; sin ella la cita existe y nadie la ve.
+                        idtercero_final = (
+                            identidad["tercero_id"] or identidad["persona_id"]
+                        )
+                        if not identidad["tercero_id"]:
+                            logger.warning(
+                                "Persona %s sin ficha de cliente: la reserva puede "
+                                "no aparecer en su perfil.", identidad["persona_id"],
+                            )
+                        user_id_for_agenda = identidad["usuario_id"] or external_user_id
                     else:
-                        # Si no hay tercero vinculado, usar el ID de usuario como fallback
                         idtercero_final = external_user_id
+                        user_id_for_agenda = external_user_id
                         if not user_name:
                             user_name = "Usuario"
 
-                    # El user_id para la tabla 'agenda' debe ser el ID de la cuenta (usuario)
-                    # El idtercero_final es para tablas relacionales de personas
-                    user_id_for_agenda = external_user_id
                     user_id_for_client = idtercero_final
                 else:
                     # Caso anónimo: se resolverá más adelante con el nombre proporcionado
@@ -2287,8 +2619,16 @@ async def confirm_appointment(
                 # ── Paso 3: Resolver servicio ──────────────────────────────────
                 srv_data = await _resolve_service_id(business_id, service_name)
                 if not srv_data:
+                    if names_nothing_concrete(service_name):
+                        return {
+                            "success": False,
+                            "asking": "service_name",
+                            "needs_input": True,
+                            "message": f"¿Qué servicio deseas agendar en **{real_name}**?",
+                        }
                     return {
                         "success": False,
+                        "asking": "service_name",
                         "message": f"Lo siento, no encontré el servicio '**{service_name}**' en **{real_name}**.",
                     }
 

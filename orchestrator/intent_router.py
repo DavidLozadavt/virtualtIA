@@ -34,6 +34,7 @@ from tools.shared.utils import (
 
 from core.logger import setup_logger
 from core.semantic import Act, ConversationState, build_understanding
+from core.semantic import lexicon as lx
 from core.semantic import temporal as semantic_temporal
 from core.semantic.dialogue import read_answer
 from core.semantic.speech_act import analyze as analyze_speech_act
@@ -564,9 +565,19 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         asking_service = ("servicio" in last_assistant_msg or "cuál" in last_assistant_msg or "que servicio" in last_assistant_msg) and \
                          ("agendar" in last_assistant_msg or "deseas" in last_assistant_msg or "escribe" in last_assistant_msg or "elegir" in last_assistant_msg)
         
+        # El atajo guarda el mensaje ENTERO como nombre del servicio, así que
+        # sólo vale si el mensaje nombra algo. "agendar cita" describe el acto,
+        # no lo que se agenda: tomarlo al pie de la letra hacía que el turno
+        # siguiente respondiera "no encontré el servicio 'agendar cita'".
         if asking_service and not (asking_time or asking_prof):
-             logger.info(f"DETECCION: intent='request_appointment' (vía context: servicio) -> '{text}'")
-             return {"intent": "request_appointment", "args": {"service_name": text}}
+            if lx.names_nothing_concrete(text):
+                logger.info(
+                    "DETECCION: '%s' pide cita sin nombrar servicio → se deja a la comprensión",
+                    text,
+                )
+            else:
+                logger.info(f"DETECCION: intent='request_appointment' (vía context: servicio) -> '{text}'")
+                return {"intent": "request_appointment", "args": {"service_name": text}}
 
     # ═══════════════════════════════════════════════════════════════════════
     # DECISIÓN PRINCIPAL: LA COMPRENSIÓN VA PRIMERO

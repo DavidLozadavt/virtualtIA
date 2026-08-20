@@ -468,3 +468,37 @@ def is_function_word(word: str) -> bool:
     if w in FUNCTION_WORDS or w in CALENDAR_WORDS:
         return True
     return in_stem_set(phonetic_stem(w), FUNCTION_STEMS)
+
+
+#: Raíces que nombran el ACTO de agendar o la idea abstracta de "servicio",
+#: nunca un servicio concreto del catálogo.
+_CONTENTLESS_STEMS = (
+    APPOINTMENT_FRAME_STEMS | OFFERING_FRAME_STEMS
+    | GENERIC_PLACE_STEMS | TEMPORAL_FRAME_STEMS
+)
+
+
+def names_nothing_concrete(text: str) -> bool:
+    """
+    True si el texto pide agendar sin decir QUÉ.
+
+    "agendar cita", "quiero una reserva" y "cita para mañana" describen el acto,
+    no lo que se agenda. Guardarlos como nombre de servicio producía una
+    búsqueda de un servicio llamado "agendar cita", y de ahí el "no encontré el
+    servicio 'agendar cita'" que veía el usuario justo después de pedir una.
+
+    La comprobación es por palabra: el filtro anterior comparaba la frase entera
+    contra una lista de palabras sueltas, así que "agendar" se detenía y
+    "agendar cita" pasaba de largo.
+    """
+    from core.semantic.morphology import in_stem_set, normalize
+    palabras = normalize(text or "").split()
+    if not palabras:
+        return True
+    for palabra in palabras:
+        if is_function_word(palabra):
+            continue
+        if in_stem_set(phonetic_stem(palabra), _CONTENTLESS_STEMS):
+            continue
+        return False
+    return True

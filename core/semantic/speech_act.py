@@ -516,6 +516,19 @@ def analyze(message: str) -> Analysis:
     return result(Act.UNPARSEABLE, 0.5)
 
 
+#: Palabras que sólo pegan una fórmula social a otra ("claro QUE sí"). No son
+#: contenido y no deben impedir reconocer la fórmula.
+#:
+#: Se descuentan las que además SON fórmula: "si" es a la vez conjunción
+#: condicional y la afirmación más común del idioma, y retirarla dejaba "sí" sin
+#: nada que reconocer.
+_SOCIAL_FORMULAS = (
+    lx.AFFIRMATIVE_FORMS | lx.NEGATIVE_FORMS | lx.BACKCHANNEL_FORMS
+    | lx.THANKS_FORMS | lx.GREETING_FORMS | lx.FAREWELL_FORMS
+)
+_SOCIAL_GLUE = (lx.CONJUNCTIONS | lx.ARTICLES | lx.PREPOSITIONS) - _SOCIAL_FORMULAS
+
+
 def _social_act(text_norm: str, toks: List[str], token_set: Set[str], residue: List[str]) -> Optional[str]:
     """
     Rutinas de contacto. Sólo se aplican si el mensaje se AGOTA en ellas:
@@ -553,16 +566,22 @@ def _social_act(text_norm: str, toks: List[str], token_set: Set[str], residue: L
     if token_set and token_set <= (lx.GREETING_FORMS | lx.GREETING_FORMS):
         return Act.GREET
 
-    if token_set and token_set <= lx.AFFIRMATIVE_FORMS:
+    # "Claro QUE sí", "sí POR supuesto": la conjunción y la preposición son
+    # andamiaje de la fórmula, no una segunda cosa que el usuario esté diciendo.
+    # Compararlas contra el inventario hacía que "claro que sí" no llegara a ser
+    # una afirmación y acabara respondida como si nadie hubiera dicho nada.
+    nucleo = token_set - _SOCIAL_GLUE
+
+    if nucleo and nucleo <= lx.AFFIRMATIVE_FORMS:
         return Act.AFFIRM
-    if token_set and token_set <= lx.NEGATIVE_FORMS:
+    if nucleo and nucleo <= lx.NEGATIVE_FORMS:
         return Act.DENY
 
-    if token_set and token_set <= lx.BACKCHANNEL_FORMS:
+    if nucleo and nucleo <= lx.BACKCHANNEL_FORMS:
         return Act.BACKCHANNEL
 
     # Mezclas de fórmulas: "ok gracias", "hola buenas".
-    if token_set and token_set <= (lx.BACKCHANNEL_FORMS | lx.THANKS_FORMS | lx.AFFIRMATIVE_FORMS):
+    if nucleo and nucleo <= (lx.BACKCHANNEL_FORMS | lx.THANKS_FORMS | lx.AFFIRMATIVE_FORMS):
         return Act.BACKCHANNEL
     if token_set and token_set <= (lx.GREETING_FORMS | lx.BACKCHANNEL_FORMS):
         return Act.GREET

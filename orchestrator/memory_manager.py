@@ -94,7 +94,8 @@ def get_or_create_conversation(
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id, user_id, project_slug, final_data FROM lyra_conversations WHERE id = %s",
+                """SELECT id, user_id, project_slug, final_data, last_message_at
+                   FROM lyra_conversations WHERE id = %s""",
                 (conversation_id,),
             )
             conv = cursor.fetchone()
@@ -126,8 +127,60 @@ def get_or_create_conversation(
                 "id": conversation_id,
                 "user_id": user_id,
                 "project_slug": project_slug,
-                "final_data": {}
+                "final_data": {},
+                "last_message_at": datetime.now(),
             }
+
+
+# ─── Vigencia del contexto ───────────────────────────────────────────────
+
+#: Tras este tiempo sin hablar, lo que quedó a medias deja de estar vigente.
+#: Un servicio elegido, una hora propuesta o una reserva a la espera de sesión
+#: sólo tienen sentido dentro de la conversación que los produjo; recuperarlos
+#: días después hace que el asistente conteste a algo que el usuario ya no
+#: recuerda haber dicho.
+STALE_CONTEXT_SECONDS = 2 * 60 * 60
+
+#: Claves que son la RESPUESTA de un turno, no la memoria de la conversación.
+#: Se persistían junto al resto y volvían pegadas al turno siguiente: por eso
+#: las fichas de una búsqueda antigua acompañaban a cada mensaje posterior.
+TURN_OUTPUT_KEYS = (
+    "reply", "properties", "filters_applied", "map_center",
+    "voice_action", "voice_action_payload",
+    "needs_clarification", "clarification_question", "needs_input",
+    "needs_auth", "pending_reservation", "llm_error", "_fallback_reply",
+)
+
+
+def is_stale(last_message_at=None, now=None) -> bool:
+    """¿El hilo lleva tanto tiempo parado que ya no es la misma conversación?"""
+    if last_message_at is None:
+        return False
+    try:
+        inactivo = ((now or datetime.now()) - last_message_at).total_seconds()
+    except TypeError:          # naive vs aware: no vale la pena adivinar
+        return False
+    if inactivo <= STALE_CONTEXT_SECONDS:
+        return False
+    logger.info(
+        "Hilo reanudado tras %.0f s de silencio (límite %s s): empieza de cero.",
+        inactivo, STALE_CONTEXT_SECONDS,
+    )
+    return True
+
+
+def carry_over_context(final_data: dict, last_message_at=None, now=None) -> dict:
+    """
+    Lo que de la conversación anterior sigue valiendo para este turno.
+
+    Devuelve un diccionario NUEVO: el turno empieza sin la respuesta del
+    anterior, y sin nada en absoluto si el hilo lleva demasiado tiempo parado.
+    """
+    if not final_data:
+        return {}
+    if is_stale(last_message_at, now):
+        return {}
+    return {k: v for k, v in final_data.items() if k not in TURN_OUTPUT_KEYS}
 
 
 def update_conversation_timestamp(conversation_id: str) -> None:
