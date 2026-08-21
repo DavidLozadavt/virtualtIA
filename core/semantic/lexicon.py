@@ -372,6 +372,24 @@ OFFERING_FRAME_STEMS = frozenset({
     phonetic_stem(w) for w in (
         "servicio", "servicios", "catalogo", "carta", "menu",
         "precio", "precios", "valor", "costo", "tarifa", "cobran",
+        # Preguntar el precio con el verbo en lugar del sustantivo es la forma
+        # más común de hacerlo: "¿cuánto cuesta?", "¿cuánto vale?". Sin estas
+        # formas, "cuesta" quedaba como palabra de contenido y se buscaba en el
+        # catálogo un rubro llamado "cuesta".
+        "cuesta", "cuestan", "costar", "vale", "valen", "valer", "cobra", "cobrar",
+    )
+})
+
+#: Marco de CANTIDAD sobre lo ya mostrado: "¿es el único?", "¿son todos?",
+#: "¿cuántos hay?". Son clase cerrada y no nombran nada del catálogo: preguntan
+#: si la lista que el usuario tiene delante está completa. Sin registrarlas,
+#: "único" viajaba como palabra de contenido y se buscaba un rubro con ese
+#: nombre — o peor, se guardaba como el nombre de un servicio.
+QUANTITY_FRAME_STEMS = frozenset({
+    phonetic_stem(w) for w in (
+        "unico", "unica", "unicos", "unicas",
+        "todos", "todas", "demas", "restantes",
+        "cuantos", "cuantas", "cantidad",
     )
 })
 
@@ -448,6 +466,7 @@ MAP_FRAME_STEMS = frozenset({phonetic_stem(w) for w in ("mapa", "plano", "ubicac
 FRAME_STEMS = (
     APPOINTMENT_FRAME_STEMS | HUMAN_AGENT_FRAME_STEMS | TEMPORAL_FRAME_STEMS
     | OFFERING_FRAME_STEMS | GENERIC_PLACE_STEMS | REVIEW_FRAME_STEMS
+    | QUANTITY_FRAME_STEMS
     | IDENTITY_FRAME_STEMS | WEB_FRAME_STEMS | RECOMMEND_FRAME_STEMS
     | COMPARE_FRAME_STEMS | MAP_FRAME_STEMS
 )

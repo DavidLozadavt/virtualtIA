@@ -87,6 +87,15 @@ def read_answer(
     if not slot:
         return None
 
+    # El usuario rechaza el objetivo mismo, no el valor que se le pide. Una
+    # pregunta abierta es evidencia fuerte, pero no puede sobrevivir a que le
+    # digan que la conversación iba por otro lado: "no quiero agendar, quiero
+    # saber qué negocios ofrecen medicina general" respondía "¿a qué hora te
+    # viene mejor?", que es ignorar al usuario por escrito.
+    if analysis.rejects_booking:
+        logger.info("el usuario rechaza el objetivo → la ranura '%s' se abandona", slot)
+        return None
+
     reader = _READERS.get(slot)
     if reader is None:
         return None
@@ -127,6 +136,14 @@ def _read_out_of_turn(
     sin la pregunta correspondiente delante, no hay forma de saber si nombra un
     servicio, un profesional o un negocio.
     """
+    # Preguntar por una fecha no es proponerla. "¿Tienen citas mañana?" consulta
+    # la disponibilidad; recoger ese "mañana" como el día de la reserva era
+    # convertir una pregunta en un compromiso que el usuario no adquirió.
+    if analysis.markers.get("interrogative") and analysis.act in (
+        Act.EXISTENTIAL, Act.ATTRIBUTE, Act.LOCATIVE, Act.PERSON_QUERY,
+    ):
+        return None
+
     updates: Dict[str, Any] = {}
 
     hora = temporal.read_time(message)
@@ -171,6 +188,19 @@ def booking_args(state: ConversationState, **overrides) -> Dict[str, Any]:
     for key, value in overrides.items():
         if value is not None:
             args[key] = value
+
+    # El servicio por el que se hizo la búsqueda entra en la reserva.
+    #
+    # "¿Qué negocios ofrecen medicina general?" … "quisiera agendar" es una sola
+    # conversación: el usuario ya dijo qué quiere. Preguntarle el servicio a
+    # estas alturas —y encima con una lista de cuatro para elegir— es hacerle
+    # repetir lo único que había pedido desde el principio.
+    #
+    # Va al final y sólo si la ranura quedó vacía: cualquier cosa que el usuario
+    # nombre manda sobre el tema que traía la conversación.
+    if not args.get(Slot.SERVICE) and state.topic_service:
+        args[Slot.SERVICE] = state.topic_service
+
     return args
 
 
@@ -204,8 +234,24 @@ def _ask_again(question: str, slot: str, note: str) -> Understanding:
     return u.note(note)
 
 
+#: Marcos que hablan de OTRO tema. Si la negación viene acompañada de uno, el
+#: mensaje no es un "no" a la ranura abierta: es otra petición.
+_TOPIC_FRAMES = frozenset({
+    "appointment", "offering", "human_agent", "review", "map", "web",
+    "identity", "compare", "generic_place",
+})
+
+
 def _is_denial(analysis: Analysis, message: str) -> bool:
-    """¿El mensaje corrige algo? ("no, mejor a las 10")"""
+    """
+    ¿El mensaje rechaza el valor de la ranura y nada más? ("no, mejor a las 10")
+
+    Un "no" que viene seguido de otra petición —"no, primero quiero saber
+    cuánto cuesta"— no es eso: es un cambio de tema, y volver a preguntar la
+    hora sería contestar a algo que el usuario no dijo.
+    """
+    if analysis.corrective and (analysis.content_terms or (analysis.frames & _TOPIC_FRAMES)):
+        return False
     if analysis.act == Act.DENY:
         return True
     first = normalize(message).split()

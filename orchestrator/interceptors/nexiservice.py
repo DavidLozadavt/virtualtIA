@@ -476,6 +476,21 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
         )
 
     # ══════════════════════════════════════════════════════════════════════════
+    # EL USUARIO CANCELÓ LA RESERVA: SE TIRA ENTERA
+    # ══════════════════════════════════════════════════════════════════════════
+    # Distinto de un cambio de tema. Aquí el usuario no se desvía: dice que no
+    # quiere agendar. Conservar las ranuras "por si vuelve" era lo que hacía que
+    # dos turnos después reapareciera la cita que acababa de rechazar.
+    if args.pop("_cancel_booking", False):
+        logger.info(
+            "[DIÁLOGO] el usuario canceló el agendamiento; se descarta: %s",
+            {k: v for k, v in sem_state.booking.items() if v},
+        )
+        sem_state.clear_booking()
+        sem_state.save(final_data)
+        clear_booking_state(final_data)
+
+    # ══════════════════════════════════════════════════════════════════════════
     # CAMBIO DE TEMA: SE CIERRA LA PREGUNTA, NO LA RESERVA
     # ══════════════════════════════════════════════════════════════════════════
     # El usuario tiene derecho a preguntar otra cosa en mitad de una reserva
@@ -1365,6 +1380,15 @@ async def _handle_search_businesses(
     category = args.get("category")
     city = args.get("city") or context.get("active_city")
 
+    # Qué se le había mostrado ANTES de esta búsqueda. Es lo que permite
+    # reconocer que el usuario está preguntando por lo mismo otra vez —"¿es el
+    # único?", "¿hay más?"— y contestarle eso en vez de volver a presentarle el
+    # mismo negocio como si fuera un hallazgo nuevo.
+    ya_mostrados = [
+        p.entity_id for p in sem_state.presented
+        if p.kind == ConceptKind.BUSINESS and p.entity_id
+    ]
+
     # Cuando la necesidad se expresó por el servicio ("alguna medicina", "un
     # masaje"), se entra por la tabla de servicios: buscar sólo por nombre y
     # categoría de empresa no encontraría nada aunque el servicio exista.
@@ -1396,6 +1420,12 @@ async def _handle_search_businesses(
     sem_state.remember_list(ConceptKind.BUSINESS, businesses)
     if args.get("_grounded_kind"):
         sem_state.active_domain = category
+    # Cuando la búsqueda se hizo POR UN SERVICIO, ese servicio es el tema de la
+    # conversación. No abre una reserva —buscar no es agendar—, pero si el
+    # usuario decide agendar después, ya lo dijo: preguntárselo otra vez es
+    # hacerle repetir lo único que había pedido desde el principio.
+    if args.get("_grounded_kind") in (ConceptKind.SERVICE, ConceptKind.SERVICE_CATEGORY):
+        sem_state.topic_service = category
 
     # El usuario pidió reservar y describió el rubro en el mismo mensaje. La
     # petición no se pierde por mostrarle opciones: queda anotada para que
@@ -1409,6 +1439,37 @@ async def _handle_search_businesses(
             sem_state.booking["wants_professional"] = True
 
     label = _domain_label(args, category)
+
+    # ── La misma búsqueda otra vez: el usuario pregunta si eso es todo ───────
+    #
+    # "¿Es el único?", "¿hay más?", "¿qué otras opciones hay?" vuelven a
+    # consultar el catálogo y devuelven exactamente lo mismo. Repetirle entonces
+    # "Encontré X. ¿Quieres agendar?" es no haber contestado: el usuario
+    # preguntó por la CANTIDAD, y la respuesta a eso es que no hay más.
+    repetida = (
+        bool(businesses)
+        and not is_booking
+        and ya_mostrados
+        and {b["id"] for b in businesses} == set(ya_mostrados)
+    )
+    if repetida:
+        where = tool_output.get("city") or city
+        if len(businesses) == 1:
+            b = businesses[0]
+            sem_state.set_focus(ConceptKind.BUSINESS, b["id"], b["name"])
+            reply = (
+                f"Sí, **{b['name']}** es el único que tengo registrado con "
+                f"{label} en {where}. Si quieres, te muestro sus servicios, "
+                f"sus horarios o buscamos en otra ciudad."
+            )
+        else:
+            reply = (
+                f"Son esas mismas {len(businesses)} opciones: no tengo más "
+                f"registradas con {label} en {where}."
+            )
+        sem_state.save(final_data)
+        return {"reply": reply, "final_data": final_data}
+
     if not businesses:
         # El concepto se entendió; simplemente no hay nada registrado todavía.
         reply = (
