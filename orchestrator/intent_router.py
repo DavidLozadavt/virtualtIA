@@ -36,7 +36,7 @@ from core.logger import setup_logger
 from core.semantic import Act, ConversationState, build_understanding
 from core.semantic import lexicon as lx
 from core.semantic import temporal as semantic_temporal
-from core.semantic.dialogue import read_answer
+from core.semantic.dialogue import Slot, read_answer
 from core.semantic.speech_act import analyze as analyze_speech_act
 from core.semantic.types import Disposition
 
@@ -73,6 +73,8 @@ def _semantic_result(understanding) -> dict:
         extra["_expects"] = understanding.expects
     if understanding.corrections:
         extra["_corrections"] = understanding.corrections
+    if understanding.cancels_goal:
+        extra["_cancel_booking"] = True
 
     if understanding.disposition == Disposition.CLARIFY:
         return {
@@ -543,28 +545,52 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         _act_is(Act.REFERENCE, Act.PERSON_QUERY, Act.ATTRIBUTE)
         or (semantic_analysis is not None and semantic_analysis.ordinal is not None)
     )
+    # Segunda guarda, y la que de verdad delimita el atajo: tiene que haber una
+    # pregunta abierta.
+    #
+    # Antes se deducía de raspar el markdown del asistente, y ese raspado no
+    # distingue una PREGUNTA de una OFERTA. "¿Te gustaría ver sus servicios o
+    # agendar?" contiene "servicio" y "agendar", así que "es el único?" se
+    # guardaba como el nombre de un servicio y la conversación saltaba a
+    # "¿en qué negocio te gustaría agendar tu cita?".
+    #
+    # El estado estructurado sabe qué se preguntó porque la herramienta lo
+    # declara. Sólo se recurre al texto cuando no hay estado ninguno, que es el
+    # caso de las conversaciones anteriores a que existiera.
+    _pending = semantic_state.pending_slot
+    _sin_estado = not (
+        semantic_state.presented or semantic_state.booking
+        or semantic_state.focus_id or _pending
+    )
     if (
         project_id == "nexiservice"
+        and (_pending or _sin_estado)
         and len(text.split()) <= 5
         and not is_time_or_date
         and not _is_selection_or_question
     ):
-        asking_time = any(kw in last_assistant_msg for kw in ["hora", "cuándo", "cuando", "momento", "tiempo"])
-        asking_prof = any(kw in last_assistant_msg for kw in ["profesional", "quién", "quien", "atender"])
-        
-        # Priority 1: Name (Strict to avoid collision with "nombre del servicio")
-        # If the assistant says "agendaremos el servicio X... ¿a nombre de quién?", we must prioritize the name.
-        asking_name = ("tu nombre" in last_assistant_msg or "a nombre de" in last_assistant_msg or "indícame tu nombre" in last_assistant_msg) or \
-                     ("nombre" in last_assistant_msg and ("quién" in last_assistant_msg or "quien" in last_assistant_msg) and ("reserva" in last_assistant_msg or "agendar" in last_assistant_msg))
-        
+        if _pending:
+            asking_time    = _pending == Slot.TIME
+            asking_prof    = _pending == Slot.PROFESSIONAL
+            asking_name    = _pending == Slot.NAME
+            asking_service = _pending == Slot.SERVICE
+        else:
+            asking_time = any(kw in last_assistant_msg for kw in ["hora", "cuándo", "cuando", "momento", "tiempo"])
+            asking_prof = any(kw in last_assistant_msg for kw in ["profesional", "quién", "quien", "atender"])
+
+            # Priority 1: Name (Strict to avoid collision with "nombre del servicio")
+            # If the assistant says "agendaremos el servicio X... ¿a nombre de quién?", we must prioritize the name.
+            asking_name = ("tu nombre" in last_assistant_msg or "a nombre de" in last_assistant_msg or "indícame tu nombre" in last_assistant_msg) or \
+                         ("nombre" in last_assistant_msg and ("quién" in last_assistant_msg or "quien" in last_assistant_msg) and ("reserva" in last_assistant_msg or "agendar" in last_assistant_msg))
+
+            # Priority 2: Service (Assistant says "Escribe el nombre del servicio" or "¿Cuál servicio?")
+            asking_service = ("servicio" in last_assistant_msg or "cuál" in last_assistant_msg or "que servicio" in last_assistant_msg) and \
+                             ("agendar" in last_assistant_msg or "deseas" in last_assistant_msg or "escribe" in last_assistant_msg or "elegir" in last_assistant_msg)
+
         if asking_name:
             logger.info(f"DETECCION: intent='request_appointment' (vía context: nombre de reserva) -> '{text}'")
             return {"intent": "request_appointment", "args": {"reservation_name": text}}
 
-        # Priority 2: Service (Assistant says "Escribe el nombre del servicio" or "¿Cuál servicio?")
-        asking_service = ("servicio" in last_assistant_msg or "cuál" in last_assistant_msg or "que servicio" in last_assistant_msg) and \
-                         ("agendar" in last_assistant_msg or "deseas" in last_assistant_msg or "escribe" in last_assistant_msg or "elegir" in last_assistant_msg)
-        
         # El atajo guarda el mensaje ENTERO como nombre del servicio, así que
         # sólo vale si el mensaje nombra algo. "agendar cita" describe el acto,
         # no lo que se agenda: tomarlo al pie de la letra hacía que el turno

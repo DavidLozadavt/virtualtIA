@@ -182,6 +182,11 @@ class ConversationState:
     focus_label: Optional[str] = None
     #: Dominio semántico activo (etiqueta real de categoría del catálogo).
     active_domain: Optional[str] = None
+    #: Servicio del que trata la conversación, como CRITERIO de búsqueda. Vive
+    #: aparte de `booking` a propósito: tenerlo en memoria no significa que el
+    #: usuario quiera reservarlo. Sirve para no volver a preguntárselo si acaba
+    #: agendando, y sobrevive a que cambie de intención.
+    topic_service: Optional[str] = None
     #: Ranuras de agendamiento acumuladas a lo largo de varios mensajes.
     booking: Dict[str, Any] = field(default_factory=dict)
     #: Último acto de habla y si Lyra dejó una pregunta abierta.
@@ -213,6 +218,7 @@ class ConversationState:
             "focus_id": self.focus_id,
             "focus_label": self.focus_label,
             "active_domain": self.active_domain,
+            "topic_service": self.topic_service,
             "booking": self.booking,
             "last_act": self.last_act,
             "pending_question": self.pending_question,
@@ -231,6 +237,7 @@ class ConversationState:
             focus_id=raw.get("focus_id"),
             focus_label=raw.get("focus_label"),
             active_domain=raw.get("active_domain"),
+            topic_service=raw.get("topic_service"),
             booking=dict(raw.get("booking") or {}),
             last_act=raw.get("last_act"),
             pending_question=raw.get("pending_question"),
@@ -400,6 +407,11 @@ class Understanding:
     expects: Optional[str] = None
     #: Ranuras que este turno reemplazó: [{"slot", "from", "to"}].
     corrections: List[Dict[str, Any]] = field(default_factory=list)
+    #: El usuario canceló explícitamente el objetivo que estaba en curso ("no
+    #: quiero agendar"). Viaja hasta el interceptor, que es quien persiste el
+    #: estado: sin esta señal la reserva seguía viva en la base de datos y
+    #: reaparecía en el turno siguiente.
+    cancels_goal: bool = False
 
     def note(self, message: str) -> "Understanding":
         self.trace.append(message)

@@ -18,10 +18,11 @@ generalice a formulaciones nunca vistas.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Set
 
 from core.semantic import lexicon as lx
+from core.semantic import polarity
 from core.semantic.morphology import in_stem_set, normalize, phonetic_stem, tokens
 from core.semantic.types import Act
 
@@ -47,10 +48,23 @@ class Analysis:
     #: Rasgos gramaticales crudos, útiles para depurar decisiones.
     markers: Dict[str, bool] = field(default_factory=dict)
     confidence: float = 0.0
+    #: Marcos que el usuario nombró para RECHAZARLOS ("no quiero agendar").
+    #: Están fuera de `frames` a propósito: no describen lo que quiere, sino lo
+    #: que acaba de descartar, y confundirlos era lo que convertía una negación
+    #: en una reserva.
+    negated_frames: Set[str] = field(default_factory=set)
+    #: El mensaje corrige una interpretación anterior. Es la señal de máxima
+    #: confianza del turno: manda sobre cualquier flujo abierto.
+    corrective: bool = False
 
     @property
     def has_content(self) -> bool:
         return bool(self.content_terms)
+
+    @property
+    def rejects_booking(self) -> bool:
+        """El usuario dijo explícitamente que no quiere agendar."""
+        return "appointment" in self.negated_frames
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -101,6 +115,7 @@ _FRAME_ORDER = (
     ("appointment",   lambda: lx.APPOINTMENT_FRAME_STEMS),
     ("human_agent",   lambda: lx.HUMAN_AGENT_FRAME_STEMS),
     ("map",           lambda: lx.MAP_FRAME_STEMS),
+    ("quantity",      lambda: lx.QUANTITY_FRAME_STEMS),
     ("offering",      lambda: lx.OFFERING_FRAME_STEMS),
     ("generic_place", lambda: lx.GENERIC_PLACE_STEMS),
     ("temporal",      lambda: lx.TEMPORAL_FRAME_STEMS),
@@ -230,6 +245,15 @@ def _extract_ordinal(toks: List[str], text_norm: str) -> Optional[int]:
         nxt = toks[idx + 1] if idx + 1 < len(toks) else ""
         if nxt and not lx.is_function_word(nxt):
             continue
+        # Ni tampoco un ordinal SIN determinante seguido de verbo: ahí ordena el
+        # turno, no señala un elemento. "Primero quiero saber cuánto cuesta"
+        # decía en qué orden hacer las cosas, y se leía como "el primero de la
+        # lista" — con lo que la pregunta acababa siendo una reserva.
+        #
+        # El determinante es lo que lo separa de una selección de verdad: "EL
+        # primero está bien" sí nombra un elemento de la lista.
+        if nxt and prev not in lx.ARTICLES and in_stem_set(phonetic_stem(nxt), lx.MODAL_STEMS):
+            continue
         return lx.ORDINALS[tok]
     if "ultimo" in text_norm or "ultima" in text_norm:
         return -1
@@ -257,7 +281,62 @@ def _content_residue(toks: List[str]) -> List[str]:
 
 
 def analyze(message: str) -> Analysis:
-    """Lee la estructura de un mensaje y devuelve su acto de habla."""
+    """
+    Lee la estructura de un mensaje y devuelve su acto de habla.
+
+    Antes de analizar QUÉ nombra el mensaje se mira CON QUÉ SIGNO lo nombra. Sin
+    ese paso, "quiero agendar" y "no quiero agendar" producían el mismo análisis
+    —el marco de cita aparece en los dos— y una corrección explícita del usuario
+    terminaba abriendo justo el proceso que acababa de rechazar.
+    """
+    reading = polarity.read(message)
+    if not reading.corrective:
+        # Sin corrección no hay nada que descartar, salvo el andamiaje con que
+        # se ordena un turno: "antes de eso, ¿qué otros negocios…?". Ese "antes"
+        # viajaba como palabra de contenido y se intentaba anclar al catálogo.
+        if reading.has_affirmation and reading.affirmed != normalize(message):
+            return _analyze_plain(_with_question_mark(reading.affirmed, message))
+        return _analyze_plain(message)
+
+    negated = _frames_in(reading.rejected)
+
+    if reading.has_affirmation:
+        # El usuario dijo qué NO quiere y a continuación qué sí. Lo segundo es
+        # el mensaje: lo primero sólo sirve para saber qué hay que abandonar.
+        base = _analyze_plain(_with_question_mark(reading.affirmed, message))
+    else:
+        # Rechazo sin recambio: "no", "no quiero agendar". No hay una petición
+        # nueva que atender, pero la anterior queda cancelada igual.
+        base = _analyze_plain(reading.rejected)
+        base = replace(base, act=Act.DENY, content_terms=[], frames=set())
+
+    base.negated_frames = negated
+    base.corrective = True
+    return base
+
+
+def _with_question_mark(fragment: str, original: str) -> str:
+    """
+    Devuelve el fragmento conservando la interrogación del mensaje original.
+
+    La segmentación por polaridad trabaja sobre texto ya normalizado, y ahí no
+    queda signo de interrogación. Sin volver a ponerlo, "¿hay más?" perdía el
+    único rasgo que lo marca como pregunta cuando no lleva interrogativo.
+    """
+    return fragment + ("?" if "?" in (original or "") else "")
+
+
+def _frames_in(text: str) -> Set[str]:
+    """Marcos semánticos que nombra un tramo de texto."""
+    if not text:
+        return set()
+    toks = [t for t in text.split() if t]
+    frames, _, _ = _assign_roles(toks, text)
+    return frames
+
+
+def _analyze_plain(message: str) -> Analysis:
+    """Análisis estructural del mensaje tal cual, sin considerar la polaridad."""
     text_norm = normalize(message)
     if not text_norm:
         return Analysis(act=Act.UNPARSEABLE, confidence=1.0)
@@ -361,6 +440,19 @@ def analyze(message: str) -> Analysis:
     social = _social_act(text_norm, toks, token_set, residue)
     if social:
         return result(social, 0.95, content_terms=[])
+
+    # 1b. Pregunta por la CANTIDAD de lo ya mostrado.
+    #
+    #     "¿Es el único?", "¿son todos?", "¿cuántos hay?" no nombran nada nuevo:
+    #     preguntan si la lista que el usuario tiene delante está completa.
+    #
+    #     Va muy arriba porque la cópula la disfraza: "¿es el único?" tiene la
+    #     forma de una pregunta por una definición —"¿qué es una reserva?"— y
+    #     salía respondida con el catálogo de capacidades del asistente. Sólo
+    #     manda si la cantidad es el ÚNICO marco: "¿cuántos servicios tienen?"
+    #     sigue preguntando por los servicios.
+    if "quantity" in frames and not residue and not (frames - {"quantity", "temporal"}):
+        return result(Act.EXISTENTIAL, 0.85, content_terms=[])
 
     # 2. El mensaje se dirige al asistente sobre sí mismo.
     #    "¿qué me puedes ofrecer?", "ayúdame", "¿cómo funciona esto?"

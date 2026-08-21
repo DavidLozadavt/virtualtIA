@@ -99,7 +99,24 @@ def build_understanding(
     u = Understanding(act=act, disposition=Disposition.CLARIFY, confidence=analysis.confidence)
     u.note(f"acto={act} contenido={analysis.content_terms} marcos={sorted(analysis.frames)}")
 
-    # ── 0. ¿Es la respuesta a lo que Lyra acaba de preguntar? ───────────────
+    # ── 0. Una corrección explícita cancela la lectura anterior ─────────────
+    #
+    # Va la primera de todas, por delante incluso de la pregunta abierta. Cuando
+    # el usuario dice "no, yo no quiero agendar", está diciendo que la
+    # interpretación anterior fue equivocada: ése es el dato más fiable del
+    # turno, y ninguna ranura pendiente puede reclamar el mensaje frente a él.
+    #
+    # Lo acordado no se tira entero por cualquier "no": sólo cuando lo que se
+    # rechaza es el objetivo mismo. "No, mejor a las 10" corrige la hora y la
+    # reserva sigue viva; "no quiero agendar" la termina.
+    if analysis.corrective:
+        u.note("corrección explícita: la lectura anterior pierde toda autoridad")
+        if analysis.rejects_booking:
+            u.cancels_goal = True
+            state.clear_booking()
+            u.note("el usuario rechaza agendar → se abandona la reserva en curso")
+
+    # ── 0.1. ¿Es la respuesta a lo que Lyra acaba de preguntar? ─────────────
     #
     # Va antes que todo lo demás. Una pregunta abierta es la evidencia
     # contextual más fuerte que hay: mientras siga en pie, el mensaje siguiente
@@ -165,6 +182,22 @@ def build_understanding(
             u.note(f"superlativo sin contenido → recomendación sobre '{rubro}'")
             return _finish(u, Disposition.ACT, "recommend_businesses")
 
+    # ── 0c. "¿Y los precios?" con un negocio delante pregunta por ESE negocio ─
+    #
+    # Sin nada en pantalla, "quiero saber los precios" es una pregunta sobre lo
+    # que hace el asistente. Con un negocio en foco no lo es: el usuario
+    # pregunta por su oferta, y responderle con el catálogo de capacidades de
+    # Lyra es cambiarle de tema.
+    if (
+        act == Act.AGENT_CAPABILITY
+        and "offering" in analysis.frames
+        and (state.focus_id or state.presented)
+    ):
+        analysis = replace(analysis, act=Act.ATTRIBUTE)
+        act = Act.ATTRIBUTE
+        u.act = act
+        u.note("pregunta por la oferta con un negocio delante → atributo del negocio")
+
     # ── 1. Actos sociales y dirigidos al asistente ──────────────────────────
     if act in Act.CONVERSATIONAL:
         return _conversational(u, act)
@@ -192,6 +225,24 @@ def build_understanding(
             u, analysis, state, message, temporal,
             mentioned_city=mentioned_city, catalog=catalog, allow_llm=allow_llm,
         )
+
+    # ── 3b. Preguntar SI hay citas no es pedirlas ───────────────────────────
+    #
+    # "¿Tienen citas mañana?", "¿hay horarios disponibles?" consultan la agenda
+    # del negocio que está sobre la mesa. Sin esta rama caían en descubrimiento y
+    # se respondían con una búsqueda de negocios, que no es lo que se preguntó.
+    if (
+        act == Act.EXISTENTIAL
+        and "appointment" in analysis.frames
+        and not analysis.content_terms
+    ):
+        biz_id = state.booking.get("business_id") or (
+            state.focus_id if state.focus_kind == ConceptKind.BUSINESS else None
+        )
+        if biz_id:
+            u.args = {"business_id": biz_id}
+            u.note("consulta de disponibilidad sobre el negocio en foco")
+            return _finish(u, Disposition.ACT, "get_business_availability")
 
     # ── 4. Descubrimiento: necesidad, existencia, lugar, sintagma desnudo ───
     if act in Act.DISCOVERY:
@@ -406,7 +457,10 @@ def _booking(
             catalog=catalog, allow_llm=allow_llm,
         )
         if servicio and servicio.label != args.get("service_name"):
-            anterior = args.get("service_name")
+            # Sólo cuenta como corrección lo que el usuario había ACORDADO. El
+            # servicio que venía del tema de la conversación es una suposición
+            # nuestra, y sustituirla no es que él haya cambiado de idea.
+            anterior = state.booking.get(dialogue.Slot.SERVICE)
             args["service_name"] = servicio.label
             if anterior:
                 u.corrections.append(
@@ -593,6 +647,18 @@ def _discovery(
 
     # ── Sin contenido propio: descubrimiento general del directorio ─────────
     if not terms:
+        # …salvo que la conversación ya tenga un tema. "¿Hay más?", "¿es el
+        # único?" preguntan por MÁS DE LO MISMO: buscar entonces en el
+        # directorio entero devuelve cualquier cosa y deja la pregunta sin
+        # responder. El rubro que ya estaba sobre la mesa es la consulta.
+        tema = state.topic_service or state.active_domain
+        if tema and analysis.act in (Act.EXISTENTIAL, Act.LOCATIVE):
+            u.args = {"category": tema, "city": mentioned_city, "_grounded_terms": [tema]}
+            if state.topic_service:
+                u.args["_grounded_kind"] = ConceptKind.SERVICE
+            u.note(f"pregunta por más de lo mismo → se repite la búsqueda de '{tema}'")
+            return _finish(u, Disposition.ACT, "search_businesses")
+
         wants_near = analysis.markers.get("locative_q") or _wants_proximity(message)
         if (
             "generic_place" in analysis.frames
@@ -642,9 +708,27 @@ def _discovery(
     # Hay una reserva abierta y el usuario nombra un servicio: lo está eligiendo,
     # no buscando otra cosa. Antes esto reiniciaba la búsqueda y el proceso se
     # quedaba dando vueltas sin llegar nunca a la cita.
+    #
+    # Dos condiciones lo delimitan, y las dos hacen falta:
+    #
+    # 1. La reserva tiene que estar REALMENTE abierta. Que haya un negocio en
+    #    foco no basta: un negocio queda en foco por el mero hecho de aparecer en
+    #    una búsqueda, y con esa condición sola cualquier pregunta posterior
+    #    sobre un servicio se convertía en una cita que nadie había pedido.
+    # 2. El mensaje no puede estar pidiendo opciones. "¿Qué otros negocios
+    #    ofrecen medicina general?" nombra el servicio para BUSCAR con él, no
+    #    para agendarlo.
+    booking_open = state.goal == dialogue.GOAL_BOOKING and bool(
+        state.booking.get("business_id") or state.booking.get("business_name")
+    )
+    asks_for_options = (
+        analysis.act in (Act.EXISTENTIAL, Act.LOCATIVE)
+        or "generic_place" in analysis.frames
+    )
     if (
         best.kind in (ConceptKind.SERVICE, ConceptKind.SERVICE_CATEGORY)
-        and (state.booking.get("business_id") or state.focus_id)
+        and booking_open
+        and not asks_for_options
     ):
         u.args = _booking_args(state, service_name=best.label)
         u.note(f"servicio elegido para la reserva en curso: {best.label}")
