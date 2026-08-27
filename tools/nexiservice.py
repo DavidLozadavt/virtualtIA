@@ -14,6 +14,9 @@ from core.config import settings
 from core.semantic.lexicon import names_nothing_concrete
 from tools.shared.utils import normalize_text as _normalize_shared
 
+from core.speech_format import format_price
+from core.wording import natural_list, one_line as _one_line
+
 logger = logging.getLogger("lyra.tools.nexiservice")
 
 # Registro local de ciudades principales para evitar rate-limits de Nominatim
@@ -750,6 +753,58 @@ async def search_businesses(
     }
 
 
+async def directory_overview(city: str = None, **kwargs) -> dict:
+    """
+    De qué hay en el directorio, por rubro.
+
+    Responde a "¿qué negocios tienes?" y a "¿qué puedo encontrar aquí?". Contar
+    los rubros de la página de resultados no servía: la búsqueda devuelve como
+    mucho veinte fichas ordenadas por distancia, y con eso Lyra informaba de dos
+    categorías cuando hay nueve. La pregunta es por la variedad, así que la
+    variedad se consulta entera.
+    """
+    from core.database import get_connection
+
+    ciudad = (city or "").strip()
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                where, params = ["e.idEstado = 1", "e.publicado = 1"], []
+                if ciudad:
+                    where.append("(LOWER(e.direccion) LIKE %s OR LOWER(e.razonSocial) LIKE %s)")
+                    aguja = f"%{_normalize(ciudad)}%"
+                    params.extend([aguja, aguja])
+                cur.execute(
+                    f"""
+                    SELECT COALESCE(ce.nombre, ce2.nombre) AS categoria, COUNT(DISTINCT e.id) AS n
+                    FROM empresa e
+                    LEFT JOIN categoriaempresa ce ON e.idCategoriaEmpresa = ce.id
+                    LEFT JOIN asignacionCompanyCategoria acc ON e.id = acc.idCompany
+                    LEFT JOIN categoriaempresa ce2 ON acc.idCategoriaCompany = ce2.id
+                    WHERE {" AND ".join(where)}
+                    GROUP BY categoria
+                    ORDER BY n DESC
+                    """,
+                    params,
+                )
+                filas = cur.fetchall() or []
+    except Exception as e:
+        logger.error(f"Error en directory_overview: {e}")
+        return {"success": False, "categories": [], "total": 0}
+
+    rubros = [
+        {"name": (f["categoria"] or "").strip(), "count": int(f["n"] or 0)}
+        for f in filas
+        if (f["categoria"] or "").strip()
+    ]
+    return {
+        "success": True,
+        "city": ciudad or None,
+        "total": sum(int(f["n"] or 0) for f in filas),
+        "categories": rubros,
+    }
+
+
 async def navigate_to_company(company_id: str, **kwargs) -> dict:
     """
     Indica al sistema que debe redirigir al usuario al perfil de una empresa.
@@ -882,7 +937,7 @@ async def get_businesses_comparison(business_ids: list) -> dict:
                         services_by_biz[bid] = []
                     if len(services_by_biz[bid]) < 3:  # Máximo 3 por negocio
                         services_by_biz[bid].append(
-                            f"{s['nombre']} (${s['valor']})"
+                            f"{s['nombre']} ({format_price(s['valor'])})"
                             if s["valor"]
                             else s["nombre"]
                         )
@@ -1053,8 +1108,10 @@ async def get_business_availability(
         }
 
     # 2. Configurar fechas (Hoy y Mañana por defecto si no hay fecha)
+    date = resolve_date_token(date)
     is_default_date = date is None
-    target_date = date or datetime.now().strftime("%Y-%m-%d")
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    target_date = date or today_date
     tomorrow_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
     professional_ids = kwargs.get("professional_ids")  # Lista de IDs
@@ -1126,9 +1183,12 @@ async def get_business_availability(
                     h_end = str(r["horaFinal"])[:5] if r["horaFinal"] else None
                     f_init = str(r["fechaInicial"])
 
+                    # Contra el día de verdad, no contra el día que se consultó:
+                    # al preguntar por mañana, `target_date` ES mañana y todas
+                    # las franjas salían etiquetadas "Hoy".
                     label = (
                         "Hoy"
-                        if f_init == target_date
+                        if f_init == today_date
                         else ("Mañana" if f_init == tomorrow_date else f_init)
                     )
 
@@ -1471,6 +1531,148 @@ async def find_businesses_offering(service_term: str, city: str = None, **kwargs
         }
 
 
+#: Horario en el que se ofrecen alternativas cuando la hora pedida está tomada.
+#: No hay horarios de atención por empresa en la base, así que se usa una
+#: jornada comercial corriente en vez de inventarse una franja por negocio.
+_JORNADA = (8, 19)
+
+
+def _agenda_rows(cur, business_id: int, date: str, professional_id=None) -> list:
+    """Lo que ya está agendado ese día, para quien va a atender."""
+    sql = """
+        SELECT a.horaInicial, a.horaFinal
+        FROM agenda a
+        LEFT JOIN asignacionresponsableservicio ars ON a.id = ars.idAgenda
+        WHERE a.idCompany = %s
+          AND a.fechaInicial = %s
+          AND a.estado NOT IN ('CANCELADO', 'ARCHIVADO')
+    """
+    params = [business_id, date]
+    if professional_id:
+        sql += " AND ars.idResponsable = %s"
+        params.append(professional_id)
+    cur.execute(sql, tuple(params))
+    return cur.fetchall() or []
+
+
+def _to_minutes(valor) -> Optional[int]:
+    """Una hora de MySQL —`time`, `timedelta` o texto— en minutos desde medianoche."""
+    if valor is None:
+        return None
+    texto = str(valor)
+    match = re.match(r"(\d{1,2}):(\d{2})", texto)
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def _find_overlap(cur, business_id, date, start_time, end_time, professional_id=None):
+    """
+    La cita que se cruza con la franja pedida, si hay alguna.
+
+    Dos citas se cruzan cuando una empieza antes de que la otra termine y
+    termina después de que la otra empiece. Tocarse por un extremo —una acaba a
+    las 10:00 y la siguiente empieza a las 10:00— no es cruzarse.
+    """
+    inicio, fin = _to_minutes(start_time), _to_minutes(end_time)
+    if inicio is None or fin is None:
+        return None
+    for fila in _agenda_rows(cur, business_id, date, professional_id):
+        otro_inicio = _to_minutes(fila["horaInicial"])
+        if otro_inicio is None:
+            continue
+        # Sin hora de fin registrada se asume una hora, que es lo que dura la
+        # mayoría; suponer cero dejaría pasar el solape entero.
+        otro_fin = _to_minutes(fila["horaFinal"]) or (otro_inicio + 60)
+        if inicio < otro_fin and fin > otro_inicio:
+            return {
+                "start": f"{otro_inicio // 60:02d}:{otro_inicio % 60:02d}",
+                "end": f"{otro_fin // 60:02d}:{otro_fin % 60:02d}",
+            }
+    return None
+
+
+def _free_hours(cur, business_id, date, duration_min, professional_id=None) -> list:
+    """Las horas en punto de ese día en las que sí cabe la cita."""
+    ocupadas = []
+    for fila in _agenda_rows(cur, business_id, date, professional_id):
+        inicio = _to_minutes(fila["horaInicial"])
+        if inicio is None:
+            continue
+        ocupadas.append((inicio, _to_minutes(fila["horaFinal"]) or (inicio + 60)))
+
+    libres = []
+    for hora in range(_JORNADA[0], _JORNADA[1]):
+        inicio = hora * 60
+        fin = inicio + (duration_min or 60)
+        if all(not (inicio < o_fin and fin > o_ini) for o_ini, o_fin in ocupadas):
+            libres.append(f"{hora:02d}:00")
+    return libres
+
+
+async def _slot_is_taken(business_id, date, time, duration_min: int = 60, professional_id=None):
+    """La cita que ocupa esa franja, si la hay. Abre su propia conexión."""
+    from core.database import get_connection
+    from datetime import datetime, timedelta
+
+    dia = resolve_date_token(date)
+    inicio = _to_minutes(time)
+    if not dia or not business_id or inicio is None:
+        return None
+    fin = inicio + (duration_min or 60)
+    hhmm = lambda m: f"{m // 60:02d}:{m % 60:02d}:00"
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                return _find_overlap(
+                    cur, business_id, dia, hhmm(inicio), hhmm(fin), professional_id
+                )
+    except Exception as exc:
+        # No poder comprobarlo no puede tumbar la reserva: el choque real se
+        # vuelve a mirar al confirmar, que es donde sí bloquea.
+        logger.warning("No se pudo comprobar el solape de agenda: %s", exc)
+        return None
+
+
+def resolve_date_token(date: Optional[str]) -> Optional[str]:
+    """
+    La fecha real detrás de "hoy", "mañana" o una fecha ya escrita.
+
+    Existe porque cada capa la traducía por su cuenta y una se olvidó: la
+    consulta de agenda comparaba `fechaInicial = 'tomorrow'` contra la base y no
+    encontraba nada nunca. El efecto era que Lyra decía "ya tienen ocupado
+    mañana de 09:00 a 10:00" en un turno y "tienen la agenda libre" en el
+    siguiente, sobre el mismo día, y acababa agendando encima de la cita que
+    acababa de nombrar.
+    """
+    from datetime import datetime, timedelta
+
+    if not date:
+        return None
+    clave = str(date).strip().lower()
+    desplazamiento = {
+        "today": 0, "hoy": 0,
+        "tomorrow": 1, "manana": 1, "mañana": 1,
+        "day_after_tomorrow": 2, "pasado manana": 2, "pasado mañana": 2,
+    }.get(clave)
+    if desplazamiento is not None:
+        return (datetime.now() + timedelta(days=desplazamiento)).strftime("%Y-%m-%d")
+    return date
+
+
+def _day_label(date: Optional[str]) -> str:
+    """Cómo se dice un día en una frase: "hoy", "mañana", "el 12 de junio"."""
+    if not date:
+        return ""
+    if date == "today":
+        return "hoy"
+    if date == "tomorrow":
+        return "mañana"
+    if date == "day_after_tomorrow":
+        return "pasado mañana"
+    return f"el {date}"
+
+
 def _format_slot(slot: dict) -> str:
     """
     Un tramo ocupado, dicho como lo diría una persona.
@@ -1641,9 +1843,7 @@ async def get_service_info(service_name: str, business_id: int = None) -> dict:
                         "message": f"No encontré el servicio '**{service_name}**'.",
                     }
 
-                price = (
-                    f"${srv['valor']:,.0f}" if srv["valor"] else "Precio a consultar"
-                )
+                price = format_price(srv["valor"])
                 duration = (
                     f"{srv['tiempoServicio']} min"
                     if srv["tiempoServicio"]
@@ -2146,19 +2346,23 @@ async def request_appointment(
 
             # Si hay múltiples y el usuario no eligió, preguntar — con anchors para contexto
             elif professionals and not professional_name:
+                # Igual que con los servicios: un perfil idéntico en los tres
+                # no ayuda a elegir entre los tres. Sólo se muestra cuando de
+                # verdad los distingue.
+                perfiles = {(p.get("perfil") or "").strip() for p in professionals}
+                describe = len(perfiles - {""}) > 1
                 prof_items = []
                 for p in professionals:
-                    perfil_text = f" ({p['perfil'][:80]}...)" if p.get("perfil") else ""
+                    perfil_text = (
+                        f" ({_one_line(p['perfil'], 80)})"
+                        if describe and p.get("perfil") else ""
+                    )
                     prof_items.append(f"• **{p['nombre']}**{perfil_text}")
 
                 # Calcular fecha legible
                 from datetime import datetime, timedelta
 
-                date_label = "mañana"
-                if date == "today":
-                    date_label = "hoy"
-                elif date and date not in ("today", "tomorrow"):
-                    date_label = f"el {date}"
+                date_label = _day_label(date) or "mañana"
 
                 return {
                     "success": True,
@@ -2246,7 +2450,12 @@ async def request_appointment(
         # encadenaban dos ("¿En qué otro horario…?" y "¿A qué hora…?") y sonaba
         # a formulario, no a alguien atendiendo.
         que_agenda = f"tu **{srv_real_name}**" if service_name else f"tu cita en **{real_name}**"
-        partes = [f"Con gusto te ayudo a agendar {que_agenda}."]
+        # El día que el usuario acaba de dar se NOMBRA. Repetir la pregunta
+        # anterior palabra por palabra —"¿a qué hora te gustaría?"— después de
+        # que alguien conteste "mañana" es la forma más rápida de que parezca
+        # que no se le escuchó, aunque el dato sí se haya guardado.
+        cuando = f" para {_day_label(date)}" if _day_label(date) else ""
+        partes = [f"Con gusto te ayudo a agendar {que_agenda}{cuando}."]
 
         if avail.get("success") and avail.get("busy_slots"):
             by_day: dict = {}
@@ -2285,18 +2494,38 @@ async def request_appointment(
     srv_list = ""
     if srv_data.get("success") and srv_data.get("services"):
         srvs = srv_data["services"][:10]
+        # Una descripción idéntica en los diez servicios no describe nada: sólo
+        # alarga la lista y hace que suene a plantilla. Se muestra únicamente
+        # cuando distingue a unos de otros.
+        descripciones = {(s.get("descripcion") or "").strip() for s in srvs}
+        describe = len(descripciones - {""}) > 1
         srv_items = []
         for s in srvs:
-            desc_text = f" ({s['descripcion'][:60]}...)" if s.get("descripcion") else ""
-            srv_items.append(f"• **{s['nombre']}**{desc_text}")
+            precio = format_price(s.get("valor"), fallback="")
+            precio_text = f" — {precio}" if precio else ""
+            desc_text = (
+                f" ({s['descripcion'][:60]}...)"
+                if describe and s.get("descripcion") else ""
+            )
+            srv_items.append(f"• **{s['nombre']}**{precio_text}{desc_text}")
         srv_list = "\n\n**¿Qué servicio deseas agendar?**\n" + "\n".join(srv_items)
 
-    # Determinar texto de fecha
-    date_text = "mañana"
-    if date == "today":
-        date_text = "hoy"
-    elif date and date != "tomorrow":
-        date_text = f"el {date}"
+    date_text = _day_label(date) or "mañana"
+
+    # Anunciar "tengo disponibilidad a las 09:00" cuando a esa hora ya hay algo
+    # es la contradicción que el usuario nota antes que ninguna otra: dos turnos
+    # atrás Lyra le acababa de nombrar esa misma cita. Aquí todavía no se sabe
+    # quién atenderá —puede que otra persona sí tenga libre—, así que se avisa y
+    # se sigue; el choque exacto se comprueba al confirmar.
+    ocupado = await _slot_is_taken(target_id, date, time)
+    if ocupado:
+        cabecera = (
+            f"A las **{time}** ya hay una cita en **{real_name}** para {date_text} "
+            f"(de {ocupado['start']} a {ocupado['end']}). Miro si alguien más "
+            "puede atenderte a esa hora, pero si prefieres otra, dímela."
+        )
+    else:
+        cabecera = f"¡Perfecto! Tengo disponibilidad en **{real_name}** para {date_text} a las **{time}**."
 
     return {
         "success": True,
@@ -2307,7 +2536,7 @@ async def request_appointment(
         "action": "navigate_to_booking",
         "url": f"/empresa/{target_id}#servicios",
         "message": (
-            f"¡Perfecto! Tengo disponibilidad en **{real_name}** para {date_text} a las **{time}**."
+            f"{cabecera}"
             f"{srv_list}"
             f"\n\nEscribe el nombre del servicio y confirmo tu cita. [BIZ:{target_id}]"
         ),
@@ -2660,14 +2889,7 @@ async def confirm_appointment(
                         ),
                     }
 
-                if date == "today":
-                    target_date = datetime.now().strftime("%Y-%m-%d")
-                elif date == "tomorrow":
-                    target_date = (datetime.now() + timedelta(days=1)).strftime(
-                        "%Y-%m-%d"
-                    )
-                else:
-                    target_date = date
+                target_date = resolve_date_token(date)
 
                 # ── Parsear hora ───────────────────────────────────────────────
                 if not time:
@@ -2706,6 +2928,44 @@ async def confirm_appointment(
                         "message": (
                             f"No pude entender la hora '**{time}**'. "
                             "¿Puedes indicarla en formato '2:30 pm' o '14:00'?"
+                        ),
+                    }
+
+                # ── Paso 5b: ¿La franja está libre de verdad? ──────────────────
+                #
+                # Es la última puerta antes de escribir, y hasta ahora no
+                # existía: Lyra podía nombrar una cita ocupada en un turno y
+                # crear otra encima en el siguiente. Se mira la agenda de QUIEN
+                # va a atender —dos personas distintas sí pueden tener las
+                # nueve— y sólo el negocio entero cuando no hay nadie asignado.
+                choque = _find_overlap(
+                    cur, business_id, target_date, start_time, end_time, professional_id
+                )
+                if choque:
+                    libres = _free_hours(
+                        cur, business_id, target_date, duration_min, professional_id
+                    )
+                    quien = f" con **{professional_name}**" if professional_name else ""
+                    sugerencia = (
+                        " Puedo dejártela a las "
+                        # Alternativas, no una lista: se enumeran con "o".
+                        + natural_list([f"**{h}**" for h in libres[:3]], conjunction="o")
+                        + ", si te sirve alguna."
+                        if libres
+                        else " Ese día ya está completo; ¿probamos otro?"
+                    )
+                    logger.info(
+                        "[CONFIRM] choque de agenda: %s %s-%s (prof=%s) contra %s",
+                        target_date, start_time, end_time, professional_id, choque,
+                    )
+                    return {
+                        "success": False,
+                        "asking": "time",
+                        "needs_input": True,
+                        "message": (
+                            f"Esa hora ya está tomada{quien}: hay algo de "
+                            f"**{choque['start']}** a **{choque['end']}**.{sugerencia}"
+                            f"\n\n[BIZ:{business_id}] [SERVICIO:{srv_real_name}]"
                         ),
                     }
 
@@ -2821,16 +3081,38 @@ async def _resolve_service_id(business_id: int, service_name: str) -> dict:
                 import unicodedata
 
                 nfkd = unicodedata.normalize("NFKD", str(service_name))
-                pattern = "".join(
-                    c for c in nfkd if not unicodedata.combining(c)
-                ).lower()
-                pattern = re.sub(r"[^a-z0-9]+", "%", pattern).strip("%")
+                plano = "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
 
-                if not pattern:
-                    return None
+                # La gente contesta "un almuerzo ejecutivo", no "Almuerzo
+                # Ejecutivo". El LIKE se armaba con la frase entera —
+                # `%un%almuerzo%ejecutivo%`— y no encajaba con ningún nombre de
+                # la tabla, así que Lyra respondía que no tenía un servicio que
+                # acababa de listar ella misma.
+                _ARRASTRE = {
+                    "un", "una", "unos", "unas", "el", "la", "lo", "los", "las",
+                    "de", "del", "al", "con", "para", "por", "en", "mi", "me",
+                    "quiero", "quisiera", "deseo", "necesito", "dame", "ponme",
+                    "servicio", "el servicio", "reservar", "agendar", "seria",
+                    "sera", "sería", "será", "porfa", "favor",
+                }
+                palabras = [w for w in re.split(r"[^a-z0-9]+", plano) if w]
+                contenido = [w for w in palabras if w not in _ARRASTRE]
 
-                sql = "SELECT id, nombre, tiempoServicio, descripcion FROM servicios WHERE idCompany = %s AND LOWER(nombre) LIKE %s LIMIT 1"
-                cur.execute(sql, (business_id, f"%{pattern}%"))
-                return cur.fetchone()
+                sql = (
+                    "SELECT id, nombre, tiempoServicio, descripcion FROM servicios "
+                    "WHERE idCompany = %s AND LOWER(nombre) LIKE %s LIMIT 1"
+                )
+                # Primero con lo que dijo, entero; luego sin las palabras de
+                # arrastre. El orden importa: un servicio puede llamarse "Menú
+                # del Día", y "del" es arrastre en cualquier otra frase.
+                for candidato in (palabras, contenido):
+                    pattern = "%".join(candidato)
+                    if not pattern:
+                        continue
+                    cur.execute(sql, (business_id, f"%{pattern}%"))
+                    fila = cur.fetchone()
+                    if fila:
+                        return fila
+                return None
     except Exception:
         return None

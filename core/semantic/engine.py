@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from core.semantic import dialogue
 from core.semantic import lexicon as lx
 from core.semantic import reference
+from core import wording
 from core.semantic.catalog import SemanticCatalog, get_catalog
 from core.semantic.morphology import normalize, stem_compatible, stem
 from core.semantic.speech_act import Analysis, analyze
@@ -220,6 +221,21 @@ def build_understanding(
         )
 
     # ── 3. Agendamiento ─────────────────────────────────────────────────────
+    #
+    # …salvo que el mensaje pida ver el directorio. "Muéstrame las opciones
+    # DISPONIBLES" activa el marco de cita por esa palabra, y sin contenido
+    # propio ni negocio delante acababa preguntando "¿en qué negocio te gustaría
+    # agendar?" a quien sólo quería mirar qué hay.
+    if (
+        act == Act.BOOKING
+        and "generic_place" in analysis.frames
+        and not analysis.content_terms
+        and not (state.booking.get("business_id") or state.focus_id)
+    ):
+        u.args = {"category": "", "city": mentioned_city}
+        u.note("petición de ver opciones sin negocio en juego → directorio")
+        return _finish(u, Disposition.ACT, "search_businesses")
+
     if act == Act.BOOKING:
         return _booking(
             u, analysis, state, message, temporal,
@@ -328,7 +344,11 @@ def _contextual(
             )
             if dominio:
                 u.grounding = dominio["grounding"]
-                u.args = {"category": dominio["args"]["category"], "city": mentioned_city}
+                u.args = {
+                    "category": dominio["args"]["category"],
+                    "city": mentioned_city,
+                    "_user_terms": dominio["args"].get("_user_terms"),
+                }
                 u.note(f"superlativo sobre '{dominio['label']}' → recomendación")
                 return _finish(u, Disposition.ACT, "recommend_businesses")
             if state.active_domain:
@@ -349,6 +369,13 @@ def _contextual(
                 return _finish(u, Disposition.ACT, intent)
         if "compare" in analysis.frames:
             return _finish(u, Disposition.ACT, "compare_businesses")
+        # La agenda con un día delante gana sobre las reseñas. "¿Cómo está mi
+        # agenda mañana?" activa los dos marcos —"cómo está" es una fórmula de
+        # opinión— y el orden por defecto lo mandaba a las reseñas del negocio.
+        if {"appointment", "temporal"} <= analysis.frames and biz_id:
+            u.args = {"business_id": biz_id}
+            u.note("agenda con referencia temporal → disponibilidad")
+            return _finish(u, Disposition.ACT, "get_business_availability")
         if "review" in analysis.frames:
             u.args = {"business_id": biz_id, "business_name": _business_label(target, state)}
             return _finish(u, Disposition.ACT, "get_business_reviews")
@@ -358,9 +385,19 @@ def _contextual(
         if "appointment" in analysis.frames and biz_id:
             u.args = {"business_id": biz_id}
             return _finish(u, Disposition.ACT, "get_business_availability")
+        # "¿Cuál está más cerca?", "¿cuál queda más cerquita?". Es una
+        # comparación por proximidad sobre lo que ya se mostró, y se puede
+        # contestar con los datos que cada resultado ya trae. Antes se delegaba
+        # al modelo "porque lo responde mejor con los resultados delante"; con
+        # el modelo externo apagado eso significaba no responder.
+        if state.presented and _wants_proximity(message):
+            u.args = {"criterion": "distance"}
+            u.note("comparación por cercanía sobre lo ya mostrado")
+            return _finish(u, Disposition.ACT, "compare_businesses")
+
         if state.has_context:
-            # Comparaciones y matices ("¿cuál queda más cerca?") los responde
-            # mejor el modelo con los resultados delante que una plantilla.
+            # Matices que no encajan en ningún criterio conocido. El
+            # interceptor los atiende como conversación, con el hilo delante.
             u.note("pregunta sobre resultados previos → respuesta con contexto")
             return _finish(u, Disposition.CONVERSE, None)
         if analysis.frames:
@@ -374,6 +411,15 @@ def _contextual(
 
     # — Selección pura —
     if analysis.act == Act.REFERENCE:
+        # "El más cercano" es una selección POR UN CRITERIO, no un señalamiento.
+        # El resolutor de referencias se quedaba con lo que estuviera en foco y
+        # devolvía un negocio que no era el más cercano de la lista, que es
+        # justo lo único que el usuario había pedido.
+        if state.presented and _wants_proximity(message):
+            u.args = {"criterion": "distance"}
+            u.note("selección por cercanía sobre lo ya mostrado")
+            return _finish(u, Disposition.ACT, "compare_businesses")
+
         if not target:
             if not reference.has_resolvable_context(state):
                 u.clarification = "Todavía no te he mostrado opciones. ¿Qué estás buscando?"
@@ -381,6 +427,16 @@ def _contextual(
                 u.clarification = "¿Cuál de las opciones te interesa?"
             u.note("referencia sin antecedente resoluble")
             return u
+
+        # Una referencia CON marco dice qué hacer con lo referido: "háblame de
+        # ese lugar", "muéstrame ese en el mapa", "¿qué ofrece ése?". Va por
+        # delante de la reserva porque no es una selección, es una pregunta.
+        # Cuando se miraba después, cualquier negocio que hubiera quedado en
+        # foco convertía "háblame de ese sitio" en una cita que nadie pidió.
+        if target.kind == ConceptKind.BUSINESS:
+            marco = _frame_intent(analysis, target.entity_id, target.label, u)
+            if marco is not None:
+                return marco
 
         if target.kind == "professional":
             u.args = _booking_args(state, professional_name=target.label)
@@ -391,7 +447,12 @@ def _contextual(
 
         # Selección de negocio: si la conversación venía agendando, la selección
         # continúa esa reserva en vez de reiniciar la navegación.
-        if state.booking:
+        #
+        # "Venía agendando" es tener el OBJETIVO abierto, no tener ranuras. Un
+        # negocio queda anotado en `booking` por el mero hecho de entrar en
+        # foco, así que la condición anterior daba por iniciada una reserva que
+        # el usuario nunca había pedido.
+        if state.goal == dialogue.GOAL_BOOKING and state.booking:
             u.args = _booking_args(state, business_id=target.entity_id, business_name=target.label)
             return _finish(u, Disposition.ACT, "request_appointment")
         u.args = {"business_id": target.entity_id, "business_name": target.label}
@@ -403,8 +464,15 @@ def _contextual(
             u.args = _booking_args(state, **temporal)
             u.note(f"complemento temporal continúa la reserva en curso: {temporal}")
             return _finish(u, Disposition.ACT, "request_appointment")
-        u.note("dato temporal sin proceso abierto")
-        return _finish(u, Disposition.CONVERSE, None)
+        # Un "a las 8" sin nada en marcha no es conversación: es un dato que no
+        # tiene dónde ir. Devolverlo como charla hacía que Lyra saludara a quien
+        # acababa de darle una hora.
+        u.note("dato temporal sin proceso abierto → se pregunta a qué corresponde")
+        u.clarification = (
+            "Todavía no tenemos una cita en marcha. ¿En qué negocio quieres que "
+            "te agende, y para qué servicio?"
+        )
+        return u
 
     # — Confirmación / negación —
     if analysis.act == Act.AFFIRM:
@@ -506,6 +574,14 @@ def _booking(
             u.note(f"reserva sin negocio pero con dominio '{domain['label']}' → mostrar opciones")
             return _finish(u, Disposition.ACT, "search_businesses")
 
+        # Describió QUÉ quiere y no existe aquí. Preguntarle "¿en qué negocio
+        # te gustaría agendar?" es ignorar la mitad de su mensaje y dejarle
+        # creer que el sitio está y sólo falta nombrarlo.
+        if analysis.content_terms:
+            u.note("reserva de algo que el catálogo no reconoce → aclaración")
+            u.clarification = _unrecognized_message(analysis.content_terms)
+            return u
+
     u.args = args
     if "human_agent" in analysis.frames:
         u.args["_wants_professional"] = True
@@ -575,6 +651,7 @@ def _resolve_domain(
             "city": mentioned_city,
             "_grounded_kind": best.kind,
             "_grounded_terms": search_terms,
+            "_user_terms": _user_terms_for(grounding),
         },
     }
 
@@ -602,6 +679,15 @@ def _discovery(
         and not analysis.content_terms
         and reference.has_resolvable_context(state)
     ):
+        # …salvo que la selección venga con un criterio. "El más cercano" no
+        # señala a nada: pide que se ordene lo mostrado por distancia. El
+        # resolutor de referencias se quedaba con lo que hubiera en foco y
+        # devolvía un negocio que podía ser el más lejano de la lista.
+        if state.presented and _wants_proximity(message):
+            u.args = {"criterion": "distance"}
+            u.note("selección por cercanía sobre lo ya mostrado")
+            return _finish(u, Disposition.ACT, "compare_businesses")
+
         target = reference.resolve(analysis, state, message)
         if target:
             u.note(f"necesidad sobre elemento ya mostrado → {target.label}")
@@ -611,8 +697,29 @@ def _discovery(
             u.args = {"business_id": target.entity_id, "business_name": target.label}
             return _finish(u, Disposition.ACT, "navigate_to_company")
 
+    # "¿Qué servicios tengo publicados?", "¿qué ofrecen?". El marco nombra la
+    # oferta de un negocio concreto; con uno delante no hay nada que buscar en
+    # el directorio. Es la pregunta que más hace un empresario sobre lo suyo, y
+    # sin esta rama se anclaba la palabra "servicios" contra el catálogo, no
+    # encajaba con nada y salía por conversación.
     terms = _content_for_grounding(analysis.content_terms, mentioned_city)
     catalog = catalog if catalog is not None else get_catalog()
+
+    if (
+        "offering" in analysis.frames
+        # "¿Qué NEGOCIOS ofrecen medicina general?" pregunta por el directorio,
+        # no por el negocio que se tenga delante. El marco de lugar genérico es
+        # lo que separa una pregunta de la otra.
+        and "generic_place" not in analysis.frames
+        and (state.focus_id or state.booking.get("business_id"))
+        # …y siempre que el mensaje no nombre otra cosa que sí exista: si el
+        # usuario dice un servicio o un rubro concreto, está buscando con él.
+        and not _grounds_to_something(terms, catalog)
+    ):
+        biz_id = state.focus_id or state.booking.get("business_id")
+        u.args = {"business_id": biz_id, "business_name": state.focus_label}
+        u.note("oferta del negocio que está sobre la mesa")
+        return _finish(u, Disposition.ACT, "get_business_services")
 
     grounding = Grounding(content_terms=terms, attempted=bool(terms))
     if terms:
@@ -647,13 +754,32 @@ def _discovery(
 
     # ── Sin contenido propio: descubrimiento general del directorio ─────────
     if not terms:
+        # "Muéstrame dónde quedan", "¿y en el mapa?", "quiero verlas en el
+        # plano". Con resultados en pantalla, esto pregunta DÓNDE están, no si
+        # hay más. Repetir la búsqueda contestaba a otra cosa —"son esas mismas
+        # seis, no tengo más"— cuando lo que faltaba era mover el mapa.
+        if state.presented and (
+            "map" in analysis.frames or analysis.act == Act.LOCATIVE
+        ):
+            u.args = {}
+            u.note("ubicación de lo ya mostrado → se lleva al mapa")
+            return _finish(u, Disposition.ACT, "fit_all_businesses")
+
         # …salvo que la conversación ya tenga un tema. "¿Hay más?", "¿es el
         # único?" preguntan por MÁS DE LO MISMO: buscar entonces en el
         # directorio entero devuelve cualquier cosa y deja la pregunta sin
         # responder. El rubro que ya estaba sobre la mesa es la consulta.
+        # …y salvo que el usuario haya ensanchado la pregunta a propósito.
+        # "¿Qué NEGOCIOS tienes?" nombra el directorio entero: seguir contestando
+        # con el rubro anterior es no haberse enterado de que cambió el tema.
         tema = state.topic_service or state.active_domain
+        if "generic_place" in analysis.frames:
+            tema = None
         if tema and analysis.act in (Act.EXISTENTIAL, Act.LOCATIVE):
-            u.args = {"category": tema, "city": mentioned_city, "_grounded_terms": [tema]}
+            u.args = {
+                "category": tema, "city": mentioned_city,
+                "_grounded_terms": [tema], "_user_terms": [tema],
+            }
             if state.topic_service:
                 u.args["_grounded_kind"] = ConceptKind.SERVICE
             u.note(f"pregunta por más de lo mismo → se repite la búsqueda de '{tema}'")
@@ -685,6 +811,16 @@ def _discovery(
 
     if not grounding.concepts or grounding.best.score < _MIN_ACTIONABLE_SCORE:
         reason = "no reconocido en el catálogo" if not grounding.concepts else "anclaje demasiado débil"
+
+        # "¿Qué puedo encontrar aquí?", "muéstrame qué hay". Las únicas palabras
+        # de contenido nombran el acto de buscar, no lo buscado: anclarlas no
+        # podía funcionar nunca, y decir "no manejo nada relacionado con
+        # «encontrar»" es contestar a una pregunta que nadie hizo.
+        if wording.user_facing_label(terms) is None:
+            u.args = {"category": "", "city": mentioned_city}
+            u.note("el contenido sólo nombra el acto de buscar → directorio general")
+            return _finish(u, Disposition.ACT, "search_businesses")
+
         if asked_explicitly:
             u.note(f"{reason} tras una petición explícita → aclaración")
             u.clarification = _unrecognized_message(terms)
@@ -701,7 +837,11 @@ def _discovery(
     # después, un negocio que hubiera quedado en foco se llevaba la petición y
     # el usuario acababa agendando en un sitio que nadie le había recomendado.
     if "recommend" in analysis.frames:
-        u.args = {"category": _search_terms_for(best, grounding)[0], "city": mentioned_city}
+        u.args = {
+            "category": _search_terms_for(best, grounding)[0],
+            "city": mentioned_city,
+            "_user_terms": _user_terms_for(grounding),
+        }
         u.note("recomendación sobre el rubro anclado")
         return _finish(u, Disposition.ACT, "recommend_businesses")
 
@@ -753,9 +893,11 @@ def _discovery(
     # ── Nombre propio identificado → ir a ese negocio ───────────────────────
     # Sólo si señala a UNA empresa. Si varias sucursales encajan igual, se
     # muestran todas: aterrizar en una al azar es peor que dar a elegir.
+    pide_lista = _asks_for_a_list(analysis) or _names_a_kind(message, grounding)
     if (
         best.kind == ConceptKind.BUSINESS
         and not best.ambiguous
+        and not pide_lista
         and best.score >= _BUSINESS_NAV_THRESHOLD
     ):
         u.args = {"business_id": best.entity_id, "business_name": best.label, "city": mentioned_city}
@@ -763,12 +905,13 @@ def _discovery(
         return _finish(u, Disposition.ACT, "navigate_to_company")
 
     # ── Cualquier otro concepto → búsqueda con términos REALES del catálogo ─
-    search_terms = _search_terms_for(best, grounding)
+    search_terms = _search_terms_for(best, grounding, prefer_domain=pide_lista)
     u.args = {
         "category": search_terms[0],
         "city": mentioned_city,
         "_grounded_kind": best.kind,
         "_grounded_terms": search_terms,
+        "_user_terms": _user_terms_for(grounding),
     }
     if _wants_proximity(message):
         u.args["near_me"] = True
@@ -786,17 +929,111 @@ def _finish(u: Understanding, disposition: str, intent: Optional[str]) -> Unders
     return u
 
 
-def _search_terms_for(best: GroundedConcept, grounding: Grounding) -> List[str]:
+#: Marco reconocido → qué capacidad de NexiService le corresponde.
+_FRAME_INTENTS = (
+    ("identity", "get_business_mission_vision"),
+    ("web", "open_business_web"),
+    ("map", "fly_to_business"),
+    ("review", "get_business_reviews"),
+    ("offering", "get_business_services"),
+)
+
+
+def _frame_intent(
+    analysis: Analysis, biz_id: Optional[int], label: Optional[str], u: Understanding
+) -> Optional[Understanding]:
+    """
+    La capacidad que nombra el marco del mensaje, si nombra alguna.
+
+    Es la misma tabla para una pregunta ("¿qué ofrece?") y para una referencia
+    ("háblame de ése"): lo que cambia es a qué apunta, no qué se pide.
+    """
+    for frame, intent in _FRAME_INTENTS:
+        if frame in analysis.frames:
+            u.args = {"business_id": biz_id, "business_name": label}
+            u.note(f"{frame} sobre el elemento referido")
+            return _finish(u, Disposition.ACT, intent)
+    return None
+
+
+def _grounds_to_something(terms: Sequence[str], catalog: SemanticCatalog) -> bool:
+    """¿Las palabras del mensaje apuntan a algo que existe en el catálogo?"""
+    if not terms:
+        return False
+    conceptos = catalog.ground(terms, limit=1)
+    return bool(conceptos) and conceptos[0].score >= _MIN_ACTIONABLE_SCORE
+
+
+#: Determinantes que presentan una clase en vez de señalar un individuo.
+_INDEFINITE = ("un", "una", "unos", "unas", "algun", "alguna", "algunos", "algunas")
+
+
+def _names_a_kind(message: str, grounding: Grounding) -> bool:
+    """
+    ¿El mensaje pide UNA DE ESAS COSAS, o pide ESA COSA?
+
+    Es la diferencia entre "necesito una veterinaria" y "llévame a Veterinaria
+    El Guardián". La marca está en el determinante, que en español lo dice sin
+    ambigüedad: el indefinido presenta una clase.
+
+    Importa porque el anclaje encuentra la palabra "veterinaria" dentro de la
+    razón social de UNA empresa —en otra ciudad— y sin esta comprobación quien
+    pedía una veterinaria cerca aterrizaba en la ficha de aquélla.
+    """
+    palabras = normalize(message).split()
+    for termino in grounding.matched_terms or grounding.content_terms:
+        raiz = normalize(termino).split()
+        if not raiz:
+            continue
+        try:
+            posicion = palabras.index(raiz[0])
+        except ValueError:
+            continue
+        if posicion > 0 and palabras[posicion - 1] in _INDEFINITE:
+            return True
+    return False
+
+
+def _asks_for_a_list(analysis: Analysis) -> bool:
+    """
+    ¿La pregunta espera varias opciones en vez de una empresa concreta?
+
+    "¿Qué veterinarias tienes?" nombra un rubro en plural. El anclaje encuentra
+    ahí una empresa —"Veterinaria El Guardián"— porque la palabra está en su
+    razón social, y sin esta comprobación el usuario que preguntaba qué hay
+    aterrizaba en la ficha de un negocio de otra ciudad.
+    """
+    if analysis.act != Act.EXISTENTIAL:
+        return False
+    return any(
+        len(t) > 3 and normalize(t).endswith("s") for t in analysis.content_terms
+    )
+
+
+def _search_terms_for(
+    best: GroundedConcept, grounding: Grounding, prefer_domain: bool = False
+) -> List[str]:
     """
     Con qué términos consultar la base de datos.
 
-    Lo normal es usar la etiqueta del concepto anclado. La excepción son los
-    nombres ambiguos: si "fogón criollo" encaja con cuatro sucursales, buscar
-    por el nombre completo de una sola ("Fogón Criollo Norte Popayán") dejaría
-    fuera a las demás. En ese caso se usan las palabras del propio usuario, que
-    a esas alturas ya se sabe que existen en el catálogo.
+    Lo normal es usar la etiqueta del concepto anclado. Hay dos excepciones, y
+    las dos se resuelven igual —bajando de la empresa concreta al rubro—:
+
+      · Nombres ambiguos: si "fogón criollo" encaja con cuatro sucursales,
+        buscar por el nombre completo de una sola dejaría fuera a las demás.
+      · Preguntas en plural: quien pide "veterinarias" quiere el rubro, aunque
+        la palabra viva dentro de la razón social de una empresa.
     """
-    if best.kind == ConceptKind.BUSINESS and best.ambiguous:
+    if best.kind == ConceptKind.BUSINESS and (best.ambiguous or prefer_domain):
+        # El rubro va primero: es lo que de verdad se preguntó.
+        for candidate in grounding.concepts:
+            if candidate.kind in (ConceptKind.BUSINESS_CATEGORY, ConceptKind.SERVICE_CATEGORY):
+                return list(candidate.search_terms) or [candidate.label]
+        # Y si ningún rubro se ancló por sí solo, sirve el de la propia empresa:
+        # "veterinaria" sólo existe dentro de una razón social, pero esa empresa
+        # está clasificada en "Mascotas", que es el rubro que hay que buscar.
+        if prefer_domain and best.domain:
+            return [best.domain]
         if grounding.matched_terms:
             return [" ".join(grounding.matched_terms)]
         # Sin palabras reconocidas propias, describe el rubro con el mejor
@@ -805,6 +1042,23 @@ def _search_terms_for(best: GroundedConcept, grounding: Grounding) -> List[str]:
             if candidate.kind != ConceptKind.BUSINESS:
                 return list(candidate.search_terms) or [candidate.label]
     return list(best.search_terms) or [best.label]
+
+
+def _user_terms_for(grounding: Grounding) -> List[str]:
+    """
+    Las palabras con las que el USUARIO nombró lo que busca.
+
+    No son las mismas con las que se consulta la base de datos, y ésa es
+    justamente la distinción que faltaba: la plataforma guarda los hospitales
+    bajo «Consultorios y Centros Médicos», así que buscar por la etiqueta del
+    catálogo es correcto, pero contestar con ella —«encontré 6 opciones de
+    médico»— le dice al usuario que no se le entendió.
+
+    Se prefieren los términos que el catálogo reconoció, porque son suyos Y
+    existen. Si no hay ninguno reconocido se devuelve lo que dijo tal cual: el
+    llamador decide si le sirve.
+    """
+    return list(grounding.matched_terms or grounding.content_terms)
 
 
 def _content_for_grounding(terms: Sequence[str], mentioned_city: Optional[str]) -> List[str]:
@@ -859,7 +1113,7 @@ def _unrecognized_message(terms: Sequence[str]) -> str:
     reconoce el concepto, y decírselo así al usuario le permite reformular.
     """
     quoted = " ".join(terms[:4])
-    return (
-        f"No manejo nada relacionado con «{quoted}» dentro de NexiService. "
-        "¿Me cuentas qué necesitas resolver y te digo si tenemos algo así?"
-    )
+    # Sin pregunta al final a propósito: el interceptor añade después qué SÍ
+    # hay y cierra él. Encadenar aquí una pregunta y allí una oferta producía
+    # dos remates seguidos y la respuesta sonaba a dos mensajes pegados.
+    return f"No tengo nada relacionado con «{quoted}» dentro de NexiService."

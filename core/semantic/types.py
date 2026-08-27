@@ -99,6 +99,11 @@ class GroundedConcept:
     #: True cuando varios conceptos del mismo tipo encajan igual de bien. La
     #: coincidencia es buena, pero no identifica UNA cosa: describe un rubro.
     ambiguous: bool = False
+    #: Rubro al que pertenece el concepto, cuando lo tiene. Es lo que permite
+    #: subir de una empresa a su categoría: quien pregunta "¿qué veterinarias
+    #: tienes?" ancla en el nombre de UNA veterinaria, y lo que quiere es el
+    #: rubro entero. Sin esto la respuesta era esa empresa, en otra ciudad.
+    domain: Optional[str] = None
 
     def __repr__(self) -> str:  # pragma: no cover - ayuda de depuración
         return f"<{self.kind}:{self.label} score={self.score:.2f} via={self.source}>"
@@ -182,6 +187,12 @@ class ConversationState:
     focus_label: Optional[str] = None
     #: Dominio semántico activo (etiqueta real de categoría del catálogo).
     active_domain: Optional[str] = None
+    #: Cómo llamó el USUARIO a ese dominio. Se guarda junto al anterior y por
+    #: separado a propósito: uno sirve para consultar la base de datos y el otro
+    #: para hablar. Sin esta distinción, la conversación que empezaba con "¿qué
+    #: veterinarias tienes?" seguía dos turnos después con "miré las opciones de
+    #: Mascotas", que es el nombre de la tabla, no el de lo que se pidió.
+    active_domain_label: Optional[str] = None
     #: Servicio del que trata la conversación, como CRITERIO de búsqueda. Vive
     #: aparte de `booking` a propósito: tenerlo en memoria no significa que el
     #: usuario quiera reservarlo. Sirve para no volver a preguntárselo si acaba
@@ -218,6 +229,7 @@ class ConversationState:
             "focus_id": self.focus_id,
             "focus_label": self.focus_label,
             "active_domain": self.active_domain,
+            "active_domain_label": self.active_domain_label,
             "topic_service": self.topic_service,
             "booking": self.booking,
             "last_act": self.last_act,
@@ -237,6 +249,7 @@ class ConversationState:
             focus_id=raw.get("focus_id"),
             focus_label=raw.get("focus_label"),
             active_domain=raw.get("active_domain"),
+            active_domain_label=raw.get("active_domain_label"),
             topic_service=raw.get("topic_service"),
             booking=dict(raw.get("booking") or {}),
             last_act=raw.get("last_act"),

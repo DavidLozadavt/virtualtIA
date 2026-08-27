@@ -13,15 +13,34 @@ async def run_pre_llm_interceptors(project_id: str, intent_name: str, args: Dict
     res = await nexiservice.pre_llm_interceptor(project_id, intent_name, args, context)
     if res:
         logger.info(f"Interceptor caught intent '{intent_name}' for project '{project_id}'")
-        return res
+        return _with_text(res, intent_name)
 
     # SchoolSena Interceptor
     res = await schoolsena.pre_llm_interceptor(project_id, intent_name, args, context)
     if res:
         logger.info(f"SchoolSena interceptor caught intent for project '{project_id}'")
-        return res
-        
+        return _with_text(res, intent_name)
+
     return None
+
+
+#: Último recurso cuando un manejador resuelve el turno pero no redacta nada.
+#: Un turno sin texto no se puede guardar —la columna no admite nulos— ni leer
+#: en voz alta, así que el fallo aparecía como un error de base de datos a
+#: mitad de la conversación, lejos del manejador que lo causó.
+_SIN_TEXTO = (
+    "Ya lo tengo, pero no logré redactarlo. ¿Me lo vuelves a pedir?"
+)
+
+
+def _with_text(result: Dict[str, Any], intent_name: str) -> Dict[str, Any]:
+    if result.get("reply"):
+        return result
+    logger.error(
+        "El manejador de '%s' resolvió el turno sin texto; se responde con el "
+        "mensaje de último recurso.", intent_name,
+    )
+    return {**result, "reply": _SIN_TEXTO}
 
 async def run_pre_execution_interceptors(tool_name: str, tool_args: Dict[str, Any], context: Dict[str, Any]) -> None:
     """

@@ -1,6 +1,8 @@
 from typing import Union, Tuple, List
 from twilio.twiml.voice_response import VoiceResponse, Gather
 
+from core.speech_format import humanize_for_speech
+
 def build_gather_response(
     message: str, 
     action_url: str, 
@@ -34,7 +36,10 @@ def build_gather_response(
         enhanced="true",
         hints=hints_str
     )
-    gather.say(message, voice=voice, language="es-MX")
+    # Polly lee «$120.000» dígito a dígito igual que edge-tts. El teléfono es
+    # sólo voz, así que aquí la conversión no es una mejora: es la diferencia
+    # entre entender el precio y no entenderlo.
+    gather.say(humanize_for_speech(message), voice=voice, language="es-MX")
     response.append(gather)
     
     # CRITICAL: If Gather times out (no speech detected), redirect back
@@ -51,7 +56,7 @@ def build_say_hangup(message: str, voice: str = "Polly.Mia") -> str:
     This function is pure. It depends only on the passed arguments.
     """
     response = VoiceResponse()
-    response.say(message, voice=voice, language="es-MX")
+    response.say(humanize_for_speech(message), voice=voice, language="es-MX")
     response.hangup()
     
     return str(response)

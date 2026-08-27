@@ -291,8 +291,11 @@ async def _run(tool_name: str, params: dict, context: dict,
         for k, v in data.items():
             label = k.replace("_", " ").capitalize()
             if any(x in k.lower() for x in ["nomina", "valor", "total", "salario", "sueldo"]):
-                try: v = f"${float(v):,.0f} COP"
-                except: pass
+                # Mismo formateo que en NexiService: es el que la capa de voz
+                # sabe leer como un precio y no como una fila de dígitos.
+                from core.speech_format import format_price
+
+                v = format_price(v, fallback=str(v))
             lines.append(f"- **{label}**: {v}")
         reply = prefix + "\n".join(lines)
 

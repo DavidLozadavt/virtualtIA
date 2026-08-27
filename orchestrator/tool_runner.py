@@ -717,7 +717,11 @@ async def run_agent_loop(
             user_text,
             project_id=project_id,
             mentioned_city=active_city,
-            current_context={"semantic_state": final_data.get(ConversationState.STORAGE_KEY)},
+            current_context={
+                "semantic_state": final_data.get(ConversationState.STORAGE_KEY),
+                "role": (user_data or {}).get("role"),
+                "active_company_id": active_company_id,
+            },
         )
     else:
         intent_result = local_intent

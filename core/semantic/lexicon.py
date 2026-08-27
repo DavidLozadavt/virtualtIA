@@ -430,6 +430,10 @@ REVIEW_PHRASES = (
 IDENTITY_FRAME_STEMS = frozenset({
     phonetic_stem(w) for w in (
         "mision", "vision", "historia", "trayectoria", "filosofia", "valores",
+        # "Háblame de este lugar", "cuéntame de ellos". Es la forma normal de
+        # pedir que te presenten un negocio, y sin ella caía en la rama de
+        # agendar: el usuario preguntaba quiénes son y le ofrecían una cita.
+        "hablame", "hablanos", "cuentame", "cuentanos", "presentame",
     )
 })
 

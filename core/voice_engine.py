@@ -86,6 +86,17 @@ def _clean_for_tts(text: str) -> str:
     Limpia el texto antes de enviarlo al motor TTS.
     Elimina markdown, anclas internas y caracteres que suenan raro al hablar.
     """
+    # Las cifras se convierten a letras ANTES de tocar la puntuación: la
+    # limpieza de más abajo borra el «$» y deja «120.000», que el motor de voz
+    # lee «ciento veinte, cero, cero, cero». Aquí todavía se sabe que eso es un
+    # precio, así que aquí es donde se dice.
+    from core.speech_format import condense_lists_for_speech, humanize_for_speech
+
+    # Y una lista de dieciocho servicios se recorre con la vista en un segundo,
+    # pero dicha entera son casi sesenta. Se dicen los primeros y cuántos
+    # quedan; lo escrito llega completo igual.
+    text = condense_lists_for_speech(humanize_for_speech(text or ""))
+
     # Eliminar tags internos de Lyra [TAG:XX], [BIZ:XX], [ID:XX]
     # Usamos [^\]]* para permitir IDs alfanuméricos
     clean = _re.sub(r'\[BIZ:[^\]]*\]', '', text)

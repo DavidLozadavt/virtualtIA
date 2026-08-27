@@ -168,11 +168,28 @@ INFO_KEYWORDS = ["quien es", "quienes son", "quien atiende", "que hace", "cuenta
 
 # --- ADMIN NAVIGATION TARGETS ---
 ADMIN_NAV_TARGETS = {
-    "/punto-venta": ["punto de venta", "pos", "caja", "vender", "facturar"],
-    "/configuracion/gestion-productos": ["producto", "inventario", "stock", "catalogo"],
-    "/gestion-personal": ["personal", "empleado", "trabajador", "plantilla", "nomina"],
-    "/configuracion/config-pagos/medios-pago": ["medios de pago", "metodo de pago"],
-    "/gestion-agendamientos/agenda": ["agenda", "calendario", "cita", "reserva"]
+    "/punto-venta": ["punto de venta", "pos", "caja", "vender", "facturar", "venta", "ventas"],
+    "/configuracion/gestion-productos": ["producto", "productos", "inventario", "stock", "catalogo", "servicios"],
+    "/gestion-personal": ["personal", "empleado", "empleados", "trabajador", "plantilla", "nomina", "equipo"],
+    "/configuracion/config-pagos/medios-pago": ["medios de pago", "metodo de pago", "pasarela", "wompi", "pagos"],
+    "/gestion-agendamientos/agenda": ["agenda", "calendario", "cita", "citas", "reserva", "reservas", "agendamientos"],
+    "/empresa/configuracion-empresa": [
+        "configuracion de empresa", "configuracion empresa", "perfil de empresa",
+        "perfil de mi empresa", "mi empresa", "datos de la empresa", "mi negocio",
+        "banners", "logo", "redes sociales de mi empresa",
+    ],
+}
+
+#: Cómo se llama cada destino cuando Lyra lo anuncia. Antes se decía la primera
+#: palabra clave de la lista —"Te llevo a Producto"—, que es el término con el
+#: que se BUSCA el destino, no su nombre.
+ADMIN_NAV_LABELS = {
+    "/punto-venta": "Punto de venta",
+    "/configuracion/gestion-productos": "Productos e inventario",
+    "/gestion-personal": "Gestión de personal",
+    "/configuracion/config-pagos/medios-pago": "Medios de pago",
+    "/gestion-agendamientos/agenda": "tu agenda",
+    "/empresa/configuracion-empresa": "la configuración de tu empresa",
 }
 
 def is_generic_query(text: str | None) -> bool:

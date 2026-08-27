@@ -38,7 +38,7 @@ from core.semantic import lexicon as lx
 from core.semantic import temporal as semantic_temporal
 from core.semantic.dialogue import Slot, read_answer
 from core.semantic.speech_act import analyze as analyze_speech_act
-from core.semantic.types import Disposition
+from core.semantic.types import ConceptKind, Disposition
 
 logger = setup_logger("lyra.intent_router")
 
@@ -291,6 +291,34 @@ def _extract_date(text: str) -> Optional[str]:
     """
     return semantic_temporal.read_date(text)
 
+#: Quién está hablando. La navegación del panel sólo existe para un rol.
+_ADMIN_ROLES = frozenset({"admin", "administrador", "empresario", "owner"})
+
+
+def _is_admin(current_context: dict) -> bool:
+    return str((current_context or {}).get("role") or "").lower() in _ADMIN_ROLES
+
+
+def _admin_destination(text: str) -> Optional[dict]:
+    """
+    La sección del panel que nombra el mensaje, si nombra alguna.
+
+    Con límite de palabra: "inventario" contiene "venta" como subcadena, y sin
+    esto "llévame a inventario" aterrizaba en el punto de venta.
+    """
+    if not re.search(
+        r"\b(lleva|llevame|llevar?me|vamos|navega|ir a|ir al|ir a la|abre|abrir|"
+        r"muestra|muestrame|entrar|dirigeme|redirige|ver)\b", text
+    ):
+        return None
+    from tools.shared.utils import ADMIN_NAV_LABELS
+
+    for url, kws in _ADMIN_NAV_TARGETS.items():
+        if any(re.search(rf"\b{re.escape(kw)}\b", text) for kw in kws):
+            return {"url": url, "name": ADMIN_NAV_LABELS.get(url, kws[0].capitalize())}
+    return None
+
+
 def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] = None, current_context: dict = None) -> dict:
     """
     Analiza el mensaje del usuario localmente para determinar si Lyra
@@ -323,6 +351,36 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
 
     semantic_analysis = None
     semantic_state = ConversationState.from_dict(current_context.get("semantic_state"))
+
+    # La empresa abierta en pantalla es el sujeto por defecto de la conversación.
+    #
+    # Viajaba en el contexto desde siempre, pero sólo llegaba al prompt del
+    # modelo. Con el modelo apagado, alguien dentro del perfil de un negocio
+    # preguntaba "¿qué servicios tiene?" y la comprensión no tenía a quién
+    # referirlo. Se siembra aquí, antes de comprender, y sólo si la conversación
+    # no eligió ya otro: lo que se hablando manda sobre lo que hay en pantalla.
+    _en_pantalla = current_context.get("active_company_id")
+    if _en_pantalla and not semantic_state.focus_id:
+        try:
+            semantic_state.set_focus(
+                ConceptKind.BUSINESS, int(_en_pantalla), semantic_state.focus_label or ""
+            )
+            logger.info("CONTEXTO: la empresa %s está en pantalla → entra como foco", _en_pantalla)
+        except (TypeError, ValueError):
+            pass
+
+    # ── El empresario navega su panel diciéndolo ───────────────────────────
+    #
+    # "Llévame a mi agenda" es, para un cliente, el principio de una cita, y por
+    # eso la navegación de administración se comprueba después del marco de
+    # reserva. Para quien administra su negocio significa exactamente lo
+    # contrario: quiere abrir esa pantalla. La misma frase, dos lecturas, y lo
+    # que las separa es quién la dice.
+    if _is_admin(current_context):
+        _panel = _admin_destination(text)
+        if _panel:
+            logger.info("DETECCION: intent='admin_navigate' (rol administrador) → %s", _panel["url"])
+            return {"intent": "admin_navigate", "args": _panel}
 
     def _act_is(*acts) -> bool:
         return semantic_analysis is not None and semantic_analysis.act in acts
@@ -407,16 +465,30 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
         logger.info("DETECCION: intent='zoom_out' (Prioridad 0)")
         return {"intent": "zoom_out", "args": {}}
     if any(kw in text for kw in _ZOOM_IN_KEYWORDS):
-        # SI el texto dice algo como "negocio mas cercano" o "la mas cercana", priorizamos busqueda de proximidad
-        # Con límite de palabra: "acercar" contiene "cerca" como subcadena y
-        # acababa desviando el zoom hacia una búsqueda por proximidad.
-        if re.search(r"\b(?:cerca|cercan\w*|mas cerca)\b", text):
-            cat_match = next((cat for cat, kws in _CATEGORY_KEYWORDS.items() if any(k in text for k in kws)), "negocios")
-            logger.info(f"DETECCION: intent='search_businesses' (singular mas cercano) | cat={cat_match} | city={mentioned_city}")
-            return {"intent": "search_businesses", "args": {"category": cat_match, "near_me": True, "city": mentioned_city}}
-            
-        logger.info("DETECCION: intent='zoom_in' (Prioridad 0)")
-        return {"intent": "zoom_in", "args": {}}
+        # "¿Cuál está más cerca?" no pide zoom ni pide una búsqueda nueva:
+        # pregunta CUÁL, entre las opciones que ya están en pantalla. La palabra
+        # "mas cerca" está en las claves de zoom, así que esta regla se la
+        # llevaba y devolvía otra lista de veinte negocios en vez de contestar.
+        _es_seleccion = bool(
+            semantic_state.presented
+            and re.search(
+                r"\b(?:cual|cuales|que tan|quien|el mas|la mas|los mas|las mas)\b", text
+            )
+        )
+        if _es_seleccion:
+            logger.info("DETECCION: '%s' selecciona entre lo mostrado → a la comprensión", text)
+        else:
+            # SI el texto dice algo como "negocio mas cercano" o "la mas cercana",
+            # priorizamos búsqueda de proximidad. Con límite de palabra:
+            # "acercar" contiene "cerca" como subcadena y acababa desviando el
+            # zoom hacia una búsqueda por proximidad.
+            if re.search(r"\b(?:cerca|cercan\w*|mas cerca)\b", text):
+                cat_match = next((cat for cat, kws in _CATEGORY_KEYWORDS.items() if any(k in text for k in kws)), "negocios")
+                logger.info(f"DETECCION: intent='search_businesses' (singular mas cercano) | cat={cat_match} | city={mentioned_city}")
+                return {"intent": "search_businesses", "args": {"category": cat_match, "near_me": True, "city": mentioned_city}}
+
+            logger.info("DETECCION: intent='zoom_in' (Prioridad 0)")
+            return {"intent": "zoom_in", "args": {}}
 
     # ── GPS: Permiso aceptado ────────────────────────────────────────────────
     if any(kw in text for kw in _GPS_GRANTED_KEYWORDS):
@@ -698,8 +770,19 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             prof_name = prof_match.group(1).strip()
             # Limpiar posibles restos
             prof_name = re.sub(r"\?|\!|\.", "", prof_name).strip()
-            logger.info(f"DETECCION: intent='get_professional_info' -> '{prof_name}'")
-            return {"intent": "get_professional_info", "args": {"professional_name": prof_name}}
+            # "Llévame a mi perfil de empresa" encaja con "perfil de" y dejaba
+            # a Lyra buscando a un profesional llamado "empresa". Lo que sigue a
+            # la fórmula tiene que poder ser el nombre de una persona.
+            _NOT_A_PERSON = {
+                "empresa", "mi empresa", "negocio", "mi negocio", "local", "tienda",
+                "perfil", "mi perfil", "la empresa", "el negocio", "compania",
+                "sitio", "lugar", "este lugar", "ese lugar", "esta empresa",
+            }
+            if _normalize(prof_name) in _NOT_A_PERSON or len(prof_name) < 3:
+                logger.info("DETECCION: '%s' no nombra a una persona → sigue el análisis", prof_name)
+            else:
+                logger.info(f"DETECCION: intent='get_professional_info' -> '{prof_name}'")
+                return {"intent": "get_professional_info", "args": {"professional_name": prof_name}}
 
     if any(kw in text for kw in ["que es", "en que consiste", "de que trata", "que ofrece el servicio"]) and project_id == "nexiservice" and not is_in_booking_flow:
         srv_match = re.search(r"(?:que es|en que consiste|de que trata|que ofrece el servicio|precio de|valor de)\s+(?:el\s+|la\s+|el servicio\s+|el servicio de\s+|la\s+)?([a-záéíóúñ\s]+)", text, re.IGNORECASE)
@@ -1231,11 +1314,14 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     admin_nav_match = None if _act_is(Act.BOOKING) else re.search(nav_admin_pattern, text)
     if admin_nav_match:
         target_text = admin_nav_match.group(2).strip()
+        # Con límite de palabra: "inventario" contiene "venta" como subcadena, y
+        # sin esto "llévame a inventario" aterrizaba en el punto de venta.
         for url, kws in _ADMIN_NAV_TARGETS.items():
-            if any(kw in target_text or kw == target_text for kw in kws):
+            if any(re.search(rf"\b{re.escape(kw)}\b", target_text) for kw in kws):
+                from tools.shared.utils import ADMIN_NAV_LABELS
                 return {
                     "intent": "admin_navigate",
-                    "args": {"url": url, "name": kws[0].capitalize()}
+                    "args": {"url": url, "name": ADMIN_NAV_LABELS.get(url, kws[0].capitalize())},
                 }
 
     # Navegación general de clientes (Ir a negocio X) - YA CUBIERTO ARRIBA en profile_match
@@ -1341,9 +1427,10 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     if len(text.split()) <= 3 and not _act_is(Act.BOOKING):
         for url, kws in _ADMIN_NAV_TARGETS.items():
             if any(kw == text or kw in text for kw in kws):
+                from tools.shared.utils import ADMIN_NAV_LABELS
                 return {
                     "intent": "admin_navigate",
-                    "args": {"url": url, "name": kws[0].capitalize()}
+                    "args": {"url": url, "name": ADMIN_NAV_LABELS.get(url, kws[0].capitalize())},
                 }
 
     # FIX 2A: Composites de intención directa (Ej: "quiero hacer una reserva")

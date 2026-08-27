@@ -48,6 +48,8 @@ class Concept:
     aliases: List[str] = field(default_factory=list)
     #: Término con el que las herramientas actuales deben buscarlo.
     search_term: str = ""
+    #: Rubro al que pertenece (la categoría de la empresa, si la tiene).
+    domain: str = ""
     #: Si los alias nombran el concepto en lugar de describirlo.
     #: Un rubro se llama "hospital" tanto como "medico"; en cambio la
     #: descripción de una empresa sólo la acompaña. Los primeros deben pesar
@@ -229,6 +231,7 @@ class SemanticCatalog:
                 search_terms=[concept.search_term or concept.label],
                 source="lexical",
                 ambiguous=ambiguous and concept.kind == scored[0][2].kind,
+                domain=concept.domain or None,
             )
             for score, _idx, concept in scored[:limit]
         ]
@@ -342,6 +345,7 @@ def _fetch_concepts() -> List[Concept]:
                         entity_id=row.get("id"),
                         aliases=[str(a)[:200] for a in aliases],
                         search_term=name,
+                        domain=str(row.get("categoria") or "").strip(),
                     ))
 
                 cur.execute("SELECT DISTINCT nombre FROM categoriaservicios")

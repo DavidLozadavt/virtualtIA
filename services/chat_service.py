@@ -144,6 +144,11 @@ class ChatService:
             current_context={
                 "last_assistant_msg": last_assistant_msg,
                 "semantic_state": final_data.get(ConversationState.STORAGE_KEY),
+                # Quién habla cambia qué significan algunas frases: "llévame a
+                # mi agenda" abre una pantalla para el dueño del negocio y
+                # empieza una cita para quien lo visita.
+                "role": payload.role,
+                "active_company_id": payload.active_company_id,
             }
         )
         
@@ -204,15 +209,27 @@ class ChatService:
                 save_message(conversation_id, m["role"], candidate_content)
 
         reply = agent_data["reply"]
-        
+
+        # Clean reply for the user output
+        clean_reply = _strip_debug_markers(reply)
+
+        # La voz se empieza a sintetizar YA, antes de escribir en la base de
+        # datos. Son dos cosas independientes —el audio sale de un servicio
+        # externo, los mensajes van a MySQL— y encadenarlas sumaba el tiempo de
+        # las dos al que el usuario espera. Ahora corren a la vez.
+        audio_task = None
+        if getattr(payload, "voice", False) and app_state:
+            import asyncio as _asyncio
+
+            audio_task = _asyncio.create_task(
+                self._synthesize(clean_reply, project_config)
+            )
+
         # Save assistant response (with markers for context)
         save_message(conversation_id, "assistant", reply)
 
         # Update conversation timestamp
         update_conversation_timestamp(conversation_id)
-
-        # Clean reply for the user output
-        clean_reply = _strip_debug_markers(reply)
 
         latency_ms = int((time.time() - start_time) * 1000)
 
@@ -228,30 +245,20 @@ class ChatService:
             _properties = []
 
         audio_url = None
-        if getattr(payload, "voice", False) and app_state:
-            from core.voice_engine import get_voice_engine
+        if audio_task is not None:
             import asyncio
-            engine = get_voice_engine()
-            audio_id = str(uuid.uuid4())
-            active_p = project_config.get("active_personality", "lyra")
-            personality_config = project_config.get("personalities", {}).get(active_p, {})
-            voice_id = (
-                personality_config.get("tts_voice") or 
-                personality_config.get("voice") or 
-                (project_config.get("voice") if isinstance(project_config.get("voice"), str) else project_config.get("voice", {}).get("tts_voice")) or
-                "es-CO-SalomeNeural"
-            )
-            audio_bytes = await engine.synthesize_to_bytes(clean_reply, voice=voice_id)
-            
+
+            audio_bytes = await audio_task
             if audio_bytes:
+                audio_id = str(uuid.uuid4())
                 if not hasattr(app_state, "tts_cache"):
                     app_state.tts_cache = {}
                 app_state.tts_cache[audio_id] = audio_bytes
-                
+
                 async def delete_after_ttl(aid: str):
                     await asyncio.sleep(60)
                     app_state.tts_cache.pop(aid, None)
-                
+
                 asyncio.create_task(delete_after_ttl(audio_id))
                 audio_url = f"/tts/{audio_id}"
 
@@ -272,6 +279,27 @@ class ChatService:
             needs_auth=bool(_fd.get("needs_auth")),
             pending_reservation=_fd.get("_pending_reservation"),
         )
+
+
+    async def _synthesize(self, text: str, project_config: Dict[str, Any]) -> bytes:
+        """La voz de la personalidad activa, en bytes MP3."""
+        from core.voice_engine import get_voice_engine
+
+        active_p = project_config.get("active_personality", "lyra")
+        personality_config = project_config.get("personalities", {}).get(active_p, {})
+        raw_voice = project_config.get("voice")
+        voice_id = (
+            personality_config.get("tts_voice")
+            or personality_config.get("voice")
+            or (raw_voice if isinstance(raw_voice, str) else (raw_voice or {}).get("tts_voice"))
+            or "es-CO-SalomeNeural"
+        )
+        try:
+            return await get_voice_engine().synthesize_to_bytes(text, voice=voice_id)
+        except Exception as exc:
+            # Quedarse sin audio no puede costarle al usuario su respuesta.
+            logger.error("No se pudo sintetizar la voz: %s", exc)
+            return b""
 
 
     async def get_session_history(self, session_id: str) -> List[Dict[str, Any]]:
