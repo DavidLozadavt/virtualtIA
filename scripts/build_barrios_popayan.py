@@ -54,9 +54,10 @@ PAGINA = 1000
 # barrio se queda sin cubrir.
 CELDA = 0.0001
 
-# Anillos de celdas que se añaden alrededor de cada barrio para cubrir la vía
-# (2 × 11 m ≈ 22 m, el ancho de una calzada con andenes).
-ANILLOS_FRONTERA = 2
+# Anillos de celdas que se añaden alrededor de cada barrio para cubrir la vía y
+# los lotes sin etiqueta pegados al barrio (4 × 11 m ≈ 44 m). Solo crece hacia
+# donde no hay otro barrio compitiendo, así que ensanchar no genera errores.
+ANILLOS_FRONTERA = 4
 
 # Palabras que van en minúscula al pasar el nombre de MAYÚSCULAS a Título.
 MINUSCULAS = {"de", "del", "la", "las", "los", "el", "y", "e", "en", "a"}

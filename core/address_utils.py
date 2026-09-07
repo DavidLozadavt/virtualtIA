@@ -393,6 +393,84 @@ def _google_component(components: list, tipo: str) -> Optional[str]:
     return None
 
 
+# Precisiones de Google que corresponden a una dirección concreta. APPROXIMATE
+# es el centroide del barrio o de la ciudad: sirve para pintar un mapa, no para
+# mandar un taxi ni para decidir en qué barrio queda el punto.
+_GOOGLE_PRECISION_EXACTA = ("ROOFTOP", "RANGE_INTERPOLATED")
+
+
+def _google_geocode_raw(direccion: str) -> Optional[Tuple[float, float]]:
+    """Coordenadas de una dirección ESCRITA, solo si Google la ubica exacta.
+
+    Devuelve None cuando Google solo alcanza a dar una precisión aproximada
+    (centro del barrio o de la ciudad): con eso no se puede resolver el barrio
+    ni despachar un conductor.
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    consulta = (direccion or "").strip()
+    if not api_key or len(consulta) < 4:
+        return None
+
+    cache_key = f"geo_goo_{consulta.lower()}"
+    cached = _geocode_cache_get(cache_key)
+    if cached is not None:
+        return tuple(cached) if cached else None
+
+    params = {
+        "address": f"{consulta}, Popayán, Cauca, Colombia",
+        "components": "country:CO",
+        "key": api_key,
+        "language": "es",
+        "region": "co",
+    }
+
+    try:
+        r = httpx.get(GOOGLE_GEOCODE_URL, params=params, timeout=6.0)
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        if data.get("status") not in ("OK", "ZERO_RESULTS"):
+            logger.warning(f"Google geocode status: {data.get('status')}")
+            return None
+
+        for result in data.get("results", []):
+            geo = result.get("geometry") or {}
+            if geo.get("location_type") not in _GOOGLE_PRECISION_EXACTA:
+                continue
+            loc = geo.get("location") or {}
+            lat, lng = float(loc.get("lat", 0)), float(loc.get("lng", 0))
+            if _in_popayan_bbox(lat, lng):
+                _geocode_cache_set(cache_key, (lat, lng))
+                return (lat, lng)
+
+        _geocode_cache_set(cache_key, ())
+        return None
+
+    except Exception as exc:
+        logger.error(f"Google geocode error: {exc}")
+        return None
+
+
+async def geocode_direccion_escrita(direccion: str) -> Optional[Tuple[float, float]]:
+    """Coordenadas de una dirección que el cliente escribió, o None.
+
+    Google primero (precisión ROOFTOP/RANGE_INTERPOLATED), Nominatim después.
+    Sirve para dos cosas: resolver el barrio con `core.barrio_popayan` y mandarle
+    al backend las coordenadas reales en vez de 0,0.
+    """
+    import asyncio
+
+    punto = await asyncio.to_thread(_google_geocode_raw, direccion)
+    if punto:
+        return punto
+
+    osm = await _nominatim_geocode_async(direccion)
+    if osm and _in_popayan_bbox(osm[0], osm[1]):
+        return (osm[0], osm[1])
+    return None
+
+
 def _nominatim_reverse_parts_raw(lat: float, lng: float) -> Dict[str, Optional[str]]:
     """Vía, barrio y respaldo textual del punto EXACTO, via Nominatim."""
     global _NOMINATIM_LAST_REQ

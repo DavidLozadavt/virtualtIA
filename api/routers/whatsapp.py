@@ -17,6 +17,7 @@ from core.address_utils import (
     _try_local_match,
     _nominatim_geocode,
     reverse_geocode_street_address,
+    geocode_direccion_escrita,
     extract_datetime_with_llm,
     looks_like_place,
 )
@@ -431,6 +432,27 @@ def format_address(text: str) -> str:
     return abbreviate_street_type(_keep_address_only(clean_map_location(text)))
 
 
+async def _con_barrio(direccion: str) -> tuple[str, float, float]:
+    """Agrega el barrio a una dirección ESCRITA y resuelve sus coordenadas.
+
+    Retorna (texto, lat, lng). Si Google no ubica la dirección con precisión de
+    predio, el texto queda igual y las coordenadas en 0,0 — el backend las
+    resuelve como hasta ahora, y sin barrio antes que con uno equivocado.
+    """
+    if not direccion:
+        return direccion, 0.0, 0.0
+
+    punto = await geocode_direccion_escrita(direccion)
+    if not punto:
+        return direccion, 0.0, 0.0
+
+    lat, lng = punto
+    barrio = barrio_de_coordenadas(lat, lng)
+    if barrio and barrio.lower() not in direccion.lower():
+        direccion = f"{direccion}, {barrio}"
+    return direccion, lat, lng
+
+
 async def _resolve_shared_location(
     lat: float,
     lng: float,
@@ -529,7 +551,9 @@ async def _create_wp_service(
     else:
         origen = normalize_address(origen) or origen
         origen = format_address(origen) or origen
-        olat, olng = 0.0, 0.0
+        # Dirección escrita: se geocodifica para poder ponerle el barrio y para
+        # mandarle al backend las coordenadas reales en vez de 0,0.
+        origen, olat, olng = await _con_barrio(origen)
 
     # Solo el domicilio lleva destino (dirección de entrega). Taxi ahora/programado → destino=None.
     dlat, dlng = 0.0, 0.0
@@ -545,7 +569,7 @@ async def _create_wp_service(
         else:
             destino = normalize_address(destino) or destino
             destino = format_address(destino) or destino
-            dlat, dlng = 0.0, 0.0
+            destino, dlat, dlng = await _con_barrio(destino)
 
     clase_v = "TAXI"
     service_type = "TAXI AHORA"

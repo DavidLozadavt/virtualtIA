@@ -315,9 +315,15 @@ def test_destino_compartido_conserva_sus_coordenadas(monkeypatch, backend_captur
     assert payload["destino_lng"] == -76.6009
 
 
-def test_direccion_escrita_va_completa_sin_ciudad(backend_capturado):
-    """Dirección escrita: sin coordenadas propias, pero el texto llega completo
-    y sin la ciudad/departamento al final."""
+def test_direccion_escrita_va_completa_sin_ciudad(backend_capturado, monkeypatch):
+    """Dirección escrita que Google no ubica con precisión de predio: el texto
+    llega completo y sin ciudad, y las coordenadas quedan en 0,0 para que las
+    resuelva el backend."""
+    async def _sin_punto(direccion):
+        return None
+
+    monkeypatch.setattr(wp, "geocode_direccion_escrita", _sin_punto)
+
     ok, _ = asyncio.run(
         wp._create_wp_service(
             "3001234567",
@@ -580,3 +586,66 @@ def test_comuna_del_barrio():
 
     assert comuna_de_barrio("Valle del Ortigal") == "COMUNA 9"
     assert comuna_de_barrio("Barrio Que No Existe") is None
+
+
+# ── Dirección escrita: también lleva barrio ───────────────────────────────────
+
+def test_direccion_escrita_lleva_barrio_y_coordenadas(backend_capturado, monkeypatch):
+    """La dirección escrita se geocodifica: así el conductor recibe el barrio y
+    el backend las coordenadas reales en vez de 0,0."""
+    async def _punto(direccion):
+        assert "52" in direccion
+        return (2.4638, -76.6412)
+
+    monkeypatch.setattr(wp, "geocode_direccion_escrita", _punto)
+    monkeypatch.setattr(wp, "barrio_de_coordenadas", lambda lat, lng: "Valle del Ortigal")
+
+    ok, _ = asyncio.run(
+        wp._create_wp_service(
+            "3001234567", "cra 52 # 3-3", None, "taxi ahora", None, None
+        )
+    )
+
+    assert ok is True
+    payload = backend_capturado["payload"]
+    assert payload["origen"] == "Cra 52 # 3-3, Valle del Ortigal"
+    assert payload["origen_lat"] == 2.4638
+    assert payload["origen_lng"] == -76.6412
+
+
+def test_direccion_escrita_no_repite_el_barrio(backend_capturado, monkeypatch):
+    """Si el cliente ya escribió el barrio, no se duplica."""
+    async def _punto(direccion):
+        return (2.4638, -76.6412)
+
+    monkeypatch.setattr(wp, "geocode_direccion_escrita", _punto)
+    monkeypatch.setattr(wp, "barrio_de_coordenadas", lambda lat, lng: "Valle del Ortigal")
+
+    asyncio.run(
+        wp._create_wp_service(
+            "3001234567", "cra 52 # 3-3 valle del ortigal", None, "taxi ahora", None, None
+        )
+    )
+
+    origen = backend_capturado["payload"]["origen"]
+    assert origen.lower().count("valle del ortigal") == 1
+
+
+def test_direccion_escrita_sin_barrio_en_la_capa(backend_capturado, monkeypatch):
+    """Punto geocodificado pero fuera de la cobertura oficial: sin barrio, con
+    las coordenadas igual, que sirven para asignar conductor."""
+    async def _punto(direccion):
+        return (2.4620, -76.6401)
+
+    monkeypatch.setattr(wp, "geocode_direccion_escrita", _punto)
+    monkeypatch.setattr(wp, "barrio_de_coordenadas", lambda lat, lng: None)
+
+    asyncio.run(
+        wp._create_wp_service(
+            "3001234567", "cra 52 # 3-3", None, "taxi ahora", None, None
+        )
+    )
+
+    payload = backend_capturado["payload"]
+    assert payload["origen"] == "Cra 52 # 3-3"
+    assert payload["origen_lat"] == 2.4620
