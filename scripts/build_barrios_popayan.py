@@ -54,10 +54,16 @@ PAGINA = 1000
 # barrio se queda sin cubrir.
 CELDA = 0.0001
 
-# Anillos de celdas que se añaden alrededor de cada barrio para cubrir la vía y
-# los lotes sin etiqueta pegados al barrio (4 × 11 m ≈ 44 m). Solo crece hacia
-# donde no hay otro barrio compitiendo, así que ensanchar no genera errores.
-ANILLOS_FRONTERA = 4
+# Radio (en celdas) alrededor de una celda vacía donde se mira si hay barrio.
+# En 0 la cobertura es estrictamente lo que dice la capa: un punto solo tiene
+# barrio si cae DENTRO de un predio o de una manzana de ese barrio.
+#
+# Con radio 3 (≈33 m) se cubría también la calzada, pero eso ponía barrio en
+# terreno que la Alcaldía dejó sin rotular —lotes de cesión, zonas comunes— y
+# ahí el resultado es una vecindad, no el sitio: en el lote de cesión entre
+# Valle del Ortigal y Ciudadela las Garzas contestaba "Ciudadela las Garzas".
+# Antes ningún barrio que uno de al lado.
+RADIO_VECINDAD = 0
 
 # Palabras que van en minúscula al pasar el nombre de MAYÚSCULAS a Título.
 MINUSCULAS = {"de", "del", "la", "las", "los", "el", "y", "e", "en", "a"}
@@ -300,36 +306,47 @@ def construir_grilla(
     return grilla, vetadas
 
 
-def expandir_frontera(
+def cubrir_vecindad_inequivoca(
     grilla: Dict[Tuple[int, int], str], vetadas: set
 ) -> Dict[Tuple[int, int], str]:
-    """Ensancha cada barrio hasta la calle donde cae el pin (~17 m).
+    """Cubre la calle pegada a un barrio, solo donde no hay ambigüedad.
 
-    Las manzanas no incluyen la vía, y un pin de WhatsApp casi siempre cae
-    sobre la calzada. Solo se añade una celda si TODAS las celdas vecinas
-    ocupadas pertenecen al mismo barrio: en el límite entre dos barrios no se
-    inventa pertenencia. Las celdas vetadas (linderos disputados) nunca se
-    rellenan.
+    Desactivado por defecto (`RADIO_VECINDAD = 0`): ver la nota de esa constante.
+
+    Las manzanas no incluyen la vía y el pin de WhatsApp suele caer sobre la
+    calzada. Una celda vacía toma el barrio únicamente si TODAS las celdas con
+    barrio dentro de `RADIO_VECINDAD` son del mismo barrio.
+
+    Esto NO es "el barrio más cercano": donde dos barrios se acercan —Valle del
+    Ortigal y Ciudadela las Garzas, por ejemplo— ninguna de las dos gana y la
+    celda queda sin barrio. El crecimiento se calcula una sola vez sobre las
+    celdas originales; si se iterara, un barrio avanzaría por terreno vacío
+    hasta invadir la vecindad del otro.
     """
-    total = 0
-    for _ in range(ANILLOS_FRONTERA):
-        candidatos: Dict[Tuple[int, int], set] = defaultdict(set)
-        for (ix, iy), barrio in grilla.items():
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    vecina = (ix + dx, iy + dy)
-                    if vecina not in grilla:
-                        candidatos[vecina].add(barrio)
+    if RADIO_VECINDAD <= 0:
+        print("      cobertura estricta: sin relleno de vía")
+        return grilla
 
-        nuevas = {
-            c: next(iter(b))
-            for c, b in candidatos.items()
-            if len(b) == 1 and c not in vetadas
-        }
-        grilla.update(nuevas)
-        total += len(nuevas)
+    candidatos: Dict[Tuple[int, int], set] = defaultdict(set)
+    rango = range(-RADIO_VECINDAD, RADIO_VECINDAD + 1)
 
-    print(f"      celdas de frontera añadidas: {total}")
+    for (ix, iy), barrio in grilla.items():
+        for dx in rango:
+            for dy in rango:
+                vecina = (ix + dx, iy + dy)
+                if vecina not in grilla:
+                    candidatos[vecina].add(barrio)
+
+    nuevas = {
+        celda: next(iter(barrios))
+        for celda, barrios in candidatos.items()
+        if len(barrios) == 1 and celda not in vetadas
+    }
+    grilla.update(nuevas)
+
+    ambiguas = sum(1 for b in candidatos.values() if len(b) > 1)
+    print(f"      celdas de vía cubiertas: {len(nuevas)} | "
+          f"descartadas por ambigüedad: {ambiguas}")
     return grilla
 
 
@@ -379,7 +396,7 @@ def main() -> int:
         return 1
 
     grilla, vetadas = construir_grilla(manzanas, mapa, predios)
-    grilla = expandir_frontera(grilla, vetadas)
+    grilla = cubrir_vecindad_inequivoca(grilla, vetadas)
     paquete = empacar(grilla, comuna_de)
 
     salida = Path(args.salida)

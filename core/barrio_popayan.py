@@ -16,8 +16,11 @@ build_barrios_popayan.py` la convierte en una grilla de celdas de ~11 m
 (`tools/barrios_popayan.json.gz`) y este módulo la consulta sin red ni
 dependencias geoespaciales.
 
-Si el punto no cae dentro de ningún barrio de la capa, la respuesta es None.
-Nunca se devuelve el barrio más cercano.
+Cobertura estricta: la respuesta es el barrio que CONTIENE al punto según la
+capa. Si el punto cae en la calzada, en un lote de cesión o en un predio que la
+Alcaldía dejó sin rotular, la respuesta es None. Nunca se devuelve el barrio más
+cercano ni el de al lado — probado: en el lote entre Valle del Ortigal y
+Ciudadela las Garzas responde None, no "Ciudadela las Garzas".
 """
 
 from __future__ import annotations
@@ -86,8 +89,8 @@ def _cargar() -> None:
 def barrio_de_coordenadas(lat: float, lng: float) -> Optional[str]:
     """Barrio que CONTIENE al punto, o None si la capa oficial no lo cubre.
 
-    'Valle del Ortigal' para 2.4638, -76.6412. Nunca devuelve un barrio vecino
-    ni el más cercano: sin cobertura, no hay barrio.
+    'Valle del Ortigal' para 2.463517, -76.642516. Nunca devuelve un barrio
+    vecino ni el más cercano: sin cobertura, no hay barrio.
     """
     if lat is None or lng is None:
         return None

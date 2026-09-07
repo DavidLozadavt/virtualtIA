@@ -559,10 +559,25 @@ def test_nominatim_reverse_parts_descarta_comuna_como_barrio(monkeypatch):
 # ── Barrio oficial: capa de predios de la Alcaldía de Popayán ─────────────────
 
 def test_barrio_de_coordenadas_resuelve_valle_del_ortigal():
-    """Caso reportado: el punto es Valle del Ortigal, no Villa Colombia."""
+    """Caso reportado: el punto es Valle del Ortigal, no Villa Colombia ni
+    Ciudadela las Garzas. Los tres puntos son predios reales de la capa."""
     from core.barrio_popayan import barrio_de_coordenadas
 
-    assert barrio_de_coordenadas(2.4638, -76.6412) == "Valle del Ortigal"
+    for lat, lng in [
+        (2.463517, -76.642516),   # K 53F 2-76
+        (2.464479, -76.640760),   # K 52D 1-70
+        (2.462904, -76.640309),   # K 52C 2A-09
+    ]:
+        assert barrio_de_coordenadas(lat, lng) == "Valle del Ortigal"
+
+
+def test_no_hay_barrio_por_cercania():
+    """El lote de cesión entre Valle del Ortigal y Ciudadela las Garzas no
+    pertenece a ninguno de los dos en la capa: la respuesta es None, no el
+    barrio de al lado."""
+    from core.barrio_popayan import barrio_de_coordenadas
+
+    assert barrio_de_coordenadas(2.4603913, -76.6397125) is None
 
 
 def test_barrio_de_coordenadas_fuera_de_popayan():
