@@ -108,25 +108,17 @@ def test_format_address_limpia_y_abrevia():
 
 # ── 2. Texto de la ubicación compartida ───────────────────────────────────────
 
-def _mock_reverse(monkeypatch, via=None, area=None):
-    """Fija lo que devuelven las dos capas de reverse geocoding."""
-    async def _via(lat, lng):
-        return via
+def _mock_reverse(monkeypatch, via=None, barrio=None):
+    """Fija la vía y el barrio que el geocoder reporta para el punto."""
+    async def _partes(lat, lng):
+        return {"street": via, "barrio": barrio}
 
-    async def _area(lat, lng):
-        return area
-
-    monkeypatch.setattr(wp, "reverse_geocode_street_address", _via)
-    monkeypatch.setattr(wp, "_nominatim_reverse_geocode_async", _area)
+    monkeypatch.setattr(wp, "reverse_geocode_location", _partes)
 
 
 def test_pin_con_direccion_se_usa_tal_cual(monkeypatch):
-    """Si el pin ya trae nomenclatura, no se consulta nada más."""
-    async def _no_llamar(lat, lng):
-        raise AssertionError("no debe hacerse reverse geocoding")
-
-    monkeypatch.setattr(wp, "reverse_geocode_street_address", _no_llamar)
-    monkeypatch.setattr(wp, "_nominatim_reverse_geocode_async", _no_llamar)
+    """La dirección del pin manda sobre la que arme el geocoder."""
+    _mock_reverse(monkeypatch, via="Carrera 52 # 3C-6")
 
     texto = asyncio.run(
         wp._resolve_shared_location(
@@ -150,10 +142,47 @@ def test_pin_sin_nombre_usa_reverse_geocoding(monkeypatch):
     assert texto == "Cra 52 # 3C-6"
 
 
+def test_direccion_lleva_el_barrio_del_punto(monkeypatch):
+    """Lo que pidieron los conductores: dirección + barrio, del mismo punto."""
+    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45", barrio="Ciudad Jardín")
+
+    texto = asyncio.run(
+        wp._resolve_shared_location(
+            2.4500, -76.6000, None, "Ubicación compartida GPS"
+        )
+    )
+    assert texto == "Cra 26 # 2-45, Ciudad Jardín"
+
+
+def test_pin_con_direccion_tambien_lleva_barrio(monkeypatch):
+    """La vía la manda el pin; el barrio lo aporta el geocoder del punto."""
+    _mock_reverse(monkeypatch, via="Carrera 99 # 1-1", barrio="Ciudad Jardín")
+
+    texto = asyncio.run(
+        wp._resolve_shared_location(
+            2.4500, -76.6000, "Cra 52 # 3C-6, Popayán", "Ubicación compartida GPS"
+        )
+    )
+    assert texto == "Cra 52 # 3C-6, Ciudad Jardín"
+
+
+def test_sin_barrio_reportado_la_direccion_va_sola(monkeypatch):
+    """Sin barrio del geocoder no se inventa ninguno: mejor sin barrio que
+    con uno aproximado."""
+    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45", barrio=None)
+
+    texto = asyncio.run(
+        wp._resolve_shared_location(
+            2.4500, -76.6000, None, "Ubicación compartida GPS"
+        )
+    )
+    assert texto == "Cra 26 # 2-45"
+
+
 def test_pin_con_nombre_de_barrio_resuelve_la_direccion(monkeypatch):
     """Caso reportado: el pin dice 'Ciudad Jardín' pero es una ubicación
     compartida → debe salir la dirección del punto, no el nombre del barrio."""
-    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45", area="Ciudad Jardín")
+    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45")
 
     texto = asyncio.run(
         wp._resolve_shared_location(
@@ -177,8 +206,8 @@ def test_pin_de_sitio_comercial_resuelve_la_direccion(monkeypatch):
 
 
 def test_sin_via_en_el_punto_usa_el_barrio(monkeypatch):
-    """Solo cuando el punto no tiene vía se cae al barrio."""
-    _mock_reverse(monkeypatch, via=None, area="Ciudad Jardín")
+    """Solo cuando el punto no tiene vía se manda el barrio solo."""
+    _mock_reverse(monkeypatch, via=None, barrio="Ciudad Jardín")
 
     texto = asyncio.run(
         wp._resolve_shared_location(
@@ -191,7 +220,7 @@ def test_sin_via_en_el_punto_usa_el_barrio(monkeypatch):
 def test_sin_reverse_geocoding_devuelve_enlace_con_coordenadas(monkeypatch):
     """Si todo el reverse falla, se manda el enlace con las coordenadas EXACTAS
     — nunca un landmark o barrio cercano."""
-    _mock_reverse(monkeypatch, via=None, area=None)
+    _mock_reverse(monkeypatch, via=None, barrio=None)
 
     texto = asyncio.run(
         wp._resolve_shared_location(
@@ -246,7 +275,7 @@ def backend_capturado(monkeypatch):
 def test_coordenadas_compartidas_llegan_sin_modificar(monkeypatch, backend_capturado):
     """Coordenadas dentro del radio donde antes se sobreescribían con un valor
     fijo (2.4307, -76.6012). Deben viajar tal cual las mandó el usuario."""
-    _mock_reverse(monkeypatch, via="Calle 4 # 12-30")
+    _mock_reverse(monkeypatch, via="Calle 4 # 12-30", barrio="Bella Vista")
 
     ok, _ = asyncio.run(
         wp._create_wp_service(
@@ -263,7 +292,7 @@ def test_coordenadas_compartidas_llegan_sin_modificar(monkeypatch, backend_captu
     payload = backend_capturado["payload"]
     assert payload["origen_lat"] == 2.4288
     assert payload["origen_lng"] == -76.5987
-    assert payload["origen"] == "Cl 4 # 12-30"
+    assert payload["origen"] == "Cl 4 # 12-30, Bella Vista"
 
 
 def test_destino_compartido_conserva_sus_coordenadas(monkeypatch, backend_capturado):
@@ -408,33 +437,118 @@ def test_google_reverse_sin_api_key_no_llama(monkeypatch):
     assert au._google_reverse_geocode_raw(2.45, -76.60) is None
 
 
-def test_street_address_prefiere_google(monkeypatch):
-    """Google manda; Nominatim solo se consulta si Google no resuelve la vía."""
+def _mock_partes(monkeypatch, google, nominatim=None):
+    """Fija lo que devuelve cada proveedor de reverse geocoding."""
     import core.address_utils as au
 
     async def _google(lat, lng):
-        return "Cra. 26 # 2-45"
+        return dict(google)
 
     async def _nominatim(lat, lng):
-        raise AssertionError("no debe consultarse Nominatim si Google resolvió")
+        if nominatim is None:
+            raise AssertionError("no debía consultarse Nominatim")
+        return dict(nominatim)
 
-    monkeypatch.setattr(au, "_google_reverse_geocode_async", _google)
-    monkeypatch.setattr(au, "_nominatim_reverse_geocode_async", _nominatim)
+    monkeypatch.setattr(au, "_google_reverse_parts_async", _google)
+    monkeypatch.setattr(au, "_nominatim_reverse_parts_async", _nominatim)
+    return au
+
+
+def test_location_prefiere_google(monkeypatch):
+    """Con vía y barrio de Google, Nominatim ni se consulta."""
+    au = _mock_partes(monkeypatch, {"street": "Cra. 26 # 2-45", "barrio": "Ciudad Jardín"})
+
+    assert asyncio.run(au.reverse_geocode_location(2.45, -76.60)) == {
+        "street": "Cra. 26 # 2-45",
+        "barrio": "Ciudad Jardín",
+    }
+
+
+def test_location_completa_el_barrio_con_nominatim(monkeypatch):
+    """Google resolvió la vía pero no el barrio → lo aporta OSM, mismo punto."""
+    au = _mock_partes(
+        monkeypatch,
+        {"street": "Cra. 26 # 2-45", "barrio": None},
+        {"street": None, "barrio": "Ciudad Jardín", "fallback": None},
+    )
+
+    assert asyncio.run(au.reverse_geocode_location(2.45, -76.60)) == {
+        "street": "Cra. 26 # 2-45",
+        "barrio": "Ciudad Jardín",
+    }
+
+
+def test_location_sin_via_devuelve_solo_barrio(monkeypatch):
+    """Un barrio no es una dirección: 'street' queda en None."""
+    au = _mock_partes(
+        monkeypatch,
+        {"street": None, "barrio": None},
+        {"street": None, "barrio": "Ciudad Jardín", "fallback": "Ciudad Jardín"},
+    )
+
+    partes = asyncio.run(au.reverse_geocode_location(2.45, -76.60))
+    assert partes["street"] is None
+    assert partes["barrio"] == "Ciudad Jardín"
+
+
+def test_street_address_devuelve_solo_la_via(monkeypatch):
+    au = _mock_partes(monkeypatch, {"street": "Cra. 26 # 2-45", "barrio": "Ciudad Jardín"})
 
     assert asyncio.run(au.reverse_geocode_street_address(2.45, -76.60)) == "Cra. 26 # 2-45"
 
 
-def test_street_address_descarta_barrio_de_nominatim(monkeypatch):
-    """Un barrio no es una dirección: se devuelve None y el llamador decide."""
+# ── El barrio debe ser exacto, no aproximado ──────────────────────────────────
+
+def test_clean_barrio_descarta_jerarquia_administrativa():
+    """Comuna, perímetro urbano, RAP, ciudad y departamento NO son barrios."""
     import core.address_utils as au
 
-    async def _google(lat, lng):
-        return None
+    for ruido in [
+        "Comuna 9", "Perímetro Urbano Popayán", "RAP Pacífico", "Popayán",
+        "Cauca", "Colombia", "Corregimiento de Cajete", "Zona Urbana", "9",
+    ]:
+        assert au._clean_barrio(ruido) is None, ruido
 
-    async def _nominatim(lat, lng):
-        return "Ciudad Jardín"
 
-    monkeypatch.setattr(au, "_google_reverse_geocode_async", _google)
-    monkeypatch.setattr(au, "_nominatim_reverse_geocode_async", _nominatim)
+def test_clean_barrio_normaliza_el_nombre():
+    import core.address_utils as au
 
-    assert asyncio.run(au.reverse_geocode_street_address(2.45, -76.60)) is None
+    assert au._clean_barrio("Barrio Ciudad Jardín") == "Ciudad Jardín"
+    assert au._clean_barrio("  Villa Colombia ,") == "Villa Colombia"
+    assert au._clean_barrio(None) is None
+
+
+def test_google_reverse_extrae_barrio_del_mismo_punto(monkeypatch):
+    """El barrio sale de address_components del punto, no de un catálogo."""
+    import core.address_utils as au
+
+    monkeypatch.setattr(au.settings, "GOOGLE_MAPS_API_KEY", "test-key")
+    _fake_http_get(monkeypatch, {
+        "status": "OK",
+        "results": [{
+            "types": ["street_address"],
+            "address_components": [
+                {"long_name": "#2-45", "types": ["street_number"]},
+                {"long_name": "Cra. 26", "types": ["route"]},
+                {"long_name": "Ciudad Jardín", "types": ["neighborhood", "political"]},
+                {"long_name": "Comuna 3", "types": ["sublocality", "political"]},
+                {"long_name": "Popayán", "types": ["locality", "political"]},
+            ],
+        }],
+    })
+
+    assert au._google_reverse_parts_raw(2.4500, -76.6000) == {
+        "street": "Cra. 26 # 2-45",
+        "barrio": "Ciudad Jardín",
+    }
+
+
+def test_nominatim_reverse_parts_descarta_comuna_como_barrio(monkeypatch):
+    au = _fake_http_get(monkeypatch, {
+        "display_name": "Calle 3C, Comuna 9, Popayán, Cauca, Colombia",
+        "address": {"road": "Calle 3C", "city_district": "Comuna 9", "city": "Popayán"},
+    })
+
+    partes = au._nominatim_reverse_parts_raw(2.4400, -76.6100)
+    assert partes["street"] == "Calle 3C"
+    assert partes["barrio"] is None
