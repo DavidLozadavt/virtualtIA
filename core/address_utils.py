@@ -499,9 +499,14 @@ async def reverse_geocode_location(lat: float, lng: float) -> Dict[str, Optional
     """Vía y barrio de unas coordenadas EXACTAS: {'street', 'barrio'}.
 
     Los dos datos vienen del geocoder para ESE punto —Google primero, Nominatim
-    para lo que falte—, nunca de un catálogo por cercanía. Si el geocoder no
-    reporta barrio, la clave queda en None: es preferible una dirección sin
-    barrio a un barrio aproximado.
+    para lo que falte—, nunca de un catálogo por cercanía.
+
+    OJO con 'barrio': medido en Popayán (2026-09-07), NINGUNO de los dos
+    proveedores tiene datos de barrio usables. Google devuelve la comuna como
+    sublocality ("Comuna 1") o una urbanización vecina, y en muchos puntos no
+    devuelve nada; OSM devuelve el barrio colindante (en Valle del Ortigal
+    responde "Villa Colombia"). Por eso el flujo de WhatsApp NO usa esta clave:
+    el barrio hay que obtenerlo del cliente, no del geocoder.
     """
     partes = await _google_reverse_parts_async(lat, lng)
     street = partes.get("street")

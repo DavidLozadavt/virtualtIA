@@ -9,8 +9,9 @@ el usuario.
 
 Reglas que se verifican aquí:
   1. Las coordenadas que envía el usuario viajan al backend sin modificarse.
-  2. Toda ubicación compartida resuelve a la DIRECCIÓN del punto exacto; el
-     nombre del barrio o del sitio es solo el respaldo cuando no hay vía.
+  2. Toda ubicación compartida resuelve a la DIRECCIÓN del punto exacto, más el
+     barrio de la capa de predios de la Alcaldía. El barrio NUNCA sale de
+     Google ni de OSM: en Popayán responden la comuna o el barrio vecino.
   3. Ciudad, departamento, comuna, país y código postal se recortan del texto;
      la nomenclatura y el número de casa se conservan completos.
   4. La nomenclatura de vía se escribe siempre igual: 'Cl' y 'Cra'.
@@ -109,11 +110,12 @@ def test_format_address_limpia_y_abrevia():
 # ── 2. Texto de la ubicación compartida ───────────────────────────────────────
 
 def _mock_reverse(monkeypatch, via=None, barrio=None):
-    """Fija la vía y el barrio que el geocoder reporta para el punto."""
-    async def _partes(lat, lng):
-        return {"street": via, "barrio": barrio}
+    """Fija la vía del geocoder y el barrio de la capa de la Alcaldía."""
+    async def _via(lat, lng):
+        return via
 
-    monkeypatch.setattr(wp, "reverse_geocode_location", _partes)
+    monkeypatch.setattr(wp, "reverse_geocode_street_address", _via)
+    monkeypatch.setattr(wp, "barrio_de_coordenadas", lambda lat, lng: barrio)
 
 
 def test_pin_con_direccion_se_usa_tal_cual(monkeypatch):
@@ -142,41 +144,47 @@ def test_pin_sin_nombre_usa_reverse_geocoding(monkeypatch):
     assert texto == "Cra 52 # 3C-6"
 
 
-def test_direccion_lleva_el_barrio_del_punto(monkeypatch):
-    """Lo que pidieron los conductores: dirección + barrio, del mismo punto."""
-    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45", barrio="Ciudad Jardín")
+def test_direccion_lleva_el_barrio_oficial(monkeypatch):
+    """Lo que pidieron los conductores: dirección + barrio del punto."""
+    _mock_reverse(monkeypatch, via="Carrera 52 # 3-3", barrio="Valle del Ortigal")
 
     texto = asyncio.run(
         wp._resolve_shared_location(
-            2.4500, -76.6000, None, "Ubicación compartida GPS"
+            2.4638, -76.6412, None, "Ubicación compartida GPS"
         )
     )
-    assert texto == "Cra 26 # 2-45, Ciudad Jardín"
+    assert texto == "Cra 52 # 3-3, Valle del Ortigal"
+
+
+def test_barrio_del_geocoder_no_entra_en_la_direccion(monkeypatch):
+    """Google y OSM reportan barrios equivocados en Popayán (en Valle del
+    Ortigal responden 'Comuna 1' y 'Villa Colombia'). El barrio solo puede
+    venir de la capa de la Alcaldía; sin cobertura, la dirección va sola."""
+    async def _via(lat, lng):
+        return "Carrera 52 # 3-3"
+
+    monkeypatch.setattr(wp, "reverse_geocode_street_address", _via)
+    monkeypatch.setattr(wp, "barrio_de_coordenadas", lambda lat, lng: None)
+
+    texto = asyncio.run(
+        wp._resolve_shared_location(
+            2.4604, -76.6397, None, "Ubicación compartida GPS"
+        )
+    )
+    assert texto == "Cra 52 # 3-3"
+    assert "Villa Colombia" not in texto
 
 
 def test_pin_con_direccion_tambien_lleva_barrio(monkeypatch):
-    """La vía la manda el pin; el barrio lo aporta el geocoder del punto."""
-    _mock_reverse(monkeypatch, via="Carrera 99 # 1-1", barrio="Ciudad Jardín")
+    """La vía la manda el pin; el barrio, la capa de la Alcaldía."""
+    _mock_reverse(monkeypatch, via="Carrera 99 # 1-1", barrio="Valle del Ortigal")
 
     texto = asyncio.run(
         wp._resolve_shared_location(
-            2.4500, -76.6000, "Cra 52 # 3C-6, Popayán", "Ubicación compartida GPS"
+            2.4638, -76.6412, "Cra 52 # 3-3, Popayán", "Ubicación compartida GPS"
         )
     )
-    assert texto == "Cra 52 # 3C-6, Ciudad Jardín"
-
-
-def test_sin_barrio_reportado_la_direccion_va_sola(monkeypatch):
-    """Sin barrio del geocoder no se inventa ninguno: mejor sin barrio que
-    con uno aproximado."""
-    _mock_reverse(monkeypatch, via="Carrera 26 # 2-45", barrio=None)
-
-    texto = asyncio.run(
-        wp._resolve_shared_location(
-            2.4500, -76.6000, None, "Ubicación compartida GPS"
-        )
-    )
-    assert texto == "Cra 26 # 2-45"
+    assert texto == "Cra 52 # 3-3, Valle del Ortigal"
 
 
 def test_pin_con_nombre_de_barrio_resuelve_la_direccion(monkeypatch):
@@ -203,18 +211,6 @@ def test_pin_de_sitio_comercial_resuelve_la_direccion(monkeypatch):
         )
     )
     assert texto == "Cra 9 # 24AN-21"
-
-
-def test_sin_via_en_el_punto_usa_el_barrio(monkeypatch):
-    """Solo cuando el punto no tiene vía se manda el barrio solo."""
-    _mock_reverse(monkeypatch, via=None, barrio="Ciudad Jardín")
-
-    texto = asyncio.run(
-        wp._resolve_shared_location(
-            2.4500, -76.6000, None, "Ubicación compartida GPS"
-        )
-    )
-    assert texto == "Ciudad Jardín"
 
 
 def test_sin_reverse_geocoding_devuelve_enlace_con_coordenadas(monkeypatch):
@@ -275,7 +271,7 @@ def backend_capturado(monkeypatch):
 def test_coordenadas_compartidas_llegan_sin_modificar(monkeypatch, backend_capturado):
     """Coordenadas dentro del radio donde antes se sobreescribían con un valor
     fijo (2.4307, -76.6012). Deben viajar tal cual las mandó el usuario."""
-    _mock_reverse(monkeypatch, via="Calle 4 # 12-30", barrio="Bella Vista")
+    _mock_reverse(monkeypatch, via="Calle 4 # 12-30")
 
     ok, _ = asyncio.run(
         wp._create_wp_service(
@@ -292,7 +288,7 @@ def test_coordenadas_compartidas_llegan_sin_modificar(monkeypatch, backend_captu
     payload = backend_capturado["payload"]
     assert payload["origen_lat"] == 2.4288
     assert payload["origen_lng"] == -76.5987
-    assert payload["origen"] == "Cl 4 # 12-30, Bella Vista"
+    assert payload["origen"] == "Cl 4 # 12-30"
 
 
 def test_destino_compartido_conserva_sus_coordenadas(monkeypatch, backend_capturado):
@@ -552,3 +548,35 @@ def test_nominatim_reverse_parts_descarta_comuna_como_barrio(monkeypatch):
     partes = au._nominatim_reverse_parts_raw(2.4400, -76.6100)
     assert partes["street"] == "Calle 3C"
     assert partes["barrio"] is None
+
+
+# ── Barrio oficial: capa de predios de la Alcaldía de Popayán ─────────────────
+
+def test_barrio_de_coordenadas_resuelve_valle_del_ortigal():
+    """Caso reportado: el punto es Valle del Ortigal, no Villa Colombia."""
+    from core.barrio_popayan import barrio_de_coordenadas
+
+    assert barrio_de_coordenadas(2.4638, -76.6412) == "Valle del Ortigal"
+
+
+def test_barrio_de_coordenadas_fuera_de_popayan():
+    """Fuera de la cobertura de la capa no se inventa barrio."""
+    from core.barrio_popayan import barrio_de_coordenadas
+
+    assert barrio_de_coordenadas(4.6097, -74.0817) is None   # Bogotá
+    assert barrio_de_coordenadas(None, None) is None
+
+
+def test_catalogo_de_barrios_cargado():
+    from core.barrio_popayan import barrios_disponibles
+
+    barrios = barrios_disponibles()
+    assert len(barrios) > 200
+    assert "Valle del Ortigal" in barrios
+
+
+def test_comuna_del_barrio():
+    from core.barrio_popayan import comuna_de_barrio
+
+    assert comuna_de_barrio("Valle del Ortigal") == "COMUNA 9"
+    assert comuna_de_barrio("Barrio Que No Existe") is None

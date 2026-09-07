@@ -16,10 +16,12 @@ from core.address_utils import (
     normalize_address,
     _try_local_match,
     _nominatim_geocode,
-    reverse_geocode_location,
+    reverse_geocode_street_address,
     extract_datetime_with_llm,
     looks_like_place,
 )
+
+from core.barrio_popayan import barrio_de_coordenadas
 
 logger = logging.getLogger("lyra.whatsapp")
 whatsapp_router = APIRouter(prefix="/wh/whatsapp", tags=["whatsapp"])
@@ -437,24 +439,27 @@ async def _resolve_shared_location(
 ) -> str:
     """Texto de una ubicación compartida: la dirección EXACTA de ese punto.
 
-    Formato: 'Cra 26 # 2-45, Valle del Ortigal'.
+    Formato: 'Cra 52 # 3-3, Valle del Ortigal'.
 
     La vía sale del pin de Meta si ya viene con nomenclatura, o del reverse
-    geocoding de las coordenadas exactas. El barrio sale SIEMPRE del geocoder
-    para ese punto; si no lo reporta, la dirección va sin barrio antes que con
-    uno aproximado. Nunca se reemplaza el punto por un landmark o barrio
-    cercano: eso convertía la ubicación exacta en un punto de referencia a
-    cientos de metros de distancia.
+    geocoding de las coordenadas exactas. El barrio NO sale del geocoder —ni
+    Google ni OSM lo tienen bien en Popayán— sino de la capa de predios de la
+    Alcaldía (`core.barrio_popayan`), que dice qué barrio contiene al punto. Si
+    esa capa no cubre el punto, la dirección va sin barrio. Nunca se reemplaza
+    el punto por un landmark o barrio cercano: eso convertía la ubicación
+    exacta en un punto de referencia a cientos de metros.
     """
     explicit = format_address(explicit_name or "")
 
-    # Vía y barrio del punto EXACTO (Google → Nominatim). Se consulta siempre,
-    # incluso con dirección en el pin, porque el barrio solo sale de aquí.
-    partes = await reverse_geocode_location(lat, lng)
-    barrio = (partes.get("barrio") or "").strip()
-
     # La dirección del pin manda sobre la del geocoder: es la que dio el usuario.
-    via = explicit if _has_address_signal(explicit) else format_address(partes.get("street") or "")
+    if _has_address_signal(explicit):
+        via = explicit
+    else:
+        via = format_address(await reverse_geocode_street_address(lat, lng) or "")
+
+    # Barrio que CONTIENE al punto según la capa de la Alcaldía. None si la
+    # capa no cubre ese punto: no se rellena con el barrio vecino.
+    barrio = barrio_de_coordenadas(lat, lng)
 
     if via and barrio:
         return f"{via}, {barrio}"
