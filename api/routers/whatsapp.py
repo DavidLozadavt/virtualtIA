@@ -326,16 +326,100 @@ def _has_address_signal(text: str) -> bool:
     return bool(_ADDRESS_SIGNAL_RE.search(text or ""))
 
 
+# Ruido geográfico que Meta/Nominatim agregan al final de la dirección.
+_LOC_NOISE_RE = re.compile(
+    r'\s*,\s*(popay[áa]n|cauca|valle del cauca|colombia|col|co)\s*(?=,|$)',
+    re.IGNORECASE,
+)
+_POSTAL_RE = re.compile(r'\s*,?\s*\b\d{6}\b')
+# Igual, pero escrito a mano por el usuario y sin comas: "cra 52 # 3c-6 popayan cauca".
+_LOC_TRAILING_RE = re.compile(
+    r'[\s,;.-]+(popay[áa]n|cauca|valle del cauca|colombia)\s*$',
+    re.IGNORECASE,
+)
+
+
 def clean_map_location(loc_name: str) -> str:
-    """Removes city, country, and zip codes from a map location name for a more natural response."""
+    """Deja SOLO la dirección: quita ciudad, departamento, país y código postal.
+
+    'Cra 52 # 3C-6, Popayán, Cauca, 190003, Colombia' → 'Cra 52 # 3C-6'
+
+    No recorta nada más: la nomenclatura y el número de casa se preservan
+    completos, porque son lo que el conductor necesita para llegar al punto.
+    """
     if not loc_name:
         return ""
-    loc = loc_name.strip()
-    loc = re.sub(r',\s*Popayán.*', '', loc, flags=re.IGNORECASE)
-    loc = re.sub(r',\s*Cauca.*', '', loc, flags=re.IGNORECASE)
-    loc = re.sub(r',\s*Colombia.*', '', loc, flags=re.IGNORECASE)
-    loc = re.sub(r',\s*CO$', '', loc, flags=re.IGNORECASE)
-    return loc.strip()
+    loc = _POSTAL_RE.sub('', loc_name.strip())
+    prev = None
+    while prev != loc:
+        prev = loc
+        loc = _LOC_NOISE_RE.sub('', loc)
+        loc = _LOC_TRAILING_RE.sub('', loc)
+    loc = re.sub(r'\s*,\s*(?=,)', '', loc)
+    loc = re.sub(r'\s{2,}', ' ', loc)
+    return loc.strip(' ,;-|')
+
+
+# Nomenclatura de vía: se escribe siempre igual, venga como venga del usuario.
+_CALLE_RE = re.compile(r'\b(?:calles?|clle|cll|cl)\b\.?', re.IGNORECASE)
+_CARRERA_RE = re.compile(r'\b(?:carreras?|crra|cra|krra|kra|kr|cr)\b\.?', re.IGNORECASE)
+
+
+def abbreviate_street_type(text: str) -> str:
+    """Normaliza la nomenclatura de vía: calle → 'Cl', carrera → 'Cra'.
+
+    'Calle 5 Norte # 22AN-45' → 'Cl 5 Norte # 22AN-45'
+    'carrera 52 # 3c-6'       → 'Cra 52 # 3c-6'
+
+    Solo toca la palabra de la vía; el número, la letra y el número de casa
+    quedan intactos.
+    """
+    if not text:
+        return ""
+    t = _CALLE_RE.sub('Cl', text)
+    t = _CARRERA_RE.sub('Cra', t)
+    t = re.sub(r'\s{2,}', ' ', t)
+    return t.strip()
+
+
+def format_address(text: str) -> str:
+    """Dirección lista para mostrar y para el backend: sin ciudad/departamento/
+    país/código postal, y con la nomenclatura de vía normalizada (Cl / Cra)."""
+    return abbreviate_street_type(clean_map_location(text))
+
+
+async def _resolve_shared_location(
+    lat: float,
+    lng: float,
+    explicit_name: Optional[str],
+    fallback_label: str,
+) -> str:
+    """Texto de una ubicación compartida: la dirección EXACTA de ese punto.
+
+    Prioridad:
+      1. Dirección que manda Meta en el pin (name/address), limpia de ciudad.
+      2. Reverse geocoding de las coordenadas exactas del usuario.
+      3. Enlace GPS con esas mismas coordenadas, si el reverse falla.
+
+    Nunca reemplaza el punto por un landmark o barrio cercano: eso convertía la
+    ubicación exacta en un punto de referencia a cientos de metros de distancia.
+    """
+    explicit = format_address(explicit_name or "")
+
+    # El pin ya trae nomenclatura de dirección → es lo que dio el usuario.
+    if explicit and _has_address_signal(explicit):
+        return explicit
+
+    reverse = format_address(await _nominatim_reverse_geocode_async(lat, lng) or "")
+
+    # Pin con solo nombre de sitio (sin dirección) → nombre + dirección real.
+    if explicit and reverse and reverse.lower() not in explicit.lower():
+        return f"{explicit} - {reverse}"
+    if explicit:
+        return explicit
+    if reverse:
+        return reverse
+    return f"{fallback_label} (Enlace: https://maps.google.com/?q={lat},{lng})"
 
 class WpSession:
     def __init__(self, phone: str, company_id: int = 1):
@@ -381,40 +465,18 @@ async def _create_wp_service(
     observacion: Optional[str] = None
 ) -> tuple[bool, str]:
     import re
-    from tools.popayan_geodata import get_nearby_landmarks, get_nearby_barrios
-    
+
     map_match_o = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", origen)
     if map_match_o:
-        olat, olng, explicit_name = map_match_o.groups()
-        if explicit_name:
-            origen = clean_map_location(explicit_name)
-        else:
-            l_info = get_nearby_landmarks(float(olat), float(olng), radius_km=0.3)
-            if l_info:
-                origen = f"{l_info[0]['name']}"
-            else:
-                b_info = get_nearby_barrios(float(olat), float(olng), radius_km=2.0)
-                if b_info:
-                    origen = f"Barrio {b_info[0]['name']}"
-                else:
-                    origen = f"Ubicación compartida GPS (Enlace: https://maps.google.com/?q={olat},{olng})"
-        
-        # Check if the location is Maria Oriente to override coords
-        is_maria_oriente = False
-        if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
-            is_maria_oriente = True
-        else:
-            b_info = get_nearby_barrios(float(olat), float(olng), radius_km=1.5)
-            if b_info and b_info[0]["name"] == "María Oriente":
-                is_maria_oriente = True
-                origen = "Barrio María Oriente"
-
-        if is_maria_oriente:
-            olat, olng = 2.4307, -76.6012
-
-        g_o = (olat, olng, origen)
+        olat_s, olng_s, explicit_name = map_match_o.groups()
+        # Coordenadas EXACTAS que compartió el usuario: van tal cual al backend.
+        olat, olng = float(olat_s), float(olng_s)
+        origen = await _resolve_shared_location(
+            olat, olng, explicit_name, "Ubicación compartida GPS"
+        )
     else:
         origen = normalize_address(origen) or origen
+        origen = format_address(origen) or origen
         olat, olng = 0.0, 0.0
 
     # Solo el domicilio lleva destino (dirección de entrega). Taxi ahora/programado → destino=None.
@@ -422,33 +484,15 @@ async def _create_wp_service(
     if destino:
         map_match_d = re.search(r"Ubicación en mapa:\s*(-?\d+\.\d+),(-?\d+\.\d+)(?:\s*\|\s*(.*))?", destino)
         if map_match_d:
-            dlat, dlng, explicit_name = map_match_d.groups()
-            if explicit_name:
-                destino = clean_map_location(explicit_name)
-            else:
-                l_info = get_nearby_landmarks(float(dlat), float(dlng), radius_km=0.3)
-                if l_info:
-                    destino = f"{l_info[0]['name']}"
-                else:
-                    b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=2.0)
-                    if b_info:
-                        destino = f"Barrio {b_info[0]['name']}"
-                    else:
-                        destino = f"Destino GPS (Enlace: https://maps.google.com/?q={dlat},{dlng})"
-
-            is_maria_oriente_d = False
-            if explicit_name and any(term in explicit_name.lower() for term in ["maria oriente", "maría oriente"]):
-                is_maria_oriente_d = True
-            else:
-                b_info = get_nearby_barrios(float(dlat), float(dlng), radius_km=1.5)
-                if b_info and b_info[0]["name"] == "María Oriente":
-                    is_maria_oriente_d = True
-                    destino = "Barrio María Oriente"
-
-            if is_maria_oriente_d:
-                dlat, dlng = 2.4307, -76.6012
+            dlat_s, dlng_s, explicit_name = map_match_d.groups()
+            # Coordenadas EXACTAS del pin de entrega, sin ajustes.
+            dlat, dlng = float(dlat_s), float(dlng_s)
+            destino = await _resolve_shared_location(
+                dlat, dlng, explicit_name, "Destino GPS"
+            )
         else:
             destino = normalize_address(destino) or destino
+            destino = format_address(destino) or destino
             dlat, dlng = 0.0, 0.0
 
     clase_v = "TAXI"
@@ -786,6 +830,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             normalized = normalize_address(origen)
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
+            # Dirección escrita: se conserva completa, solo sin ciudad/departamento.
+            origen = format_address(origen) or origen
 
         # No se pudo extraer un origen válido → re-pedir el origen SIN reenviar el menú.
         if not origen or len(origen) < 2 or not looks_like_place(origen):
@@ -849,6 +895,8 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
             normalized = normalize_address(origen)
             if normalized and len(normalized) > len(origen) * 0.5:
                 origen = normalized
+            # Dirección escrita: se conserva completa, solo sin ciudad/departamento.
+            origen = format_address(origen) or origen
 
         if not origen or len(origen) < 2 or not looks_like_place(origen):
             await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de recogida.\n\n📍 Escríbela o comparte tu ubicación.")
@@ -875,6 +923,7 @@ async def process_whatsapp_message(sender_phone: str, message: str, company_id: 
                 normalized = normalize_address(dest)
                 if normalized and len(normalized) > len(dest) * 0.5:
                     dest = normalized
+                dest = format_address(dest) or dest
 
         if not dest or len(dest) < 2 or (not dest.startswith("Ubicación en mapa:") and not looks_like_place(dest)):
             await send_whatsapp_location_request(sender_phone, "⚠️ No logré identificar la dirección de entrega.\n\n📦 Escríbela o comparte la ubicación.")
