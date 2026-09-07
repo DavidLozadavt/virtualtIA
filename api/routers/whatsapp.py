@@ -17,6 +17,7 @@ from core.address_utils import (
     _try_local_match,
     _nominatim_geocode,
     _nominatim_reverse_geocode_async,
+    reverse_geocode_street_address,
     extract_datetime_with_llm,
     looks_like_place,
 )
@@ -332,6 +333,23 @@ _LOC_NOISE_RE = re.compile(
     re.IGNORECASE,
 )
 _POSTAL_RE = re.compile(r'\s*,?\s*\b\d{6}\b')
+# Segmentos administrativos que devuelve Nominatim/Meta y que al conductor no
+# le dicen nada: "Comuna 9", "Perímetro Urbano Popayán", "RAP Pacífico"…
+_ADMIN_NOISE_SEGMENT_RE = re.compile(
+    r'^(?:'
+    r'comuna\s*\d*|'
+    r'per[íi]metro\s+urbano.*|'
+    r'rap\b.*|'
+    r'regi[óo]n\b.*|'
+    r'provincia\b.*|'
+    r'municipio\b.*|'
+    r'corregimiento\b.*|'
+    r'localidad\b.*|'
+    r'zona\s+(?:urbana|rural)\b.*|'
+    r'\d{4,}'
+    r')$',
+    re.IGNORECASE,
+)
 # Igual, pero escrito a mano por el usuario y sin comas: "cra 52 # 3c-6 popayan cauca".
 _LOC_TRAILING_RE = re.compile(
     r'[\s,;.-]+(popay[áa]n|cauca|valle del cauca|colombia)\s*$',
@@ -355,7 +373,9 @@ def clean_map_location(loc_name: str) -> str:
         prev = loc
         loc = _LOC_NOISE_RE.sub('', loc)
         loc = _LOC_TRAILING_RE.sub('', loc)
-    loc = re.sub(r'\s*,\s*(?=,)', '', loc)
+    partes = [p.strip() for p in loc.split(',') if p.strip()]
+    partes = [p for p in partes if not _ADMIN_NOISE_SEGMENT_RE.match(p)]
+    loc = ', '.join(partes)
     loc = re.sub(r'\s{2,}', ' ', loc)
     return loc.strip(' ,;-|')
 
@@ -382,10 +402,32 @@ def abbreviate_street_type(text: str) -> str:
     return t.strip()
 
 
+def _keep_address_only(text: str) -> str:
+    """Si el texto arranca con nomenclatura de vía, se queda SOLO con ella.
+
+    'Cl 3C # 12-34, Villa Colombia'                → 'Cl 3C # 12-34'
+    'Centro Comercial Campanario - Cra 9 #24AN-21' → 'Cra 9 #24AN-21'
+
+    Cuando no hay vía (el punto solo resuelve a un barrio o a un sitio), se
+    devuelve lo que haya: es la mejor referencia disponible.
+    """
+    if not text:
+        return ""
+    # Meta manda "Nombre del sitio - Dirección"; Nominatim separa por comas.
+    partes = [p.strip() for p in re.split(r'\s+-\s+|,', text) if p.strip()]
+    if not partes:
+        return ""
+    for parte in partes:
+        if _has_address_signal(parte):
+            return parte
+    return ', '.join(partes)
+
+
 def format_address(text: str) -> str:
-    """Dirección lista para mostrar y para el backend: sin ciudad/departamento/
-    país/código postal, y con la nomenclatura de vía normalizada (Cl / Cra)."""
-    return abbreviate_street_type(clean_map_location(text))
+    """Dirección lista para mostrar y para el backend: solo la dirección, sin
+    barrio/comuna/ciudad/departamento/país/código postal, y con la nomenclatura
+    de vía normalizada (Cl / Cra)."""
+    return abbreviate_street_type(_keep_address_only(clean_map_location(text)))
 
 
 async def _resolve_shared_location(
@@ -404,21 +446,25 @@ async def _resolve_shared_location(
     Nunca reemplaza el punto por un landmark o barrio cercano: eso convertía la
     ubicación exacta en un punto de referencia a cientos de metros de distancia.
     """
+    # 1. El pin ya trae la dirección con nomenclatura → es la del usuario.
     explicit = format_address(explicit_name or "")
-
-    # El pin ya trae nomenclatura de dirección → es lo que dio el usuario.
     if explicit and _has_address_signal(explicit):
         return explicit
 
-    reverse = format_address(await _nominatim_reverse_geocode_async(lat, lng) or "")
+    # 2. Prioridad para toda ubicación compartida: sacarle la DIRECCIÓN al
+    #    punto exacto (Google → Nominatim), no el nombre del barrio ni del sitio.
+    via = format_address(await reverse_geocode_street_address(lat, lng) or "")
+    if via:
+        return via
 
-    # Pin con solo nombre de sitio (sin dirección) → nombre + dirección real.
-    if explicit and reverse and reverse.lower() not in explicit.lower():
-        return f"{explicit} - {reverse}"
+    # 3. Sin vía en el punto: barrio/sector del reverse, o el nombre del pin.
+    area = format_address(await _nominatim_reverse_geocode_async(lat, lng) or "")
+    if area:
+        return area
     if explicit:
         return explicit
-    if reverse:
-        return reverse
+
+    # 4. Nada resolvió: enlace con las coordenadas exactas.
     return f"{fallback_label} (Enlace: https://maps.google.com/?q={lat},{lng})"
 
 class WpSession:

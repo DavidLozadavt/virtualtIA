@@ -178,6 +178,7 @@ NOMINATIM_URL        = "https://nominatim.openstreetmap.org/search"
 GEOCODE_COUNTRYCODES = "co"
 GEOCODE_VIEWBOX      = "-76.82,2.58,-76.42,2.32"
 GEOCODE_USER_AGENT   = "lyra-intellitaxi/1.0 (contact: admin)"
+GOOGLE_GEOCODE_URL   = "https://maps.googleapis.com/maps/api/geocode/json"
 
 POPAYAN_MIN_LAT, POPAYAN_MAX_LAT = 2.32, 2.58
 POPAYAN_MIN_LNG, POPAYAN_MAX_LNG = -76.82, -76.42
@@ -187,6 +188,14 @@ _GEOCODE_CACHE_LOCK = threading.Lock()
 _NOMINATIM_LOCK     = threading.Lock()
 _NOMINATIM_LAST_REQ = 0.0
 GEOCODE_MIN_INTERVAL = 1.1
+
+
+# Nomenclatura de vía: distingue una dirección de un nombre de barrio o sitio.
+_VIA_SIGNAL_RE = re.compile(
+    r'\b(calle|carrera|cra|cr|cl|kr|kra|avenida|av|diagonal|diag|'
+    r'transversal|tr|autopista|anillo|v[íi]a)\b',
+    re.IGNORECASE,
+)
 
 
 def _in_popayan_bbox(lat: float, lng: float) -> bool:
@@ -273,6 +282,75 @@ async def _nominatim_geocode_async(query: str) -> Optional[Tuple[float, float, s
     return await asyncio.to_thread(_nominatim_geocode_raw, query)
 
 
+def _compose_street(via: str, numero: Optional[str]) -> str:
+    """'Cra. 26' + '#2-45' → 'Cra. 26 # 2-45'. Sin número, solo la vía."""
+    via = (via or "").strip()
+    num = (numero or "").strip().lstrip("#").strip()
+    return f"{via} # {num}" if num else via
+
+
+def _google_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
+    """Dirección con nomenclatura de vía via Google Geocoding (reverse).
+
+    Google tiene mejor cobertura de nomenclatura urbana en Colombia que OSM:
+    donde Nominatim solo conoce el barrio, Google suele devolver la carrera o
+    calle con número. Retorna None si no hay API key o si el punto no resuelve
+    a una vía (nunca devuelve barrio, comuna ni plus code).
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if not api_key:
+        return None
+
+    cache_key = f"rev_goo_{lat}_{lng}"
+    cached = _geocode_cache_get(cache_key)
+    if cached is not None:
+        return cached or None
+
+    params = {
+        "latlng": f"{lat},{lng}",
+        "key": api_key,
+        "language": "es",
+        "region": "co",
+        "result_type": "street_address|premise|subpremise|route",
+    }
+
+    try:
+        r = httpx.get(GOOGLE_GEOCODE_URL, params=params, timeout=6.0)
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        status = data.get("status")
+        if status not in ("OK", "ZERO_RESULTS"):
+            logger.warning(f"Google reverse geocode status: {status}")
+            return None
+
+        for result in data.get("results", []):
+            comps = result.get("address_components") or []
+            via = _google_component(comps, "route")
+            if not via:
+                continue
+            corto = _compose_street(via, _google_component(comps, "street_number"))
+            _geocode_cache_set(cache_key, corto)
+            return corto
+
+        _geocode_cache_set(cache_key, "")
+        return None
+
+    except Exception as exc:
+        logger.error(f"Google reverse geocode error: {exc}")
+        return None
+
+
+def _google_component(components: list, tipo: str) -> Optional[str]:
+    for comp in components:
+        if tipo in (comp.get("types") or []):
+            valor = (comp.get("long_name") or "").strip()
+            if valor:
+                return valor
+    return None
+
+
 def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
     """Reverse geocode via Nominatim."""
     global _NOMINATIM_LAST_REQ
@@ -282,7 +360,7 @@ def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
     if cached is not None:
         return cached
 
-    params  = {"lat": lat, "lon": lng, "format": "json", "addressdetails": 0}
+    params  = {"lat": lat, "lon": lng, "format": "json", "addressdetails": 1}
     headers = {"User-Agent": GEOCODE_USER_AGENT, "Accept": "application/json"}
 
     try:
@@ -308,15 +386,39 @@ def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
             return None
 
         data = r.json()
-        if "display_name" in data:
-            name = str(data["display_name"])
-            name_short = (
-                name.replace(", Popayán, Cauca, Colombia", "")
-                    .replace(", Centro", "")
-                    .strip(", ")
-            )
-            _geocode_cache_set(cache_key, name_short)
-            return name_short
+        addr = data.get("address") or {}
+
+        # Solo la dirección: vía + número de casa. El resto de la jerarquía
+        # administrativa que devuelve Nominatim (comuna, perímetro urbano, RAP,
+        # departamento, país) no le sirve al conductor y ensucia el mensaje.
+        via = (
+            addr.get("road")
+            or addr.get("pedestrian")
+            or addr.get("residential")
+            or addr.get("footway")
+        )
+        if via:
+            corto = _compose_street(str(via), addr.get("house_number"))
+            _geocode_cache_set(cache_key, corto)
+            return corto
+
+        # Sin vía en el punto (lote, zona sin nomenclatura) → barrio/sector.
+        barrio = (
+            addr.get("neighbourhood")
+            or addr.get("suburb")
+            or addr.get("quarter")
+            or addr.get("city_district")
+        )
+        if barrio:
+            _geocode_cache_set(cache_key, str(barrio))
+            return str(barrio)
+
+        # Último recurso: el primer segmento del display_name.
+        if data.get("display_name"):
+            primero = str(data["display_name"]).split(",")[0].strip()
+            if primero:
+                _geocode_cache_set(cache_key, primero)
+                return primero
         return None
 
     except Exception as exc:
@@ -327,6 +429,28 @@ def _nominatim_reverse_geocode_raw(lat: float, lng: float) -> Optional[str]:
 async def _nominatim_reverse_geocode_async(lat: float, lng: float) -> Optional[str]:
     import asyncio
     return await asyncio.to_thread(_nominatim_reverse_geocode_raw, lat, lng)
+
+
+async def _google_reverse_geocode_async(lat: float, lng: float) -> Optional[str]:
+    import asyncio
+    return await asyncio.to_thread(_google_reverse_geocode_raw, lat, lng)
+
+
+async def reverse_geocode_street_address(lat: float, lng: float) -> Optional[str]:
+    """Dirección con nomenclatura de vía de unas coordenadas EXACTAS.
+
+    Prioridad Google → Nominatim: para una ubicación compartida lo que se
+    necesita es la dirección, no el nombre del barrio o del sitio. Retorna None
+    si ninguno de los dos resuelve una vía; el llamador decide el respaldo.
+    """
+    via = await _google_reverse_geocode_async(lat, lng)
+    if via:
+        return via
+
+    texto = await _nominatim_reverse_geocode_async(lat, lng)
+    if texto and _VIA_SIGNAL_RE.search(texto):
+        return texto
+    return None
 
 
 # Alias de compatibilidad (callers antiguos importan _nominatim_geocode)
