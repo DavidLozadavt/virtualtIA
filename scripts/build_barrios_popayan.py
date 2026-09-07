@@ -25,6 +25,7 @@ import argparse
 import gzip
 import json
 import sys
+import tempfile
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -55,15 +56,20 @@ PAGINA = 1000
 CELDA = 0.0001
 
 # Radio (en celdas) alrededor de una celda vacía donde se mira si hay barrio.
-# En 0 la cobertura es estrictamente lo que dice la capa: un punto solo tiene
-# barrio si cae DENTRO de un predio o de una manzana de ese barrio.
+# En 0 la cobertura es estrictamente lo que dice la capa: solo hay barrio si el
+# punto cae DENTRO de un predio o de una manzana. Eso deja sin barrio la
+# calzada y los lotes de cesión, donde cae buena parte de los pines.
 #
-# Con radio 3 (≈33 m) se cubría también la calzada, pero eso ponía barrio en
-# terreno que la Alcaldía dejó sin rotular —lotes de cesión, zonas comunes— y
-# ahí el resultado es una vecindad, no el sitio: en el lote de cesión entre
-# Valle del Ortigal y Ciudadela las Garzas contestaba "Ciudadela las Garzas".
-# Antes ningún barrio que uno de al lado.
-RADIO_VECINDAD = 0
+# Con radio 3 (≈33 m) se cubre también ese terreno, pero con una regla de
+# unanimidad: la celda toma el barrio solo si TODOS los predios rotulados a
+# menos de 33 m son de ese barrio. No es "el barrio más cercano" — donde dos
+# barrios se acercan, la celda queda vacía.
+#
+# El cálculo es de UNA pasada sobre las celdas originales. Iterarlo fue el
+# error que puso "Ciudadela las Garzas" en Valle del Ortigal: cada anillo
+# contaba como terreno del barrio para el siguiente y un barrio avanzaba 44 m
+# sobre terreno sin rotular hasta invadir la vecindad del otro.
+RADIO_VECINDAD = 3
 
 # Palabras que van en minúscula al pasar el nombre de MAYÚSCULAS a Título.
 MINUSCULAS = {"de", "del", "la", "las", "los", "el", "y", "e", "en", "a"}
@@ -150,6 +156,18 @@ def barrio_por_manzana(predios: List[dict]) -> Tuple[Dict[str, str], Dict[str, s
     comuna_de = {b: c.most_common(1)[0][0] for b, c in comunas.items()}
     print(f"      manzanas resueltas: {len(mapa)} | descartadas por mezcla: {descartadas}")
     return mapa, comuna_de
+
+
+def _cache(nombre: str, generar) -> List[dict]:
+    """Descarga una sola vez; las reconstrucciones siguientes leen del disco."""
+    ruta = Path(tempfile.gettempdir()) / f"barrios_popayan_{nombre}.json"
+    if ruta.exists():
+        print(f"      usando caché: {ruta}")
+        return json.loads(ruta.read_text(encoding="utf-8"))
+
+    datos = generar()
+    ruta.write_text(json.dumps(datos), encoding="utf-8")
+    return datos
 
 
 def descargar_predios(url: str) -> List[dict]:
@@ -379,18 +397,27 @@ def empacar(grilla: Dict[Tuple[int, int], str], comuna_de: Dict[str, str]) -> di
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--sin-cache", action="store_true",
+        help="ignora la caché de descarga y vuelve a bajar la capa",
+    )
+    parser.add_argument(
         "--salida",
         default=str(Path(__file__).resolve().parents[1] / "tools" / "barrios_popayan.json.gz"),
     )
     args = parser.parse_args()
 
-    predios = descargar_predios(LAYER_URL)
+    if args.sin_cache:
+        for nombre in ("predios", "manzanas"):
+            ruta = Path(tempfile.gettempdir()) / f"barrios_popayan_{nombre}.json"
+            ruta.unlink(missing_ok=True)
+
+    predios = _cache("predios", lambda: descargar_predios(LAYER_URL))
     if not predios:
         print("Sin predios: la capa no respondió.", file=sys.stderr)
         return 1
 
     mapa, comuna_de = barrio_por_manzana(predios)
-    manzanas = descargar_manzanas()
+    manzanas = _cache("manzanas", descargar_manzanas)
     if not manzanas:
         print("Sin manzanas: la capa no respondió.", file=sys.stderr)
         return 1

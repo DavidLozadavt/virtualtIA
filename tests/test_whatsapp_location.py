@@ -571,13 +571,31 @@ def test_barrio_de_coordenadas_resuelve_valle_del_ortigal():
         assert barrio_de_coordenadas(lat, lng) == "Valle del Ortigal"
 
 
-def test_no_hay_barrio_por_cercania():
-    """El lote de cesión entre Valle del Ortigal y Ciudadela las Garzas no
-    pertenece a ninguno de los dos en la capa: la respuesta es None, no el
-    barrio de al lado."""
+def test_la_via_solo_se_cubre_sin_ambiguedad():
+    """La regla que cubre calzada y lotes sin rótulo exige unanimidad: si a
+    menos de 33 m hay predios de dos barrios, la celda se queda sin barrio.
+
+    Es la diferencia con 'el barrio más cercano', que fue lo que puso
+    'Ciudadela las Garzas' dentro de Valle del Ortigal.
+    """
+    from scripts.build_barrios_popayan import cubrir_vecindad_inequivoca
+
+    grilla = {(0, 0): "Barrio A", (0, 5): "Barrio B"}
+    resultado = cubrir_vecindad_inequivoca(dict(grilla), set())
+
+    # Solo A alcanza (0,1): B queda a 4 celdas, fuera del radio.
+    assert resultado[(0, 1)] == "Barrio A"
+    # (0,2) tiene A a 2 celdas y B a 3: los dos dentro del radio → sin barrio.
+    assert (0, 2) not in resultado
+
+
+def test_direccion_del_reporte_resuelve_su_barrio():
+    """Regresión del caso reportado: el punto de 'cra 52 # 3-3' cae en un lote
+    de cesión sin rótulo, pero todos los predios rotulados a menos de 33 m son
+    de Valle del Ortigal."""
     from core.barrio_popayan import barrio_de_coordenadas
 
-    assert barrio_de_coordenadas(2.4603913, -76.6397125) is None
+    assert barrio_de_coordenadas(2.462079, -76.640134) == "Valle del Ortigal"
 
 
 def test_barrio_de_coordenadas_fuera_de_popayan():
