@@ -167,6 +167,164 @@ def _extract_neighborhood_google(components: list[dict]) -> Optional[str]:
     return None
 
 
+# Índice de barrios conocidos (nombre + aliases) para ETIQUETAR el neighborhood.
+# Google devuelve el componente `neighborhood` de forma poco fiable en Popayán:
+# a veces None, a veces una calle ("Carrera 17"). Cuando el usuario nombra un
+# barrio conocido explícitamente, su intención manda sobre lo que diga Google.
+_BARRIO_LABEL_INDEX: Optional[dict[str, str]] = None
+
+
+def _build_barrio_label_index() -> dict[str, str]:
+    global _BARRIO_LABEL_INDEX
+    if _BARRIO_LABEL_INDEX is not None:
+        return _BARRIO_LABEL_INDEX
+    idx: dict[str, str] = {}
+    try:
+        from tools.popayan_geodata import BARRIO_ALIASES
+        from core.stt_enhancer import strip_accents
+    except ImportError:
+        _BARRIO_LABEL_INDEX = {}
+        return _BARRIO_LABEL_INDEX
+    # Solo nombres de BARRIO (no landmarks): etiquetamos el barrio, no un POI.
+    for canonical, aliases in BARRIO_ALIASES.items():
+        for name in (canonical, *aliases):
+            k = strip_accents(name.lower().strip())
+            # >=4 chars evita ruido ("la", "sur"); frases alias ganan por longitud.
+            if len(k) >= 4 and k not in idx:
+                idx[k] = canonical
+    _BARRIO_LABEL_INDEX = idx
+    return idx
+
+
+def _barrio_from_query(query: str) -> Optional[str]:
+    """Detecta un barrio conocido nombrado explícitamente en la consulta.
+
+    Usado para corregir/rellenar el neighborhood cuando Google no lo da o lo da
+    mal. Ignora números de dirección; elige el alias más largo (más específico).
+    Retorna el canónico del barrio o None.
+    """
+    if not query:
+        return None
+    from core.stt_enhancer import strip_accents
+
+    idx = _build_barrio_label_index()
+    if not idx:
+        return None
+    q = strip_accents(query.lower())
+    q = re.sub(r"[#\d]", " ", q)          # quitar números de casa/vía
+    q = re.sub(r"\s+", " ", q).strip()
+    if not q:
+        return None
+    best: Optional[tuple[int, str]] = None
+    for alias, canonical in idx.items():
+        if re.search(r"\b" + re.escape(alias) + r"\b", q):
+            if best is None or len(alias) > best[0]:
+                best = (len(alias), canonical)
+    return best[1] if best else None
+
+
+# Marcadores de "lugar conocido" (POI): centro comercial, hospital, universidad,
+# terminal, parque, iglesia, etc. Para estos el barrio debe salir de la UBICACIÓN
+# REAL del lugar (consistencia geográfica), nunca de una coincidencia léxica en su
+# nombre — p.ej. "Centro Comercial Campanario" NO está en el barrio Centro solo
+# porque su nombre contenga la palabra "centro".
+_KNOWN_PLACE_MARKERS = (
+    "centro comercial", "cc ", "universidad", "unicauca", "hospital", "clinica",
+    "clínica", "colegio", "institucion educativa", "institución educativa",
+    "terminal", "aeropuerto", "sena", "parque", "iglesia", "catedral", "capilla",
+    "santuario", "estadio", "coliseo", "biblioteca", "museo", "plaza de",
+    "gobernacion", "gobernación", "alcaldia", "alcaldía",
+)
+
+
+def _is_known_place(query: str) -> bool:
+    """True si la consulta nombra un lugar conocido (POI) y no una dirección de vía."""
+    if not query:
+        return False
+    from core.stt_enhancer import strip_accents
+
+    low = strip_accents(query.lower())
+    return any(mk in low for mk in _KNOWN_PLACE_MARKERS)
+
+
+def _barrio_by_proximity(lat: Optional[float], lng: Optional[float]) -> Optional[str]:
+    """Barrio oficial geográficamente más cercano a unas coordenadas ya resueltas.
+
+    Fuente de verdad GEOGRÁFICA (no léxica): usa los centroides del catálogo local
+    (popayan_geodata) — así un POI se etiqueta con el barrio donde realmente está,
+    priorizando consistencia geográfica sobre similitud de nombres.
+    """
+    if lat is None or lng is None:
+        return None
+    try:
+        from tools.popayan_geodata import infer_barrio_from_coords
+    except Exception:  # pragma: no cover - defensive
+        return None
+    b = infer_barrio_from_coords(lat, lng)
+    return b.get("name") if b else None
+
+
+def _resolved(
+    query: str,
+    attempt: int,
+    selected: Optional["GeoCandidate"],
+    candidates: Optional[list] = None,
+) -> "GeoResolution":
+    """Factory de GeoResolution RESOLVED que corrige la etiqueta de barrio.
+
+    Dos caminos, según la naturaleza de la consulta:
+
+    - Lugar conocido (POI: centro comercial, hospital, universidad, terminal,
+      parque, iglesia…): se resuelve primero la entidad geográfica real y el
+      barrio se toma de su UBICACIÓN, nunca de una coincidencia léxica en el
+      nombre. Nunca se asocia a un barrio distinto solo porque el nombre se
+      parezca ("Centro Comercial Campanario" ≠ barrio Centro).
+
+    - Dirección de vía: si el usuario nombró un barrio conocido en la consulta y
+      Google no lo dio (None) o lo dio como una calle / otro barrio, la intención
+      del usuario manda.
+    """
+    if selected is not None:
+        if _is_known_place(query):
+            # Consistencia geográfica sobre similitud léxica: NO se etiqueta con
+            # una palabra del propio nombre del lugar. Se conserva el barrio que
+            # Google derivó de las coordenadas (address_components) y, si falta,
+            # se infiere el más cercano a la ubicación REAL del lugar.
+            if not selected.neighborhood:
+                inferred = _barrio_by_proximity(
+                    getattr(selected, "lat", None), getattr(selected, "lng", None)
+                )
+                if inferred:
+                    logger.info(
+                        "[PIPELINE] known-place barrio by proximity: %r (query=%r)",
+                        inferred,
+                        query,
+                    )
+                    selected.neighborhood = inferred
+        else:
+            stated = _barrio_from_query(query)
+            if stated:
+                from core.stt_enhancer import strip_accents
+
+                cur = strip_accents((selected.neighborhood or "").lower().strip())
+                if not cur or cur != strip_accents(stated.lower().strip()):
+                    if selected.neighborhood != stated:
+                        logger.info(
+                            "[PIPELINE] barrio label override: %r → %r (query=%r)",
+                            selected.neighborhood,
+                            stated,
+                            query,
+                        )
+                        selected.neighborhood = stated
+    return GeoResolution(
+        status=ResolutionStatus.RESOLVED,
+        query=query,
+        attempt=attempt,
+        candidates=candidates if candidates is not None else [],
+        selected=selected,
+    )
+
+
 def _to_google_address_format(query: str) -> str:
     """
     Convierte la dirección normalizada interna al formato que Google Geocoding
@@ -571,6 +729,112 @@ async def _google_places_search(query: str) -> list[GeoCandidate]:
         return []
 
 
+# ── Reverse Geocoding (coordenadas → dirección completa) ──────────────────────
+#
+# Usado por canales que entregan coordenadas exactas (ubicación compartida de
+# WhatsApp). Convierte lat/lng en la DIRECCIÓN POSTAL COMPLETA vía Google Maps,
+# NO en el nombre de un POI cercano.
+#
+# Regla de prioridad (item 3 correcciones): si Google devuelve tanto una
+# dirección de vía (street_address / premise / subpremise / route) como puntos
+# de interés (CAI Terminal, centro comercial, hospital, parque…), SIEMPRE gana
+# la dirección de vía. El POI nunca reemplaza la dirección: a lo sumo es
+# información complementaria. La dirección es la fuente de verdad.
+
+# Tipos de resultado que representan una dirección de vía real, en orden de
+# preferencia (más específico primero).
+_REVERSE_ADDRESS_PRIORITY = (
+    "subpremise",
+    "premise",
+    "street_address",
+    "route",
+    "intersection",
+)
+
+
+def _reverse_pick_address(results: list[dict]) -> Optional[str]:
+    """Elige la dirección postal completa de los resultados de reverse geocoding.
+
+    Prioriza una dirección de vía (street_address / premise / subpremise / route)
+    sobre cualquier punto de interés. Devuelve el `formatted_address` elegido.
+    """
+    if not results:
+        return None
+
+    def _is_pure_poi(types: set[str]) -> bool:
+        # POI puro: es establecimiento/POI y NO tiene ningún tipo de dirección de vía.
+        poi = types & {"point_of_interest", "establishment", "park",
+                       "natural_feature", "transit_station", "bus_station"}
+        addr = types & set(_REVERSE_ADDRESS_PRIORITY)
+        return bool(poi) and not bool(addr)
+
+    # 1. Mejor coincidencia por prioridad de dirección de vía.
+    for target in _REVERSE_ADDRESS_PRIORITY:
+        for r in results:
+            types = set(r.get("types", []))
+            if target in types and not _is_pure_poi(types):
+                fa = r.get("formatted_address")
+                if fa:
+                    return fa
+
+    # 2. Sin dirección de vía explícita: primer resultado que NO sea POI puro.
+    for r in results:
+        if not _is_pure_poi(set(r.get("types", []))):
+            fa = r.get("formatted_address")
+            if fa:
+                return fa
+
+    # 3. Último recurso: el formatted_address del primer resultado.
+    return results[0].get("formatted_address")
+
+
+async def reverse_geocode_address(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocoding vía Google Maps: coordenadas → dirección postal completa.
+
+    Devuelve la dirección de vía completa (no un POI). Fallback a Nominatim si no
+    hay API key de Google o Google no responde. Retorna None solo si ningún
+    proveedor resuelve.
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if api_key:
+        params = {
+            "latlng": f"{lat},{lng}",
+            "key": api_key,
+            "language": "es",
+            "region": "co",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                resp = await client.get(_GOOGLE_URL, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "OK":
+                    address = _reverse_pick_address(data.get("results", []))
+                    if address:
+                        logger.info(
+                            f"[REVERSE] ({lat:.5f},{lng:.5f}) → {address!r}"
+                        )
+                        return address
+                else:
+                    logger.info(f"[REVERSE] Google status={data.get('status')}")
+            else:
+                logger.warning(f"[REVERSE] Google HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"[REVERSE] Google error: {e}")
+
+    # Fallback: Nominatim reverse (mismo motor de fallback que el forward).
+    try:
+        from core.address_utils import _nominatim_reverse_geocode_async
+        address = await _nominatim_reverse_geocode_async(lat, lng)
+        if address:
+            logger.info(f"[REVERSE] Nominatim ({lat:.5f},{lng:.5f}) → {address!r}")
+            return address
+    except Exception as e:
+        logger.error(f"[REVERSE] Nominatim error: {e}")
+
+    return None
+
+
 # ── Nominatim ─────────────────────────────────────────────────────────────────
 
 async def _nominatim_get_candidates(query: str) -> list[GeoCandidate]:
@@ -882,12 +1146,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
         or _accept_low_precision(cached, normalized)
     ):
         logger.info(f"[PIPELINE] memory cache hit: {normalized!r}")
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            selected=cached,
-        )
+        return _resolved(normalized, attempt, cached)
     if cached:
         logger.warning(
             f"[PIPELINE] stale low-precision mem cache ignored: {normalized!r} "
@@ -906,12 +1165,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
     if db_cached:
         logger.info(f"[PIPELINE] db cache hit: {normalized!r}")
         _mem_set(normalized, db_cached)
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            selected=db_cached,
-        )
+        return _resolved(normalized, attempt, db_cached)
 
     # 4. Resolución primaria: Autocomplete + Place Details (igual que el
     #    buscador web de Google Maps — encuentra la dirección exacta indexada).
@@ -1041,13 +1295,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
                 if _cache_worthy(best, normalized):
                     _mem_set(normalized, best)
                     _db_set(normalized, best)
-                return GeoResolution(
-                    status=ResolutionStatus.RESOLVED,
-                    query=normalized,
-                    attempt=attempt,
-                    candidates=in_bbox,
-                    selected=best,
-                )
+                return _resolved(normalized, attempt, best, in_bbox)
 
             # Caso 1 (vía sin número) o nombre propio demasiado grueso
             # (APPROXIMATE / NOMINATIM_LOW / fuera del área urbana): NUNCA
@@ -1132,13 +1380,7 @@ async def run_pipeline(query: str, attempt: int = 1) -> GeoResolution:
                 f"[PIPELINE] skipped cache (display_name unrelated to query): "
                 f"{best.display_name!r} for {normalized!r}"
             )
-        return GeoResolution(
-            status=ResolutionStatus.RESOLVED,
-            query=normalized,
-            attempt=attempt,
-            candidates=in_bbox,
-            selected=best,
-        )
+        return _resolved(normalized, attempt, best, in_bbox)
 
     # Fallback (no debería llegar aquí)
     return GeoResolution(
@@ -1265,12 +1507,7 @@ async def handle_user_context(
         if matched and matched.auto_acceptable():
             _mem_set(original_query, matched)
             _db_set(original_query, matched)
-            return GeoResolution(
-                status=ResolutionStatus.RESOLVED,
-                query=original_query,
-                attempt=attempt,
-                selected=matched,
-            )
+            return _resolved(original_query, attempt, matched)
 
     # Extraer solo el término geográfico útil del texto del usuario
     raw_clarification = _strip_preamble(user_text).strip()

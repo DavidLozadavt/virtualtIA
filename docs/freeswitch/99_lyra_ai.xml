@@ -1,0 +1,16 @@
+<!--
+  Dialplan público Lyra Voice V2 — streaming full-duplex (mod_audio_stream).
+  Toda la conversación viaja por el WebSocket bidireccional que abre
+  lyra_stream.lua; no hay grabación por turnos ni archivos intermedios.
+
+  Ubicación en el contenedor: /etc/freeswitch/dialplan/public/99_lyra_ai.xml
+  El script:                  /usr/share/freeswitch/scripts/lyra_stream.lua
+  Requiere:                   mod_audio_stream cargado en modules.conf.xml
+-->
+<include>
+  <extension name="lyra_ai_inbound">
+    <condition field="destination_number" expression="^(\d+)$">
+      <action application="lua" data="lyra_stream.lua"/>
+    </condition>
+  </extension>
+</include>

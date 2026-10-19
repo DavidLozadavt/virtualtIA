@@ -1,18 +1,16 @@
-"""Telephony services — channel-agnostic voice call handling (FreeSWITCH, etc.)."""
+"""Telephony services — contratos de negocio compartidos del canal de voz.
 
-from services.telephony.voice_call_engine import VoiceCallEngine, VoiceTurnResult, VoiceAction
-from services.telephony.session_store import SessionStore, CallSession, get_session_store
+El motor conversacional vive en services/voice (Lyra Voice V2); aquí quedan
+los componentes de negocio que V2 consume sin cambios: sesiones, cliente del
+backend IntelliTaxi, utilidades de teléfono, idempotencia, ESL y ffmpeg.
+"""
+
 from services.telephony.backend_client import TelephonyBackendClient
-from services.telephony.call_handler import process_text_turn, process_stt_turn
+from services.telephony.session_store import CallSession, SessionStore, get_session_store
 
 __all__ = [
-    "VoiceCallEngine",
-    "VoiceTurnResult",
-    "VoiceAction",
     "SessionStore",
     "CallSession",
     "get_session_store",
     "TelephonyBackendClient",
-    "process_text_turn",
-    "process_stt_turn",
 ]

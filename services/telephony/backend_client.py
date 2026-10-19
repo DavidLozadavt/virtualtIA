@@ -165,23 +165,34 @@ class TelephonyBackendClient:
         use_freeswitch_channel: bool = True,
         http_client: Optional[httpx.AsyncClient] = None,
         origen_barrio: Optional[str] = None,
+        origen_lat: Optional[float] = None,
+        origen_lng: Optional[float] = None,
     ) -> Tuple[bool, str]:
         """
         Geocodifica origen/destino y crea el servicio en Laravel.
         Usado por test-create-service y por el motor conversacional.
+
+        Si el origen YA fue resuelto (origen_lat/origen_lng presentes — p. ej. el
+        Geographic Context Resolver eligió un candidato del universo cerrado y el
+        usuario confirmó), esas coordenadas son AUTORITATIVAS: se usan tal cual y
+        NO se vuelve a geocodificar el origen. Así la ambigüedad de barrio, ya
+        resuelta y confirmada, nunca se reabre en la creación del servicio.
         """
         from core.geocoder_service import geocode
 
-        # Pasar el barrio resuelto mejora la precisión de Google para
-        # nomenclaturas colombianas (paridad con el gateway Twilio).
-        g_o = await geocode(origen, barrio=origen_barrio)
-        if not g_o:
-            return False, (
-                "No me aparece esa ubicación en Popayán. "
-                "¿Me la dices de otra forma? Prueba con un barrio o una calle."
-            )
-
-        olat, olng, _ = g_o
+        if origen_lat is not None and origen_lng is not None:
+            # Origen resuelto y confirmado: coords congeladas, sin re-geocoding.
+            olat, olng = origen_lat, origen_lng
+        else:
+            # Pasar el barrio resuelto mejora la precisión de Google para
+            # nomenclaturas colombianas (paridad con el gateway Twilio).
+            g_o = await geocode(origen, barrio=origen_barrio)
+            if not g_o:
+                return False, (
+                    "No me aparece esa ubicación en Popayán. "
+                    "¿Me la dices de otra forma? Prueba con un barrio o una calle."
+                )
+            olat, olng, _ = g_o
         dlat = dlng = 0.0
         if destino:
             g_d = await geocode(destino)

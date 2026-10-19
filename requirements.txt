@@ -6,11 +6,16 @@ pyyaml>=6.0.1
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 httpx>=0.27.0
+websockets>=12.0
 python-multipart>=0.0.9
 openai>=1.0.0
 edge-tts>=7.0.0
 pusher>=3.3.1
 redis>=5.0.0
-# Remuestreo de audio 8k→16k de calidad (filtro polifásico) antes de Whisper
 numpy>=1.24.0
 scipy>=1.11.0
+
+# Pipeline de mejora de audio (services/audio): inferencia CPU de los modelos de
+# supresión de ruido (DPDFNet 8 kHz) y de detección de voz (Silero VAD). Los pesos
+# NO van en el repo: se descargan con `python scripts/fetch_audio_models.py`.
+onnxruntime>=1.20.0

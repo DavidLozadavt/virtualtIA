@@ -17,6 +17,7 @@ similitud.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from dataclasses import dataclass, field
@@ -508,5 +509,43 @@ def _resolve_scoped(t: str, scope: list[str]) -> LocationMatch:
         best.disambiguation_candidates = []
         best.margin = 1.0
         return best
+
+    return LocationMatch(canonical=None, evidence=t)
+
+
+def aggressive_place_recovery(text: str) -> Optional[str]:
+    """
+    Último recurso para rescatar un lugar de una transcripción mala.
+
+    Cuando la transcripción vino mal (ej: "noches quisiera morir para la
+    fuerza"), en vez de rechazar el turno en silencio, deslizamos ventanas de
+    3→2→1 palabras y probamos cada fragmento contra el resolver tipado.
+
+    Contrato de PRECISIÓN: solo devuelve un canónico para fragmentos que el
+    resolver decide ACCEPT (coincidencia textual/fonética fuerte y NO ambigua).
+    Fragmentos de cortesía/relleno ("buenas", "hola", "gracias") o coincidencias
+    débiles → None (el llamador pide repetir). Nunca acepta AMBIGUOUS ni inventa
+    una sede a partir de un fuzzy débil.
+    """
+    if not text:
+        return None
+
+    words = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    if not words:
+        return None
+
+    for size in (3, 2, 1):
+        for i in range(len(words) - size + 1):
+            frag = " ".join(words[i : i + size]).strip()
+            if len(frag) < 4:
+                continue
+            m = resolve_location_entity(frag)
+            if decide(m) == Decision.ACCEPT and m.canonical:
+                logging.getLogger("lyra.location_match").info(
+                    "[RECOVERY] Fragment %r → %r [%s]", frag, m.canonical, m.match_type.name
+                )
+                return m.canonical
+
+    return None
 
     return LocationMatch(canonical=None, evidence=t)

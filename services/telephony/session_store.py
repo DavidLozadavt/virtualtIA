@@ -20,10 +20,6 @@ logger = logging.getLogger("lyra.telephony.sessions")
 
 STATE_WAITING_ORIGIN = "waiting_origin"
 STATE_WAITING_GEO_CONTEXT = "waiting_geo_context"
-# Confirmación de un match DUDOSO (Decision.CONFIRM) antes de fijar el origen:
-# "¿Te refieres a X?" → sí/no. Distinto de CONFIRMING_ORIGIN, que confirma un
-# origen ya fijado ("¿Te recogemos ahí?").
-STATE_CONFIRMING_MATCH = "confirming_match"
 STATE_CONFIRMING_ORIGIN = "confirming_origin"
 STATE_WAITING_DEST_OR_SKIP = "waiting_dest_or_skip"
 STATE_CONFIRMING_DEST = "confirming_dest"
@@ -50,6 +46,15 @@ class CallSession:
     state: str = STATE_WAITING_ORIGIN
     origen_text: Optional[str] = None
     origen_barrio: Optional[str] = None
+    # Coordenadas AUTORITATIVAS del origen ya resuelto. Se fijan SOLO cuando el
+    # Geographic Context Resolver escoge un candidato del universo cerrado (una
+    # dirección válida cuya ambigüedad de barrio ya quedó resuelta con la
+    # evidencia del usuario). Una vez fijadas, la creación del servicio las
+    # consume DIRECTAMENTE y NUNCA vuelve a geocodificar ese origen: la
+    # ambigüedad no se reabre. Se limpian (=None) en cualquier recaptura o
+    # corrección del origen (deja de ser la verdad ya confirmada).
+    origen_lat: Optional[float] = None
+    origen_lng: Optional[float] = None
     destino_text: Optional[str] = None
     service_created: bool = False
     silence_count: int = 0
@@ -58,11 +63,20 @@ class CallSession:
     updated_at: float = field(default_factory=time.time)
     sip_metadata: Dict[str, Any] = field(default_factory=dict)
     pending_disambiguation: Optional[dict] = None
-    # Candidato de un match dudoso pendiente de confirmar ("¿Te refieres a X?").
-    # {"canonical": str}. Se consume en STATE_CONFIRMING_MATCH.
-    pending_match_confirmation: Optional[dict] = None
     geo_original_query: Optional[str] = None
     geo_attempt: int = 0
+    # Universo CERRADO e inmutable de candidatos de la primera resolución exitosa
+    # de una dirección VÁLIDA con múltiples barrios compatibles. Única fuente de
+    # verdad del Geographic Context Resolver (core.geo_context_resolver). Lista de
+    # dicts serializables. Se fija UNA vez al entrar a WAITING_GEO_CONTEXT y solo
+    # se limpia (=None) en los cuatro eventos terminales: selección definitiva,
+    # cancelación, handoff o descarte de la sesión.
+    geo_candidates: Optional[list] = None
+    # Traza auditable de la selección ganadora (estrategia, candidato elegido,
+    # descartados, score, confidence, distancias, márgenes, evidencia, motivo).
+    # Permite reproducir la decisión usando SOLO datos de la sesión. Se limpia en
+    # los mismos cuatro eventos terminales que geo_candidates.
+    geo_decision_trace: Optional[dict] = None
 
     def touch(self) -> None:
         self.updated_at = time.time()
