@@ -893,7 +893,7 @@ def _discovery(
     # ── Nombre propio identificado → ir a ese negocio ───────────────────────
     # Sólo si señala a UNA empresa. Si varias sucursales encajan igual, se
     # muestran todas: aterrizar en una al azar es peor que dar a elegir.
-    pide_lista = _asks_for_a_list(analysis) or _names_a_kind(message, grounding)
+    pide_lista = _asks_for_a_list(analysis) or _names_a_kind(message, grounding, best.label)
     if (
         best.kind == ConceptKind.BUSINESS
         and not best.ambiguous
@@ -967,8 +967,12 @@ def _grounds_to_something(terms: Sequence[str], catalog: SemanticCatalog) -> boo
 #: Determinantes que presentan una clase en vez de señalar un individuo.
 _INDEFINITE = ("un", "una", "unos", "unas", "algun", "alguna", "algunos", "algunas")
 
+#: Verbos con los que se pide una CLASE de cosa cuando el sustantivo va sin
+#: determinante: "busco veterinarias", "necesito veterinaria".
+_SEARCH_VERBS = ("busco", "buscar", "buscame", "busca", "necesito", "quiero", "hay", "muestrame", "encuentrame")
 
-def _names_a_kind(message: str, grounding: Grounding) -> bool:
+
+def _names_a_kind(message: str, grounding: Grounding, label: Optional[str] = None) -> bool:
     """
     ¿El mensaje pide UNA DE ESAS COSAS, o pide ESA COSA?
 
@@ -991,6 +995,16 @@ def _names_a_kind(message: str, grounding: Grounding) -> bool:
             continue
         if posicion > 0 and palabras[posicion - 1] in _INDEFINITE:
             return True
+        # Sin determinante, tras un verbo de búsqueda: el plural presenta una
+        # clase ("busco veterinarias"), y el singular también cuando es sólo
+        # una palabra de una razón social larga ("busco veterinaria" no es
+        # "Veterinaria El Guardián Norte Bogotá").
+        terminos = grounding.matched_terms or grounding.content_terms
+        if (posicion > 0 and palabras[posicion - 1] in _SEARCH_VERBS
+                and len(raiz) == 1 and len(terminos) == 1):
+            nombre = normalize(label or "").split()
+            if raiz[0].endswith("s") or len(nombre) >= 3:
+                return True
     return False
 
 

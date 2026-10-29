@@ -47,6 +47,11 @@ class LegacyToolAdapter:
             else:
                 result = self._func(**full_params)
             
+            # Las tools que ya devuelven {result, error} no se envuelven otra
+            # vez: el error quedaba escondido un nivel más abajo y el
+            # orquestador lo trataba como éxito.
+            if isinstance(result, dict) and set(result) <= {"result", "error"} and "result" in result:
+                return {"result": result.get("result"), "error": result.get("error")}
             return {"result": result, "error": None}
         except Exception as e:
             logger.error(f"Error ejecutando legacy tool '{self.TOOL_NAME}': {e}", exc_info=True)

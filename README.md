@@ -248,6 +248,9 @@ lyra-ai/
 ```bash
 migrations/001_initial.sql   # usuarios, conversaciones, mensajes
 migrations/002_admin_tables.sql  # configuración, alertas, logs admin
+migrations/003_location_cache.sql
+migrations/004_geo_aliases.sql
+migrations/005_llm_usage.sql     # uso del modelo por turno: llamadas, tokens, costo estimado
 ```
 
 ---
@@ -273,9 +276,13 @@ python main.py
 ```
 
 ```
-✓ Model loaded and ready
-✓ Lyra running on http://0.0.0.0:8099
+✓ LLM Provider: openai | Model: gpt-4o-mini
+✓ Lyra running on http://0.0.0.0:8098
 ```
+
+El puerto sale de `PORT` en el `.env` (8098 en local). Los fronts apuntan a Lyra con
+`VITE_LYRA_API_URL` y Lyra apunta al backend de SchoolSena con `SCHOOLSENA_API_BASE`
+(en local `http://127.0.0.1:8000/api`; nunca mezclar un front local con la API de producción).
 
 > Si hay conflicto de puerto en Windows:
 > ```powershell
@@ -293,6 +300,49 @@ GET http://localhost:8010/admin/health
 Respuesta esperada: JSON con todos los servicios en `"status": "healthy"`.
 
 ---
+
+## Modelo externo, navegación y consumo
+
+**Clave y proveedor.** La credencial vive sólo en el `.env` del servidor
+(`OPENAI_API_KEY` con `LLM_PROVIDER=openai`, o `OPENROUTER_API_KEY` con
+`openrouter`). Nunca va en variables `VITE_*` ni en el navegador. Los mensajes de
+error del proveedor se registran sin credenciales (`core/llm_engine.py`).
+
+**Control de gasto.** `core/llm_usage.py` mide cada llamada (tokens que reporta el
+proveedor, tokens en caché, modelo, latencia, reintentos, costo estimado) y deja
+una fila por turno en `lyra_llm_usage`. Frenos: `LLM_MAX_CALLS_PER_TURN` y
+`LLM_DAILY_BUDGET_USD` (ver `.env.example`). Lo que tiene respuesta conocida no
+usa el modelo: saludos cortos, "¿qué puedes hacer?", navegación, búsquedas,
+intentos de inyección (`orchestrator/guards.py`).
+
+**Navegación.** El front envía en `POST /chat` el campo `nav_catalog`
+(`[{title, path}]`, las secciones que el usuario ve en su menú) y `current_path`.
+`orchestrator/navigation.py` elige sólo dentro de ese catálogo (tolera erratas y
+sinónimos; si hay empate pregunta) y responde `voice_action: "navigate"` con
+`{url, title, verify: true}`. El front navega con su router y confirma que llegó;
+si una guarda lo devuelve a otra ruta, lo dice en el chat.
+
+**SchoolSena.** El rol se toma de los claims del JWT que reenvía el front, no del
+campo `role` (que el navegador puede cambiar); el backend valida el token en cada
+consulta. Al modelo sólo se le ofrecen las herramientas de datos del rol.
+
+**Batería conversacional.** Mide el antes y el después con los mismos casos:
+
+```bash
+python scripts/chat_battery.py --out salida.json --tokens tokens.json
+```
+
+`tokens.json` contiene JWT locales de SchoolSena por perfil (`aprendiz`,
+`instructor`, `admin`); sin él, los casos que consultan datos quedan sin sesión.
+
+## Pruebas
+
+```bash
+python -m pytest -q
+```
+
+Las pruebas corren en modo local por defecto (`tests/conftest.py` apaga el modelo
+externo) para no gastar ni depender del `.env`. Requiere `pytest-asyncio`.
 
 ## Cómo Agregar un Nuevo Proyecto
 

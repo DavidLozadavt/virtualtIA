@@ -8,6 +8,7 @@ no está implementado aquí.
 import json
 import re
 import logging
+import time
 from typing import Optional, List, Dict
 import httpx
 from core.config import settings
@@ -37,8 +38,20 @@ class LLMUnavailable(RuntimeError):
         return self.status_code in (402, 429)
 
 
+_SECRET_RE = re.compile(r"(sk-[A-Za-z0-9_\-*]{4,}|Bearer\s+[A-Za-z0-9._\-]+)")
+
+
+def _redact(text: str) -> str:
+    """Quita cualquier credencial que el proveedor repita en su mensaje de error."""
+    return _SECRET_RE.sub("<redactado>", text or "")
+
+
 def _describe_api_error(response) -> str:
-    """Mensaje de error del proveedor, listo para el registro."""
+    """Mensaje de error del proveedor, listo para el registro (sin credenciales)."""
+    return _redact(_raw_api_error(response))
+
+
+def _raw_api_error(response) -> str:
     try:
         body = response.json()
         err = body.get("error") or {}
@@ -74,60 +87,132 @@ def _affordable_tokens(detail: str) -> Optional[int]:
 
 
 class LLMEngine:
-    def __init__(self, model_path: str, n_ctx: int = 4096, n_gpu_layers: int = 0, n_threads: int = 4):
+    def __init__(self, model_path: str = "", n_ctx: int = 4096, n_gpu_layers: int = 0, n_threads: int = 4):
         self.provider = settings.LLM_PROVIDER
         self.api_endpoint = settings.llm_base_url().rstrip("/") + "/chat/completions"
-        self.model_name = settings.OPENAI_MODEL or "openai/gpt-4o-mini"
+        self.model_name = self._model_id(settings.OPENAI_MODEL or "gpt-4o-mini")
         self._tools_type_map: dict = {}  # tool_name -> {arg_name: json_type}
 
-    def generate_with_tools(self, messages: List[Dict], tools_schema: List[Dict],
-                            max_tokens: int = 512, temperature: float = 0.1) -> Dict:
+    def _model_id(self, model: str) -> str:
+        """OpenAI directo no acepta el prefijo de proveedor que usa OpenRouter."""
+        if self.provider == "openai" and model.startswith("openai/"):
+            return model.split("/", 1)[1]
+        return model
+
+    def _post(self, payload: dict, purpose: str) -> dict:
+        """
+        Única salida HTTP hacia el modelo.
+
+        Antes de llamar comprueba el tope por turno y el presupuesto diario; con
+        cualquiera agotado no hay red. Reintenta como mucho LLM_MAX_RETRIES veces
+        y sólo ante fallos transitorios (429 por ritmo, 5xx, red). Cada intento
+        queda medido en core/llm_usage con los tokens que reporta el proveedor.
+        """
+        from core import llm_usage
+
+        if self.provider not in {"openrouter", "openai"}:
+            raise LLMUnavailable(f"Proveedor LLM no soportado: {self.provider}")
         try:
-            if self.provider not in {"openrouter", "openai"}:
-                raise LLMUnavailable(f"Proveedor LLM no soportado: {self.provider}")
+            llm_usage.check_budget()
+        except llm_usage.LLMBudgetExceeded as exc:
+            logger.warning("Llamada al modelo omitida (%s): %s", purpose, exc)
+            raise LLMUnavailable(str(exc), status_code=429) from exc
 
-            llm_tools = self._build_llm_tools(tools_schema)
+        api_key = settings.llm_api_key()
+        if not api_key:
+            raise LLMUnavailable("Credencial del modelo no configurada", status_code=401)
 
-            headers = {
-                "Authorization": f"Bearer {settings.llm_api_key()}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": self.model_name,
-                "messages": messages,
-                "tools": llm_tools,
-                "tool_choice": "auto",
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
+        payload = {**payload, "model": self._model_id(payload.get("model") or self.model_name)}
+        # Los modelos actuales de OpenAI usan max_completion_tokens (los de
+        # razonamiento rechazan max_tokens); OpenRouter mantiene el nombre antiguo.
+        if self.provider == "openai" and "max_tokens" in payload:
+            payload["max_completion_tokens"] = payload.pop("max_tokens")
 
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(self.api_endpoint, headers=headers, json=payload)
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        timeout = httpx.Timeout(settings.LLM_TIMEOUT_SECONDS, connect=5.0)
+        retries = max(0, int(settings.LLM_MAX_RETRIES))
+        attempt = 0
+        while True:
+            t0 = time.time()
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.post(self.api_endpoint, headers=headers, json=payload)
+            except httpx.HTTPError as exc:
+                llm_usage.record_call(purpose, payload["model"], "network_error",
+                                      int((time.time() - t0) * 1000), retries=attempt)
+                if attempt < retries:
+                    attempt += 1
+                    time.sleep(0.5)
+                    continue
+                raise LLMUnavailable(f"Sin conexión con el modelo: {type(exc).__name__}") from exc
 
-                if response.status_code == 200:
-                    return self._handle_success(response.json())
+            latency = int((time.time() - t0) * 1000)
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    llm_usage.record_call(purpose, payload["model"], "bad_json", latency, retries=attempt)
+                    raise LLMUnavailable("Respuesta ilegible del modelo") from exc
+                llm_usage.record_call(purpose, data.get("model") or payload["model"], "ok",
+                                      latency, data.get("usage"), retries=attempt)
+                return data
 
-                # --- Recuperación de 400 tool_use_failed ---
-                if response.status_code == 400:
-                    body = response.json()
-                    err = body.get("error", {})
-                    if err.get("code") == "tool_use_failed" and err.get("failed_generation"):
-                        recovered = self._recover_failed_tool_call(err["failed_generation"])
-                        if recovered:
-                            logger.info(f"Recovered failed tool call: {recovered['tool']}({recovered['args']})")
-                            return recovered
+            detail = _describe_api_error(response)
+            status = response.status_code
+            llm_usage.record_call(purpose, payload["model"], f"http_{status}", latency, retries=attempt)
+            insufficient_quota = "insufficient_quota" in detail or status == 402
+            transient = (status == 429 and not insufficient_quota) or status >= 500
+            if transient and attempt < retries:
+                attempt += 1
+                try:
+                    wait = min(2.0, float(response.headers.get("retry-after", "0.8")))
+                except ValueError:
+                    wait = 0.8
+                time.sleep(wait)
+                continue
+            error = LLMUnavailable(detail, status_code=status)
+            error.response = response
+            raise error
 
-                detail = _describe_api_error(response)
-                logger.error("LLM API falló (con herramientas) — %s", detail)
-                raise LLMUnavailable(detail, status_code=response.status_code)
-
-        except LLMUnavailable:
+    def generate_with_tools(self, messages: List[Dict], tools_schema: List[Dict],
+                            max_tokens: int = 512, temperature: float = 0.1,
+                            purpose: str = "agent_tools") -> Dict:
+        llm_tools = self._build_llm_tools(tools_schema)
+        payload = {
+            "messages": messages,
+            "tools": llm_tools,
+            "tool_choice": "auto",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if self.provider == "openai":
+            # Una herramienta por paso: el orquestador ejecuta y valida de a una.
+            payload["parallel_tool_calls"] = False
+        try:
+            data = self._post(payload, purpose)
+        except LLMUnavailable as exc:
+            response = getattr(exc, "response", None)
+            # Recuperación de 400 tool_use_failed (proveedores tipo Groq).
+            if response is not None and response.status_code == 400:
+                try:
+                    err = response.json().get("error", {})
+                except ValueError:
+                    err = {}
+                if err.get("code") == "tool_use_failed" and err.get("failed_generation"):
+                    recovered = self._recover_failed_tool_call(err["failed_generation"])
+                    if recovered:
+                        logger.info(f"Recovered failed tool call: {recovered['tool']}({recovered['args']})")
+                        return recovered
+            logger.error("LLM API falló (con herramientas) — %s", exc.reason)
             raise
-        except Exception as e:
-            logger.error("LLM excepción (con herramientas): %s", e)
-            raise LLMUnavailable(str(e)) from e
+        try:
+            return self._handle_success(data)
+        except (KeyError, IndexError, ValueError, TypeError) as e:
+            logger.error("Respuesta del LLM ilegible: %s", e)
+            raise LLMUnavailable(f"Respuesta ilegible: {e}") from e
 
-    def generate(self, messages: List[Dict], max_tokens: int = 512, temperature: float = 0.7) -> str:
+    def generate(self, messages: List[Dict], max_tokens: int = 512, temperature: float = 0.7,
+                 purpose: str = "reply", model: Optional[str] = None) -> str:
         """
         Respuesta en texto libre. Lanza `LLMUnavailable` si el modelo no responde.
 
@@ -135,21 +220,13 @@ class LLMEngine:
         necesita poder distinguir "el asistente dijo esto" de "el asistente no
         pudo responder", porque lo primero se le muestra y se le lee al usuario.
         """
-        if self.provider not in {"openrouter", "openai"}:
-            raise LLMUnavailable(f"Proveedor LLM no soportado: {self.provider}")
-
-        headers = {"Authorization": f"Bearer {settings.llm_api_key()}"}
-        payload = {"model": self.model_name, "messages": messages,
-                   "max_tokens": max_tokens, "temperature": temperature}
+        payload = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+        if model:
+            payload["model"] = model
         try:
-            r = httpx.post(self.api_endpoint, headers=headers, json=payload, timeout=30.0)
-        except Exception as e:
-            logger.error("LLM sin conexión: %s", e)
-            raise LLMUnavailable(str(e)) from e
-
-        if r.status_code != 200:
-            detail = _describe_api_error(r)
-            budget = _affordable_tokens(detail) if r.status_code == 402 else None
+            data = self._post(payload, purpose)
+        except LLMUnavailable as exc:
+            budget = _affordable_tokens(exc.reason) if exc.status_code == 402 else None
             if budget and budget < max_tokens:
                 logger.warning(
                     "Saldo insuficiente para %d tokens; reintentando con %d. "
@@ -157,20 +234,15 @@ class LLMEngine:
                     max_tokens, budget,
                 )
                 payload["max_tokens"] = budget
-                try:
-                    r = httpx.post(self.api_endpoint, headers=headers, json=payload, timeout=30.0)
-                except Exception as e:
-                    raise LLMUnavailable(str(e)) from e
-
-            if r.status_code != 200:
-                detail = _describe_api_error(r)
-                logger.error("LLM API falló — %s", detail)
-                raise LLMUnavailable(detail, status_code=r.status_code)
+                data = self._post(payload, purpose)
+            else:
+                logger.error("LLM API falló — %s", exc.reason)
+                raise
 
         try:
-            content = r.json()["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError, TypeError) as e:
-            logger.error("Respuesta del LLM ilegible: %s | %s", e, r.text[:200])
+            logger.error("Respuesta del LLM ilegible: %s", e)
             raise LLMUnavailable(f"Respuesta ilegible: {e}") from e
 
         if not content:

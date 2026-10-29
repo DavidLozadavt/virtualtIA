@@ -48,7 +48,20 @@ class ChatService:
 
     async def process_message(self, payload: ChatRequest, session_id: str = None, auth_header: str = None, app_state: Any = None) -> ChatResponse:
         """Processes a chat message from the user."""
+        from core import llm_usage
+
         start_time = time.time()
+        llm_usage.begin_turn(payload.project_id, payload.conversation_id or session_id or "")
+        try:
+            response = await self._process_message(payload, session_id, auth_header, app_state, start_time)
+        finally:
+            turn = llm_usage.current_turn()
+            path = "llm" if turn and turn.calls else "local"
+            llm_usage.end_turn(int((time.time() - start_time) * 1000), path)
+        return response
+
+    async def _process_message(self, payload: ChatRequest, session_id: str, auth_header: str,
+                               app_state: Any, start_time: float) -> ChatResponse:
 
         # Get or create user
         user = get_or_create_user(payload.project_id, payload.user_id)
@@ -115,6 +128,21 @@ class ChatService:
         # Save user message
         save_message(conversation_id, "user", payload.message)
 
+        # Intentos de sacar al asistente de su papel (pedir sus instrucciones,
+        # declararse administrador): respuesta fija, sin modelo ni herramientas.
+        from orchestrator.guards import check_message
+        guarded = check_message(payload.message)
+        if guarded:
+            logger.warning("Mensaje filtrado por guard (%s) en %s", guarded["reason"], payload.project_id)
+            save_message(conversation_id, "assistant", guarded["reply"])
+            update_conversation_timestamp(conversation_id)
+            return ChatResponse(
+                reply=guarded["reply"],
+                conversation_id=conversation_id,
+                trust_level=trust_level,
+                latency_ms=int((time.time() - start_time) * 1000),
+            )
+
         # Trust level progression
         message_count = get_conversation_message_count(conversation_id)
         new_trust_level = min(5, max(1, (message_count // 6) + 1))
@@ -123,7 +151,21 @@ class ChatService:
             trust_level = new_trust_level
 
         # Build system prompt + context messages
-        user_with_role = {**user, "role": payload.role}
+        # En SchoolSena el rol sale del token de sesión, no del campo `role`
+        # que manda el navegador (manipulable). El backend vuelve a validar el
+        # token en cada consulta de datos.
+        effective_role = payload.role
+        if payload.project_id == "schoolsena":
+            from core.auth_claims import roles_from_token
+            token_roles = roles_from_token(auth_header)
+            effective_role = ",".join(token_roles) if token_roles else "invitado"
+            if payload.role and token_roles and payload.role.lower() != effective_role.lower():
+                logger.warning("Rol enviado por el cliente (%s) distinto al del token (%s); se usa el del token.",
+                               payload.role, effective_role)
+        user_with_role = {**user, "role": effective_role}
+
+        from orchestrator.navigation import sanitize_catalog
+        nav_catalog = sanitize_catalog([i.model_dump() for i in (payload.nav_catalog or [])])
         
         # Context for intent router
         last_assistant_msg = ""
@@ -137,7 +179,12 @@ class ChatService:
         # conversación), así que la comprensión de este turno cuenta con lo que
         # los turnos anteriores dejaron establecido: qué se mostró, qué está en
         # foco y qué ranuras de reserva ya se llenaron.
-        local_intent = detect_intent(
+        # La comprensión puede consultar la base y, para NexiService, al modelo
+        # (resolución semántica): se ejecuta fuera del event loop para no
+        # congelar al resto de usuarios mientras tanto.
+        import asyncio as _asyncio
+        local_intent = await _asyncio.to_thread(
+            detect_intent,
             payload.message,
             payload.project_id,
             mentioned_city=payload.active_city,
@@ -147,7 +194,7 @@ class ChatService:
                 # Quién habla cambia qué significan algunas frases: "llévame a
                 # mi agenda" abre una pantalla para el dueño del negocio y
                 # empieza una cita para quien lo visita.
-                "role": payload.role,
+                "role": effective_role,
                 "active_company_id": payload.active_company_id,
             }
         )
@@ -180,6 +227,8 @@ class ChatService:
             tool_registry=self.registries.get(payload.project_id),
             local_intent=local_intent,
             final_data=final_data,
+            nav_catalog=nav_catalog,
+            current_path=payload.current_path,
         )
 
         # Update and persist final_data

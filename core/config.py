@@ -29,7 +29,22 @@ class Settings(BaseSettings):
     # —redactar una respuesta, resolver una necesidad que el catálogo no
     # reconoce—, nunca como requisito: si falla, Lyra responde igual.
     LLM_EXTERNAL_ENABLED: bool = False
-    
+
+    # Control de gasto (core/llm_usage.py). Un turno no llama al modelo más de
+    # LLM_MAX_CALLS_PER_TURN veces; con el gasto estimado del día por encima de
+    # LLM_DAILY_BUDGET_USD (0 = sin límite) Lyra pasa a modo local.
+    LLM_MAX_CALLS_PER_TURN: int = 3
+    LLM_DAILY_BUDGET_USD: float = 2.0
+    LLM_TIMEOUT_SECONDS: float = 20.0
+    LLM_MAX_RETRIES: int = 1
+    # Tope de salida por respuesta cuando el proyecto no fija llm.max_tokens.
+    LLM_DEFAULT_MAX_TOKENS: int = 350
+    # Modelo para la clasificación semántica de NexiService (tarea corta de
+    # elegir una etiqueta). Vacío = el mismo OPENAI_MODEL.
+    LLM_SEMANTIC_MODEL: str = ""
+    # Tarifas propias en JSON {"modelo": [entrada, entrada_cache, salida]} USD/M.
+    LLM_PRICING_JSON: str = ""
+
     # STT del canal de voz de navegador (core/voice_engine): OpenAI
     # gpt-4o-mini-transcribe de forma exclusiva (OpenRouter no soporta audio).
     # El STT telefónico es Deepgram streaming aparte (ver Voice V2).

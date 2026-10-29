@@ -108,6 +108,14 @@ CATEGORY_KEYWORDS = {
     "medico": ["medic", "clinic", "salud", "doctor", "odont", "dental", "dentista", "hospital", "medicos", "clinicas"],
     "taller": ["taller", "mecanico", "carro", "moto", "reparacion", "llanta", "talleres"],
     "gym": ["gym", "gimnasio", "entrenar", "pesas", "spinning", "gimnasios"],
+    # La etiqueta es el nombre real del rubro en la base: la gente busca
+    # "colegio" o "escuela" y el catálogo sólo dice "Educación y Capacitación".
+    "Educación y Capacitación": [
+        "colegio", "colegios", "colejio", "colejios", "escuela", "escuelas",
+        "instituto", "institutos", "liceo", "academia", "academias",
+        "universidad", "universidades", "jardin infantil", "preescolar",
+        "cursos", "tutoria", "tutorias", "capacitacion", "educacion",
+    ],
 }
 
 HELP_KEYWORDS = [
@@ -128,7 +136,9 @@ IDENTITY_KEYWORDS = ["quien eres", "quien sos", "quien eres tu", "como te llamas
 CAPABILITIES_KEYWORDS = [
     "que puedes hacer", "que sabes hacer", "que funciones tienes", "que haces", "cual es tu funcion", 
     "ayudame", "ayuda", "puedes ayudarme", "como me ayudas", "en que me puedes ayudar", 
-    "que servicios ofreces", "que servicios tienes", "que habilidades tienes", "para que sirves"
+    "que servicios ofreces", "que servicios tienes", "que habilidades tienes", "para que sirves",
+    "que puedo hacer", "que se puede hacer", "como funciona esta plataforma", "como funciona nexiservice",
+    "que puedo hacer en nexiservice", "que se puede hacer en nexiservice", "para que sirve nexiservice",
 ]
 
 # Intenciones de control del mapa

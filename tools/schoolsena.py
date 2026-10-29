@@ -30,13 +30,20 @@ async def _api_get(endpoint: str, auth_header: str, params: dict = None) -> dict
             if resp.status_code == 200:
                 return resp.json()
             logger.warning(f"SchoolSena API {endpoint} returned {resp.status_code}: {resp.text[:200]}")
-            return {"error": f"API respondió con código {resp.status_code}"}
+            if resp.status_code == 401:
+                return {"error": "tu sesión expiró o no es válida; vuelve a iniciar sesión"}
+            if resp.status_code == 403:
+                return {"error": "tu usuario no tiene permiso para consultar esta información"}
+            return {"error": f"el servidor de SchoolSena respondió con un error ({resp.status_code})"}
     except httpx.ConnectError:
         logger.error(f"No se pudo conectar a SchoolSena API: {url}")
         return {"error": "No se pudo conectar al servidor de SchoolSena"}
+    except httpx.TimeoutException:
+        logger.error(f"Timeout llamando SchoolSena API: {url}")
+        return {"error": "el servidor de SchoolSena tardó demasiado en responder"}
     except Exception as e:
         logger.error(f"Error llamando SchoolSena API: {e}")
-        return {"error": str(e)}
+        return {"error": "no pude consultar SchoolSena en este momento"}
 
 
 def _safe_result(data) -> dict:
@@ -64,7 +71,9 @@ async def get_entregas(params=None, context=None, **kwargs):
     p = params or kwargs
     ctx = context or kwargs
     auth = ctx.get("auth_header", "")
-    actividad_id = p.get("actividad_id", "")
+    actividad_id = str(p.get("actividad_id", "")).strip()
+    if not actividad_id.isdigit():
+        return {"result": None, "error": "falta el número de la actividad"}
     data = await _api_get(f"lyra/actividades/{actividad_id}/respuestas", auth)
     return _safe_result(data)
 
@@ -74,7 +83,9 @@ async def get_estudiantes_ficha(params=None, context=None, **kwargs):
     p = params or kwargs
     ctx = context or kwargs
     auth = ctx.get("auth_header", "")
-    ficha_id = p.get("ficha_id", "")
+    ficha_id = str(p.get("ficha_id", "")).strip()
+    if not ficha_id.isdigit():
+        return {"result": None, "error": "falta el número de la ficha"}
     data = await _api_get(f"lyra/fichas/{ficha_id}/estudiantes", auth)
     return _safe_result(data)
 

@@ -16,6 +16,35 @@ def _get_roles(user_role: str) -> tuple[bool, bool, bool]:
     return is_coordinator, is_instructor, is_student
 
 
+_STUDENT_TOOLS = {"get_clases_hoy", "get_horario", "get_actividades_pendientes", "get_notas"}
+_INSTRUCTOR_TOOLS = _STUDENT_TOOLS | {"get_entregas", "get_estudiantes_ficha", "get_fichas_activas"}
+_COORDINATOR_TOOLS = _INSTRUCTOR_TOOLS | {
+    "get_resumen_admin", "get_nomina_resumen", "get_lista_instructores", "get_contratos_vencimiento",
+}
+
+
+def allowed_tools(user_role: str) -> set:
+    """Herramientas de datos que se le ofrecen al modelo según el rol de la sesión."""
+    is_coordinator, is_instructor, is_student = _get_roles(user_role or "")
+    if is_coordinator:
+        return set(_COORDINATOR_TOOLS)
+    if is_instructor:
+        return set(_INSTRUCTOR_TOOLS)
+    if is_student:
+        return set(_STUDENT_TOOLS)
+    return set()
+
+
+def _has(text: str, keywords) -> bool:
+    """
+    Alguna palabra clave aparece al INICIO de una palabra del texto.
+
+    La búsqueda por subcadena hacía que "información" contuviera "formación" y
+    se respondiera con el mensaje de regionales a quien preguntaba por un curso.
+    """
+    return any(re.search(r"(?<![a-z0-9áéíóúñü])" + re.escape(kw), text) for kw in keywords)
+
+
 def _denied(msg: str = None) -> Dict[str, Any]:
     return {"reply": msg or "🔒 No tienes permiso para consultar esta información.", "final_data": {"access_denied": True}}
 
@@ -337,18 +366,29 @@ async def pre_llm_interceptor(
 
     logger.info(f"SchoolSena interceptor | text='{user_text}' | role='{user_role}'")
 
+    # ── 0. Navegación a una sección real del menú del usuario ────────────────
+    from orchestrator.navigation import is_navigation_request, navigation_reply
+    if is_navigation_request(user_text):
+        return navigation_reply(user_text, context.get("nav_catalog") or [], context.get("current_path"))
+
+    # ── 0b. Seguimiento temporal corto ("y mañana?", "¿y hoy?") ──────────────
+    if re.fullmatch(r"\W*(y\s+)?(para\s+)?(el\s+|la\s+)?(hoy|mañana|manana|semana|mes)\W*", user_text):
+        user_text = f"clases {user_text}"
+        context["user_text"] = user_text
+
     # ── 1. Saludo / Ayuda ─────────────────────────────────────────────────────
     greeting_kws = ["hola", "buenos dias", "buenas tardes", "buenas noches", "start"]
-    help_kws     = ["ayuda", "puedes hacer", "que haces", "quien eres"]
+    help_kws     = ["ayuda", "puedes hacer", "que haces", "quien eres", "puedo hacer", "que se puede hacer",
+                    "como funciona", "para que sirve", "que hago aqui", "qué puedo hacer", "qué puedes hacer"]
     schedule_kws = [
         "clase", "materia", "aula", "hoy", "ahora", "horario", "semana",
         "calendario", "ficha", "mi agenda", "qué tengo", "que tengo",
         "nota", "calificacion", "actividad", "tarea",
     ]
 
-    is_greeting = any(kw in user_text for kw in greeting_kws)
-    is_help     = any(kw in user_text for kw in help_kws)
-    has_query   = any(kw in user_text for kw in schedule_kws)
+    is_greeting = _has(user_text, greeting_kws)
+    is_help     = _has(user_text, help_kws)
+    has_query   = _has(user_text, schedule_kws)
 
     if is_greeting and not has_query:
         name_part = f", {user_name.split()[0]}" if user_name != "Usuario" else ""
@@ -416,10 +456,17 @@ async def pre_llm_interceptor(
                 "- 📝 **Actividades pendientes**\n"
                 "- 📊 **Tus calificaciones**"
             )
+        sections = [c["title"] for c in (context.get("nav_catalog") or []) if c.get("path") != "/"][:8]
+        if sections:
+            msg += (
+                "\n\nTambién puedo **llevarte** a tus secciones, por ejemplo: "
+                + ", ".join(sections)
+                + ". Dime \"llévame a …\"."
+            )
         return {"reply": msg, "final_data": {"is_greeting": True}}
 
     # ── 2. Mi perfil ──────────────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["quien soy", "quién soy", "mi perfil", "mis datos", "mi rol"]):
+    if _has(user_text, ["quien soy", "quién soy", "mi perfil", "mis datos", "mi rol"]):
         email = user_data.get("email") or "No registrado"
         reply = (
             f"👤 **Tu Perfil en SchoolSena**\n"
@@ -432,7 +479,7 @@ async def pre_llm_interceptor(
     # ── 3. Fichas / Grupos ────────────────────────────────────────────────────
     ficha_match = re.search(r"ficha\s+(\d+)", user_text)
 
-    if ficha_match and any(kw in user_text for kw in ["estudiante", "cuanto", "cuánto", "quien", "quién", "lista", "alumnos"]):
+    if ficha_match and _has(user_text, ["estudiante", "cuanto", "cuánto", "quien", "quién", "lista", "alumnos"]):
         ficha_id = ficha_match.group(1)
         return await _run(
             "get_estudiantes_ficha", {"ficha_id": ficha_id}, context,
@@ -441,7 +488,7 @@ async def pre_llm_interceptor(
         )
 
     # ── "mis fichas asignadas" / "fichas asignadas" → instructor ve fichas únicas
-    if any(kw in user_text for kw in ["mis fichas", "mi fichas", "fichas asignadas"]) or user_text.strip() in ["fichas", "ficha", "las fichas"]:
+    if _has(user_text, ["mis fichas", "mi fichas", "fichas asignadas"]) or user_text.strip() in ["fichas", "ficha", "las fichas"]:
         if is_instructor:
             return await _run_fichas_asignadas(context)
         # coordinador o rol genérico: fichas activas del centro
@@ -451,7 +498,7 @@ async def pre_llm_interceptor(
             "No hay fichas activas registradas en este momento.",
         )
 
-    if any(kw in user_text for kw in ["fichas activas", "fichas del centro", "todos los grupos"]):
+    if _has(user_text, ["fichas activas", "fichas del centro", "todos los grupos"]):
         return await _run(
             "get_fichas_activas", {}, context,
             "📋 **Fichas activas en el centro:**\n",
@@ -459,15 +506,15 @@ async def pre_llm_interceptor(
         )
 
     # ── 4. Nómina ─────────────────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["nómina", "nomina", "presupuesto", "cuánto cuesta", "cuanto cuesta"]):
+    if _has(user_text, ["nómina", "nomina", "presupuesto", "cuánto cuesta", "cuanto cuesta"]):
         if not is_coordinator:
             return _denied("🔒 Solo el personal de coordinación puede consultar la información de nómina.")
         return await _run("get_nomina_resumen", {}, context, "💰 **Resumen de nómina mensual:**\n", "No hay datos de nómina disponibles.")
 
     # ── 5. Actividades / Tareas / Entregas ────────────────────────────────────
-    if any(kw in user_text for kw in ["actividad", "tarea", "taller", "trabajo", "evidencia", "entrega", "pendiente"]):
+    if _has(user_text, ["actividad", "tarea", "taller", "trabajo", "evidencia", "entrega", "pendiente"]):
         act_match = re.search(r"actividad\s+(\d+)", user_text)
-        if act_match and any(kw in user_text for kw in ["entrega", "quien", "quién", "lista", "entregó"]):
+        if act_match and _has(user_text, ["entrega", "quien", "quién", "lista", "entregó"]):
             if not (is_instructor or is_coordinator):
                 return _denied("🔒 Solo instructores y coordinadores pueden ver las entregas de otros estudiantes.")
             act_id = act_match.group(1)
@@ -481,43 +528,43 @@ async def pre_llm_interceptor(
         return await _run("get_actividades_pendientes", {}, context, label, empty)
 
     # ── 6. Instructores ───────────────────────────────────────────────────────
-    if "instructor" in user_text and any(kw in user_text for kw in ["quiénes", "quienes", "lista", "cuáles", "cuales", "hay", "cuantos"]):
+    if "instructor" in user_text and _has(user_text, ["quiénes", "quienes", "lista", "cuáles", "cuales", "hay", "cuantos"]):
         if not is_coordinator:
             return _denied("🔒 Solo la coordinación puede consultar la lista completa de instructores.")
         return await _run("get_lista_instructores", {}, context, "👨‍🏫 **Instructores activos en el centro:**\n", "No se encontraron instructores activos en el sistema.")
 
     # ── 7. Contratos ──────────────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["vencer", "vencimiento", "contrato"]):
+    if _has(user_text, ["vencer", "vencimiento", "contrato"]):
         if not is_coordinator:
             return _denied("🔒 La información de contratos está restringida a coordinación.")
         return await _run("get_contratos_vencimiento", {}, context, "⚠️ **Contratos próximos a vencer (próximos 30 días):**\n", "✅ No hay contratos por vencer en los próximos 30 días.")
 
     # ── 8. Dashboard / Resumen Admin ──────────────────────────────────────────
-    if any(kw in user_text for kw in ["resumen admin", "estado del centro", "dashboard", "estadística", "estadistica", "general"]):
+    if _has(user_text, ["resumen admin", "estado del centro", "dashboard", "estadística", "estadistica", "general"]):
         if not is_coordinator:
             return _denied("🔒 El dashboard administrativo no está disponible para tu rol.")
         return await _run("get_resumen_admin", {}, context, "📊 **Estado general del centro:**\n", "No se pudo obtener el estado general del centro.")
 
     # ── 9. Notas ──────────────────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["nota", "calificación", "calificacion", "rendimiento", "cuanto saque", "cuánto saqué", "mis notas"]):
+    if _has(user_text, ["nota", "calificación", "calificacion", "rendimiento", "cuanto saque", "cuánto saqué", "mis notas"]):
         return await _run("get_notas", {}, context, "📊 **Tus calificaciones:**\n", "Aún no tienes calificaciones registradas en el sistema.")
 
     # ── 10. Horario / Clases ──────────────────────────────────────────────────
-    if any(kw in user_text for kw in [
+    if _has(user_text, [
         "clase", "materia", "aula", "hoy", "ahora", "horario", "semana",
         "calendario", "ficha", "mi agenda", "qué tengo", "que tengo"
     ]):
         # Respuestas directas sin prompt interactivo
 
         # Hoy
-        if any(kw in user_text for kw in ["hoy", "ahora", "clases de hoy", "fichas de hoy"]):
+        if _has(user_text, ["hoy", "ahora", "clases de hoy", "fichas de hoy"]):
             context["timeframe"] = "today"
             label = "🌞 **Tus fichas programadas para hoy:**\n" if is_instructor else "🌞 **Tus clases para hoy:**\n"
             empty = "No tienes fichas programadas para el día de hoy." if is_instructor else "No tienes clases programadas para el día de hoy."
             return await _run("get_clases_hoy", {}, context, label, empty)
 
         # Mañana
-        if any(kw in user_text for kw in ["mañana", "manana", "dia de mañana", "dia de manana"]):
+        if _has(user_text, ["mañana", "manana", "dia de mañana", "dia de manana"]):
             from datetime import datetime, timedelta
             days_es       = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
             tomorrow_name = days_es[(datetime.now().weekday() + 1) % 7]
@@ -553,7 +600,7 @@ async def pre_llm_interceptor(
         return week_result
 
     # ── 11. Geografía / Centro ────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["regional", "centro", "formación", "formacion", "sede", "ciudad", "departamento"]):
+    if _has(user_text, ["regional", "centro", "formación", "formacion", "sede", "ciudad", "departamento"]):
         return {
             "reply": (
                 "📍 El sistema está configurado para tu Centro de Formación local. "
@@ -564,7 +611,7 @@ async def pre_llm_interceptor(
         }
 
     # ── 12. Fallback SENA ─────────────────────────────────────────────────────
-    if any(kw in user_text for kw in ["sena", "sistema", "plataforma", "sofia", "plus", "aprendiz", "grupos", "formación", "formacion", "regional"]):
+    if _has(user_text, ["sena", "sistema", "plataforma", "sofia", "plus", "aprendiz", "grupos", "formación", "formacion", "regional"]):
         if is_student:       suggestions = "**clases de hoy**, **mi horario**, **tareas pendientes** o **mis notas**"
         elif is_instructor:  suggestions = "**fichas de hoy**, **fichas activas** o **entregas actividad [ID]**"
         elif is_coordinator: suggestions = "**fichas activas**, **lista instructores**, **nómina** o **dashboard**"
