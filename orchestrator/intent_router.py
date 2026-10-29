@@ -382,6 +382,49 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             logger.info("DETECCION: intent='admin_navigate' (rol administrador) → %s", _panel["url"])
             return {"intent": "admin_navigate", "args": _panel}
 
+    # ── Sólo una ciudad, como respuesta a la búsqueda anterior ─────────────
+    # "Quiero buscar un colegio" → "en Popayán": el segundo mensaje completa
+    # el primero. Sin esto llegaba al modelo como charla y éste contestaba
+    # "procedo a mostrar los resultados" sin que el sistema buscara nada.
+    if project_id == "nexiservice" and semantic_state.active_domain_label and mentioned_city_from_text:
+        _rest = re.sub(r"\b(y|en|de|por|para|mejor|la|el|ciudad|que|sea|tambien|busca|buscame|ahora)\b", " ", text)
+        _rest = re.sub(re.escape(_normalize(mentioned_city_from_text)), " ", _rest)
+        if not _rest.strip(" ?¿!.,"):
+            logger.info(
+                "DETECCION: ciudad sola → se repite la búsqueda '%s' en %s",
+                semantic_state.active_domain_label, mentioned_city_from_text,
+            )
+            return {
+                "intent": "search_businesses",
+                "args": {
+                    "category": semantic_state.active_domain or semantic_state.active_domain_label,
+                    "city": mentioned_city_from_text,
+                    "_grounded_kind": "business_category",
+                    "_grounded_terms": [semantic_state.active_domain or semantic_state.active_domain_label],
+                    "_user_terms": [semantic_state.active_domain_label],
+                },
+            }
+
+    # ── "Llévame a ese restaurante": ir al negocio del que se viene hablando ─
+    # El sustantivo ("restaurante") no pide una búsqueda nueva: el demostrativo
+    # señala al que está en foco. Antes se volvía a listar la categoría.
+    if (
+        project_id == "nexiservice"
+        and semantic_state.focus_id
+        and semantic_state.focus_kind in (ConceptKind.BUSINESS, "business")
+        and re.search(r"\b(llevame|ir a|vamos a|quiero ir|abre|abreme|abrir|entrar a|muestrame el perfil)\b", text)
+        and re.search(r"\b(ese|esa|este|esta|aquel|aquella|alli|ahi)\b", text)
+        and not re.search(r"\b(otro|otra|otros|otras|mapa)\b", text)
+    ):
+        logger.info("DETECCION: navegación al negocio en foco %s", semantic_state.focus_id)
+        return {
+            "intent": "navigate_to_company",
+            "args": {
+                "business_id": semantic_state.focus_id,
+                "business_name": semantic_state.focus_label or "ese negocio",
+            },
+        }
+
     def _act_is(*acts) -> bool:
         return semantic_analysis is not None and semantic_analysis.act in acts
 

@@ -1,5 +1,11 @@
-from typing import Optional, Union
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
+
+
+class NavItem(BaseModel):
+    title: str = Field(..., max_length=120)
+    path: str = Field(..., max_length=200)
+
 
 class ChatRequest(BaseModel):
     project_id: str = Field(..., max_length=50, description="Project slug, e.g. 'rentus'")
@@ -21,6 +27,12 @@ class ChatRequest(BaseModel):
     active_city: Optional[str] = Field(None, max_length=50, description="The currently selected city in the UI")
     active_company_id: Optional[str] = Field(None, description="The currently selected company ID in the business view")
     voice: Optional[bool] = Field(False, description="Request TTS audio response")
+    nav_catalog: Optional[List[NavItem]] = Field(
+        None, max_length=300,
+        description="Secciones del menú que el usuario ve (ya filtradas por permisos). "
+                    "Lyra sólo navega a una de ellas.",
+    )
+    current_path: Optional[str] = Field(None, max_length=200, description="Ruta actual del front")
 
 class ChatResponse(BaseModel):
     reply: str = Field(..., description="Assistant's text response")

@@ -402,6 +402,15 @@ GENERIC_PLACE_STEMS = frozenset({
     )
 })
 
+#: Nombres de ciudad que el directorio atiende. Son lugares, nunca marcos: sin
+#: esta lista, "cali" compartía prefijo fonético con "calificación" y "un
+#: instituto en Cali" se leía como una consulta de reseñas.
+PLACE_NAME_FORMS = _S(
+    "cali", "popayan", "bogota", "medellin", "pasto", "neiva", "santander",
+    "quilichao", "barranquilla", "cartagena", "bucaramanga", "manizales",
+    "pereira", "armenia", "ibague", "tulua", "palmira", "buga",
+)
+
 #: Marco de VALORACIÓN: opiniones de terceros sobre una entidad.
 REVIEW_FRAME_STEMS = frozenset({
     phonetic_stem(w) for w in (

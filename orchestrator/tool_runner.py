@@ -2,6 +2,7 @@
 orchestrator/tool_runner.py — Agent loop con límite estricto de herramientas.
 """
 
+import asyncio
 import importlib
 import json
 import logging
@@ -654,6 +655,46 @@ def _local_default_reply(user_text: str) -> str:
     )
 
 
+#: Herramienta de navegación que se ofrece al modelo cuando el front envía el
+#: catálogo de secciones. El argumento es texto libre: Lyra lo resuelve contra
+#: el catálogo, así el modelo no puede inventar una ruta.
+_NAV_TOOL_SCHEMA = {
+    "name": "navigate_to_section",
+    "description": "Abre una sección del menú de la aplicación (incluido volver al inicio/Dashboard). Úsala siempre que el usuario pida ir, volver, abrir o encontrar una sección o módulo.",
+    "parameters": {"section": {"type": "string", "description": "Nombre de la sección, con las palabras del usuario"}},
+    "required": ["section"],
+}
+
+#: Tope de lo que vuelve al modelo desde una herramienta.
+_TOOL_OUTPUT_MAX_ITEMS = 15
+_TOOL_OUTPUT_MAX_CHARS = 3000
+
+
+def _compact_tool_output(output) -> str:
+    """
+    Resultado de herramienta listo para el modelo, sin relleno.
+
+    Se envía sólo lo necesario para redactar: listas recortadas, campos vacíos
+    fuera y un límite de caracteres. Una tabla de 200 filas no mejora la
+    respuesta y multiplica los tokens de entrada.
+    """
+    def _trim(v, depth=0):
+        if isinstance(v, dict):
+            return {k: _trim(x, depth + 1) for k, x in v.items()
+                    if x not in (None, "", [], {}) and not str(k).startswith("_")}
+        if isinstance(v, list):
+            items = [_trim(x, depth + 1) for x in v[:_TOOL_OUTPUT_MAX_ITEMS]]
+            if len(v) > _TOOL_OUTPUT_MAX_ITEMS:
+                items.append(f"... {len(v) - _TOOL_OUTPUT_MAX_ITEMS} más")
+            return items
+        return v
+
+    text = json.dumps(_trim(output), ensure_ascii=False, default=str)
+    if len(text) > _TOOL_OUTPUT_MAX_CHARS:
+        text = text[:_TOOL_OUTPUT_MAX_CHARS] + "…(recortado)"
+    return text
+
+
 async def run_agent_loop(
     engine,
     messages: list[dict],
@@ -670,6 +711,8 @@ async def run_agent_loop(
     tool_registry: ToolRegistry = None,
     local_intent: dict | None = None,
     final_data: dict | None = None,
+    nav_catalog: list | None = None,
+    current_path: str | None = None,
 ) -> dict:
     """
     Main agent loop. Orchestrates interceptors, LLM calls, and tool execution.
@@ -703,6 +746,8 @@ async def run_agent_loop(
         "final_data": final_data,
         "messages": messages,
         "user_text": user_text,
+        "nav_catalog": nav_catalog or [],
+        "current_path": current_path,
         "_resp_func": _resp # Pass response helper
     }
 
@@ -745,6 +790,15 @@ async def run_agent_loop(
     # herramientas del YAML: están declaradas sin parámetros y sin registrar, de
     # modo que ofrecérselas al modelo sólo produciría llamadas que fallan.
     tools_schema = tool_registry.get_schemas() if tool_registry else project_config.get("tools", [])
+    # Sólo las herramientas que el rol de la sesión puede usar: ofrecerle al
+    # modelo la nómina en la conversación de un aprendiz sólo sirve para que la
+    # pida (y gaste tokens describiéndola).
+    if project_id == "schoolsena":
+        from orchestrator.interceptors.schoolsena import allowed_tools
+        allowed = allowed_tools((user_data or {}).get("role", ""))
+        tools_schema = [t for t in tools_schema if t.get("name") in allowed]
+    if nav_catalog:
+        tools_schema = list(tools_schema) + [_NAV_TOOL_SCHEMA]
 
     # Modo local: no se sale a ningún modelo externo. Si algo llegó hasta aquí
     # sin respuesta, se usa la que dejó preparada el interceptor antes que
@@ -756,14 +810,39 @@ async def run_agent_loop(
         logger.info("Modo local: respuesta resuelta sin modelo externo.")
         return {"final_data": final_data, "reply": final_data["reply"]}
 
+    llm_cfg = project_config.get("llm") or {}
+    max_tokens = int(llm_cfg.get("max_tokens") or settings.LLM_DEFAULT_MAX_TOKENS)
+    temperature = float(llm_cfg.get("temperature") if llm_cfg.get("temperature") is not None else 0.3)
+
+    tool_schema_names = {t.get("name") for t in tools_schema} if tools_schema else None
+
+    # El modelo sólo puede mencionar secciones que existen para este usuario.
+    # Se le dan los títulos (no las rutas: ésas las resuelve Lyra) y sólo en el
+    # turno que va al modelo, que es el único que los necesita.
+    if nav_catalog and messages and messages[0].get("role") == "system":
+        titles = [c["title"] for c in nav_catalog][:40]
+        messages[0] = {
+            **messages[0],
+            "content": messages[0]["content"]
+            + "\n\nSECCIONES DEL MENÚ DE ESTE USUARIO (no existen otras): " + "; ".join(titles),
+        }
+
     for iteration in range(max_iterations):
         logger.info(f"Agent iteration {iteration + 1}/{max_iterations}")
 
         try:
+            # El cliente HTTP del motor es síncrono: se ejecuta en un hilo para
+            # no bloquear el event loop de FastAPI mientras el modelo responde.
             if tools_schema:
-                result = engine.generate_with_tools(messages, tools_schema)
+                result = await asyncio.to_thread(
+                    engine.generate_with_tools, messages, tools_schema,
+                    max_tokens=max_tokens, temperature=temperature,
+                )
             else:
-                result = {"type": "text", "content": engine.generate(messages)}
+                content = await asyncio.to_thread(
+                    engine.generate, messages, max_tokens=max_tokens, temperature=temperature,
+                )
+                result = {"type": "text", "content": content}
         except LLMUnavailable as e:
             # El modelo no respondió. Se le dice al usuario algo humano y, sobre
             # todo, NO se le entrega el texto del error: acabaría impreso en el
@@ -806,6 +885,31 @@ async def run_agent_loop(
 
             logger.info(f"Tool Call: {tool_name} | Args: {tool_args}")
 
+            from core import llm_usage
+            llm_usage.note_tool(tool_name)
+
+            # Navegación: se resuelve contra el catálogo real del usuario y
+            # termina el turno con una respuesta fija (no hace falta otra
+            # llamada al modelo para redactar "te llevo a X").
+            if tool_name == "navigate_to_section":
+                from orchestrator.navigation import navigation_reply
+                nav = navigation_reply(
+                    f"llevame a {tool_args.get('section') or ''}", nav_catalog or [], current_path
+                )
+                final_data.update(nav.get("final_data") or {})
+                final_data["reply"] = nav["reply"]
+                break
+
+            if tool_schema_names is not None and tool_name not in tool_schema_names:
+                logger.warning("El modelo pidió una herramienta no ofrecida: %s", tool_name)
+                tool_output = {"result": None, "error": "Herramienta no disponible para este usuario."}
+                messages.append({"role": "assistant", "content": None, "tool_calls": [{
+                    "id": tool_call_id, "type": "function",
+                    "function": {"name": tool_name, "arguments": json.dumps(tool_args, ensure_ascii=False)}}]})
+                messages.append({"role": "tool", "tool_call_id": tool_call_id,
+                                 "content": json.dumps(tool_output, ensure_ascii=False)})
+                continue
+
             # Pre-Execution Interception (Arg patching / Guards)
             await interceptor_manager.run_pre_execution_interceptors(
                 tool_name, tool_args, context
@@ -839,7 +943,7 @@ async def run_agent_loop(
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": json.dumps(tool_output, ensure_ascii=False),
+                "content": _compact_tool_output(tool_output),
             })
 
             # Check for early exit (e.g., if a tool/interceptor already set the final reply)

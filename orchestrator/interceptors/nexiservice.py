@@ -1295,6 +1295,14 @@ def _handle_conversational(intent_name, project_config, conversation_id, _resp, 
             "final_data": final_data,
         }
 
+    # Saludos cortos, "¿quién eres?" y "¿qué puedes hacer?" tienen respuesta
+    # conocida: el modelo cobraba ~1.100 tokens de entrada para decir "Saludos,
+    # ¿en qué le ayudo?". La charla libre sí sigue yendo al modelo.
+    _palabras = len((context.get("user_text") or "").split())
+    if intent_name in ("capabilities", "identity") or (intent_name == "greeting" and _palabras <= 5):
+        final_data.pop("_fallback_reply", None)
+        return {"reply": local_reply, "voice_action": None, "final_data": final_data}
+
     # Despedirse no necesita al modelo: es un cierre, no una conversación.
     if intent_name == "farewell":
         return {
@@ -1378,11 +1386,11 @@ async def _handle_navigate_to_company(
         sem_state.save(final_data)
         return {
             "reply": (
-                f"**{name}**\n\n¿Deseas ver sus servicios o agendar una cita?"
+                f"Te llevo al perfil de **{name}**. Ahí puedes ver sus servicios o agendar una cita."
                 f"\n[BIZ:{biz_id}]"
             ),
             "voice_action": "navigate",
-            "voice_action_payload": {"url": f"/empresa/{biz_id}"},
+            "voice_action_payload": {"url": f"/empresa/{biz_id}", "title": name, "verify": True},
             "final_data": final_data,
         }
 
@@ -1411,15 +1419,15 @@ async def _handle_navigate_to_company(
     sem_state.save(final_data)
 
     reply = (
-        f"**{b['name']}**\n"
-        f"📍 {b.get('address', 'Sin dirección')}\n\n"
-        "¿Deseas ver servicios o reservar?"
+        f"Te llevo al perfil de **{b['name']}**"
+        + (f" ({b['address']})" if b.get("address") else "")
+        + ". Ahí puedes ver sus servicios o reservar."
         f"\n[BIZ:{b['id']}]"
     )
     return {
         "reply": reply,
         "voice_action": "navigate",
-        "voice_action_payload": {"url": f"/empresa/{b['id']}"},
+        "voice_action_payload": {"url": f"/empresa/{b['id']}", "title": b["name"], "verify": True},
         "final_data": final_data,
     }
 
@@ -1645,8 +1653,10 @@ async def _handle_search_businesses(
                 "sus horarios, o buscamos en otra ciudad."
             )
         else:
+            palabra = _broadened_word(args, category) or palabra
             reply = (
-                f"Son esas mismas {count_phrase(len(businesses), palabra)}: no tengo "
+                f"Son {'esas mismas' if palabra and _feminine(palabra) else 'esos mismos'} "
+                f"{count_phrase(len(businesses), palabra)}: no tengo "
                 f"más en {where}. {them(palabra).capitalize()} tienes marcad"
                 f"{'as' if palabra and _feminine(palabra) else 'os'} en el mapa."
             )
@@ -1706,10 +1716,20 @@ async def _handle_search_businesses(
                 f"{them(palabra).capitalize()} tienes en el mapa. ¿En cuál quieres que te agende?"
             )
         elif palabra:
+            broad = _broadened_word(args, category)
+            shown = broad or palabra
+            listado = "\n".join(
+                f"{i}. **{b['name']}**{_distance_phrase(b)}"
+                for i, b in enumerate(businesses[:5], start=1)
+            )
+            nota = (
+                f"No tengo una categoría solo de {pluralize_es(palabra)}; esto es lo que hay en "
+                f"educación y capacitación. " if broad else ""
+            )
             reply = (
-                f"Encontré {count_phrase(len(businesses), palabra)} en {where}. "
-                f"Te {them(palabra)} estoy mostrando en el mapa para que veas dónde "
-                f"queda {each_one(palabra)}."
+                f"{nota}Encontré {count_phrase(len(businesses), shown)} en {where}:\n{listado}\n\n"
+                f"Te {them(shown)} estoy mostrando en el mapa. Dime cuál quieres ver "
+                "(por ejemplo «el primero») y te llevo a su perfil."
             )
         else:
             # "¿Qué negocios tienes?", "¿qué puedo encontrar aquí?". No hay un
@@ -1909,6 +1929,32 @@ def _domain_word(args: Dict, category: Optional[str]) -> Optional[str]:
         catalog_terms=args.get("_grounded_terms"),
         category=category,
     )
+
+
+#: Rubros más amplios que la palabra con la que se les pide. Quien busca un
+#: "colegio" recibe institutos y academias: llamarlos colegios sería inventarles
+#: una característica, así que se nombran por lo que son.
+_BROAD_CATEGORIES = {
+    "educacion y capacitacion": (
+        "centro educativo",
+        {"academia", "academias", "instituto", "institutos", "curso", "cursos",
+         "capacitacion", "educacion", "tutoria", "tutorias"},
+    ),
+}
+
+
+def _broadened_word(args: Dict, category: Optional[str]) -> Optional[str]:
+    """Palabra honesta para el resultado cuando el rubro es más amplio que lo pedido."""
+    import unicodedata as _ud
+    fold = lambda t: "".join(c for c in _ud.normalize("NFKD", (t or "").lower()) if not _ud.combining(c))
+    entry = _BROAD_CATEGORIES.get(fold(category))
+    if not entry:
+        return None
+    word, keep = entry
+    user_terms = [fold(t) for t in (args.get("_user_terms") or [])]
+    if not user_terms or any(t in keep for t in user_terms):
+        return None
+    return word
 
 
 def _domain_label(args: Dict, category: Optional[str]) -> str:

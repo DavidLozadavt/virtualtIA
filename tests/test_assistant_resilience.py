@@ -98,7 +98,7 @@ def test_el_fallo_del_modelo_no_se_muestra_literal(failure, with_external_llm):
 
 
 def test_el_fallo_queda_marcado_para_el_resto_del_sistema(with_external_llm):
-    out = run(FakeEngine(error=LLMUnavailable("boom", status_code=402)), "hola")
+    out = run(FakeEngine(error=LLMUnavailable("boom", status_code=402)), "oye, hoy estoy aburrido y no sé qué hacer")
     assert out["final_data"].get("llm_error") is True
 
 
@@ -109,7 +109,7 @@ def test_un_error_no_arrastra_resultados_anteriores(with_external_llm):
         "voice_action": "fit_all_businesses",
     }
     out = run(FakeEngine(error=LLMUnavailable("sin crédito", status_code=402)),
-              "hola", final_data=previo)
+              "oye, hoy estoy aburrido y no sé qué hacer", final_data=previo)
     fd = out["final_data"]
     assert fd["properties"] == []
     assert fd["voice_action"] is None
@@ -173,22 +173,24 @@ def test_el_modo_local_responde_saludos_con_contexto():
 # 2. LA CONVERSACIÓN LA ESCRIBE EL MODELO (sólo si se enciende)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_un_saludo_llega_al_modelo(with_external_llm):
+def test_un_saludo_corto_no_gasta_modelo(with_external_llm):
     """
-    Antes se devolvía una plantilla y el turno terminaba ahí. Un asistente de
-    verdad responde al saludo con algo escrito para esa conversación.
+    "Hola" y "¿cómo funciona esto?" tienen respuesta conocida: pagar ~1.100
+    tokens de entrada para contestarlos no mejora nada (auditoría 2026-10-29).
     """
-    engine = FakeEngine(reply="¡Hola! ¿En qué te puedo ayudar hoy?")
-    out = run(engine, "hola como estas")
-    assert engine.calls == 1, "el saludo debía llegar al modelo"
-    assert out["reply"] == "¡Hola! ¿En qué te puedo ayudar hoy?"
+    engine = FakeEngine(reply="no debía usarse")
+    for msg in ("hola como estas", "cómo funciona esto"):
+        out = run(engine, msg)
+        assert out["reply"] and out["reply"] != "no debía usarse"
+    assert engine.calls == 0
 
 
-def test_una_pregunta_general_llega_al_modelo(with_external_llm):
-    engine = FakeEngine(reply="NexiService es un directorio de negocios…")
-    out = run(engine, "cómo funciona esto")
+def test_la_charla_libre_llega_al_modelo(with_external_llm):
+    """Lo que no tiene respuesta preparada sí lo escribe el modelo."""
+    engine = FakeEngine(reply="¡Te entiendo! ¿Buscamos algo para hacer?")
+    out = run(engine, "oye, hoy estoy aburrido y no sé qué hacer")
     assert engine.calls == 1
-    assert out["reply"].startswith("NexiService")
+    assert out["reply"] == "¡Te entiendo! ¿Buscamos algo para hacer?"
 
 
 def test_sin_modelo_el_saludo_sigue_siendo_un_saludo():
@@ -206,7 +208,7 @@ def test_sin_modelo_el_saludo_sigue_siendo_un_saludo():
 def test_la_respuesta_preparada_se_descarta_cuando_el_modelo_responde(with_external_llm):
     """No debe quedar guardada entre turnos una respuesta que no se usó."""
     engine = FakeEngine(reply="Respuesta real del modelo.")
-    out = run(engine, "hola")
+    out = run(engine, "oye, hoy estoy aburrido y no sé qué hacer")
     assert "_fallback_reply" not in out["final_data"]
 
 

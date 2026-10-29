@@ -78,13 +78,16 @@ def clear_cache() -> None:
 
 def _default_completion(prompt: str) -> str:
     """Llama al mismo motor LLM que ya usa el orquestador."""
+    from core.config import settings
     from core.llm_engine import LLMEngine
 
     engine = LLMEngine(model_path="")
     return engine.generate(
         [{"role": "user", "content": prompt}],
-        max_tokens=120,
+        max_tokens=60,
         temperature=0.0,
+        purpose="semantic",
+        model=settings.LLM_SEMANTIC_MODEL or None,
     )
 
 

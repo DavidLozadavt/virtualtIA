@@ -149,6 +149,9 @@ TURN_OUTPUT_KEYS = (
     "voice_action", "voice_action_payload",
     "needs_clarification", "clarification_question", "needs_input",
     "needs_auth", "pending_reservation", "llm_error", "_fallback_reply",
+    # Resultado de navegación y respuestas de SchoolSena: valen sólo para su turno.
+    "nav_target", "nav_options", "nav_not_found", "nav_unavailable", "quick_replies",
+    "is_greeting", "access_denied", "fallback", "error", "profile", "geo_info",
 )
 
 

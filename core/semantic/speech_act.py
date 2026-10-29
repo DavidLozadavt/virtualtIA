@@ -139,7 +139,10 @@ def _assign_roles(toks: List[str], text_norm: str) -> tuple:
     for idx, tok in enumerate(toks):
         s = phonetic_stem(tok)
         claimed = False
-        if tok in lx.CALENDAR_WORDS or tok in lx.MERIDIEM_FORMS:
+        if tok in lx.PLACE_NAME_FORMS:
+            # Un nombre de ciudad es el DÓNDE de la consulta, no un marco.
+            claimed = True
+        elif tok in lx.CALENDAR_WORDS or tok in lx.MERIDIEM_FORMS:
             frames.add("temporal")
             claimed = True
         elif is_clock_numeral(toks, idx):
