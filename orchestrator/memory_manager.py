@@ -152,6 +152,7 @@ TURN_OUTPUT_KEYS = (
     # Resultado de navegación y respuestas de SchoolSena: valen sólo para su turno.
     "nav_target", "nav_options", "nav_not_found", "nav_unavailable", "quick_replies",
     "is_greeting", "access_denied", "fallback", "error", "profile", "geo_info",
+    "school_outcome", "_escalation_reason", "_source_project",
 )
 
 
@@ -197,9 +198,47 @@ def update_conversation_timestamp(conversation_id: str) -> None:
         conn.commit()
 
 
-def update_conversation_final_data(conversation_id: str, final_data: dict) -> None:
+def next_turn(conversation_id: str, final_data: dict) -> int:
+    """
+    Número del turno que empieza, asignado de forma atómica en la base.
+
+    Dos peticiones simultáneas de la misma conversación reciben números
+    distintos, y así la que termina tarde puede saber que ya no es la última
+    (ver `update_conversation_final_data`). Si la base no responde se cuenta en
+    memoria: el turno sigue siendo monótono dentro de la conversación.
+    """
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE lyra_conversations SET final_data = JSON_SET("
+                    "COALESCE(final_data, '{}'), '$._turn', "
+                    "COALESCE(CAST(JSON_EXTRACT(final_data, '$._turn') AS UNSIGNED), 0) + 1) "
+                    "WHERE id = %s",
+                    (conversation_id,),
+                )
+                cursor.execute(
+                    "SELECT CAST(JSON_EXTRACT(final_data, '$._turn') AS UNSIGNED) AS t "
+                    "FROM lyra_conversations WHERE id = %s",
+                    (conversation_id,),
+                )
+                row = cursor.fetchone() or {}
+            conn.commit()
+        value = row.get("t") if isinstance(row, dict) else (row[0] if row else None)
+        if value:
+            return int(value)
+    except Exception as exc:
+        logger.warning("No se pudo numerar el turno en la base (%s); se cuenta en memoria.", exc)
+    return int((final_data or {}).get("_turn") or 0) + 1
+
+
+def update_conversation_final_data(conversation_id: str, final_data: dict, turn: int = None) -> None:
     """
     Persist final_data JSON in the conversation.
+
+    Con `turn`, sólo se escribe si ningún turno posterior empezó mientras éste
+    se procesaba: la respuesta tardía de una petición vieja no puede pisar el
+    estado que ya dejó (o está dejando) la nueva.
 
     Guardar el estado es un efecto secundario del turno, no el turno. Si algún
     valor no es serializable —los precios llegan de MySQL como `Decimal`— se
@@ -215,10 +254,22 @@ def update_conversation_final_data(conversation_id: str, final_data: dict) -> No
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE lyra_conversations SET final_data = %s WHERE id = %s",
-                    (payload, conversation_id),
-                )
+                if turn:
+                    cursor.execute(
+                        "UPDATE lyra_conversations SET final_data = %s WHERE id = %s "
+                        "AND COALESCE(CAST(JSON_EXTRACT(final_data, '$._turn') AS UNSIGNED), 0) <= %s",
+                        (payload, conversation_id, int(turn)),
+                    )
+                    if cursor.rowcount == 0:
+                        logger.info(
+                            "Turno %s superado por otro más reciente en %s: su estado no se guarda.",
+                            turn, conversation_id,
+                        )
+                else:
+                    cursor.execute(
+                        "UPDATE lyra_conversations SET final_data = %s WHERE id = %s",
+                        (payload, conversation_id),
+                    )
             conn.commit()
     except Exception as exc:
         logger.error("No se pudo persistir el contexto de la conversación: %s", exc)

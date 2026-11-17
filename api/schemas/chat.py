@@ -27,6 +27,9 @@ class ChatRequest(BaseModel):
     active_city: Optional[str] = Field(None, max_length=50, description="The currently selected city in the UI")
     active_company_id: Optional[str] = Field(None, description="The currently selected company ID in the business view")
     voice: Optional[bool] = Field(False, description="Request TTS audio response")
+    input_mode: Optional[str] = Field(
+        None, max_length=10,
+        description="'voice' si el mensaje viene del reconocimiento de voz: la respuesta trae display_message")
     nav_catalog: Optional[List[NavItem]] = Field(
         None, max_length=300,
         description="Secciones del menú que el usuario ve (ya filtradas por permisos). "
@@ -37,6 +40,10 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str = Field(..., description="Assistant's text response")
     conversation_id: str = Field(..., description="Conversation UUID")
+    turn_id: Optional[int] = Field(
+        default=None,
+        description=("Número del turno en la conversación, asignado por el servidor. El front descarta "
+                     "las acciones de una respuesta cuyo turno sea anterior al último que ya aplicó."))
     trust_level: int = Field(1, description="User trust level (1-5)")
     latency_ms: int = Field(0, description="Processing time in milliseconds")
     properties: list = Field(default=[], description="List of searched properties")
@@ -56,8 +63,29 @@ class ChatResponse(BaseModel):
             "guardado y se completa solo cuando vuelva autenticado."
         ),
     )
+    display_message: Optional[str] = Field(
+        default=None,
+        description=(
+            "Cómo mostrar en el chat el mensaje DICTADO del usuario (mayúscula, signos, tilde del "
+            "interrogativo). Sólo forma: las palabras no cambian y el texto literal es el que se guarda."
+        ),
+    )
+    narration: list = Field(
+        default=[],
+        description=(
+            "Lo que se dice en voz alta, en segmentos {text, business_id}: el front los "
+            "reproduce en orden y enfoca en el mapa el negocio de cada segmento cuando su "
+            "audio empieza a sonar."
+        ),
+    )
     pending_reservation: Optional[dict] = Field(
         default=None,
         description="Reserva acordada que espera autenticación (negocio, servicio, día y hora).",
     )
+    form_draft: Optional[dict] = Field(
+        default=None,
+        description=("School: estado del formulario que se arma en la conversación (título, preguntas, si está "
+                     "guardado). El front lo muestra como tarjeta compacta; el texto de `reply` ya lo describe."),
+    )
+    school_outcome: Optional[str] = Field(default=None, description="School: qué resolvió el turno (diagnóstico).")
 

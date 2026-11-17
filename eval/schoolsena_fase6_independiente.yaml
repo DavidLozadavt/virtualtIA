@@ -1,0 +1,63 @@
+# SchoolSena — conjunto INDEPENDIENTE de la fase 6 (continuidad de varios turnos).
+# Frases que no se usaron al desarrollar; corrido UNA sola vez.
+
+- id: o01
+  role: coordinador
+  turns:
+    - {say: "dame los tipos de pago", expect: not_integrated}
+    - {say: "sí porfa", expect: nav}
+- id: o02
+  role: coordinador
+  turns:
+    - {say: "quiero ver los medios de pago", expect: not_integrated}
+    - {say: "después", expect: offer_declined}
+- id: o03
+  role: coordinador
+  turns:
+    - {say: "muestrame los tipos de pago", expect: not_integrated}
+    - {say: "llevame", expect: nav}
+- id: f01
+  role: coordinador
+  turns:
+    - {say: "necesito montar un evento", expect: create_flow}
+    - {say: "Jornada de bienvenida", expect: create_flow}
+    - {say: "el primer lunes del proximo mes a las 8", expect: create_flow}
+    - {say: "ok", expect: create_flow}
+    - {say: "no, cancelalo", expect: create_cancelled}
+- id: f02
+  role: coordinador
+  turns:
+    - {say: "crea un formulario", expect: create_flow}
+    - {say: "espera, cuantos formularios hay", expect: get_formularios}
+    - {say: "sigamos con el formulario", expect: create_flow}
+- id: f03
+  role: coordinador
+  turns:
+    - {say: "programa un evento llamado Feria de emprendimiento", expect: create_flow}
+    - {say: "dentro de ocho dias a las 3 de la tarde", expect: create_flow}
+- id: x01
+  role: coordinador
+  turns:
+    - {say: "regionales", expect: nav}
+    - {say: "periodos", expect: nav}
+- id: x02
+  role: coordinador
+  turns:
+    - {say: "dame los eventos", expect: get_eventos}
+    - {say: "y los formularios?", expect: get_formularios}
+- id: s01
+  role: coordinador
+  turns:
+    - {say: "hazme un resumen de los eventos", expect: summary}
+- id: s02
+  role: coordinador
+  turns:
+    - {say: "que tengo pendiente?", expect: summary}
+- id: p01
+  role: coordinador
+  turns:
+    - {say: "cuales puedo consultar desde aqui", expect: permissions}
+- id: p02
+  role: coordinador
+  turns:
+    - {say: "que no puedo modificar", expect: permissions}

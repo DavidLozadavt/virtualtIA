@@ -75,6 +75,10 @@ def _semantic_result(understanding) -> dict:
         extra["_corrections"] = understanding.corrections
     if understanding.cancels_goal:
         extra["_cancel_booking"] = True
+    if understanding.propose:
+        extra["_propose"] = understanding.propose
+    if understanding.final:
+        extra["_final"] = True
 
     if understanding.disposition == Disposition.CLARIFY:
         return {
@@ -91,6 +95,22 @@ def _semantic_result(understanding) -> dict:
         "args": {**understanding.args, **extra},
         "_understanding": understanding,
     }
+
+def _business_named_by_one_word(word: str, state, mentioned_city) -> Optional[dict]:
+    """{business_id, business_name} si `word` sólo nombra parte de un negocio; None si nombra un rubro o servicio."""
+    try:
+        u = build_understanding(message=word, analysis=analyze_speech_act(word), state=state,
+                                mentioned_city=mentioned_city, allow_llm=False)
+    except Exception:
+        return None
+    best = u.grounding.best if u.grounding else None
+    if not best or best.kind != ConceptKind.BUSINESS:
+        return None
+    nombre = _normalize(best.label or "")
+    if _normalize(word) == nombre:
+        return None  # nombró el negocio entero
+    return {"business_id": best.entity_id, "business_name": best.label, "term": word}
+
 
 def _extract_service_name(text: str) -> Optional[str]:
     """
@@ -224,6 +244,26 @@ _SPANISH_ANCHOR_WORDS = {
 }
 
 
+def _is_keyboard_mash(word: str) -> bool:
+    """Una sola 'palabra' que es un teclazo: consonantes seguidas, sin vocales o un patrón repetido."""
+    # "holaaaaaaa" es "hola" alargado, no un teclazo.
+    t = re.sub(r"(.)\1{2,}", r"\1", (word or "").strip().lower())
+    if len(t) < 5 or not t.isalpha():
+        return False
+    # La risa ("jajaja", "jejeje") es conversación, no un teclazo.
+    if re.fullmatch(r"(?:[jh][aeiou]){2,}[jh]?", t):
+        return False
+    # El español admite cuatro consonantes seguidas ("construcción",
+    # "instrumentos", "inscripción", "abstracto"): el teclazo empieza en cinco.
+    if re.search(r"[bcdfghjklmnñpqrstvwxyz]{5,}", t):
+        return True
+    vowels = sum(1 for c in t if c in "aeiouáéíóúü")
+    if vowels == 0 or vowels / len(t) < 0.2:
+        return True
+    # Un mismo trozo repetido ("asdasd", "qweqwe").
+    return len(t) >= 6 and (t[:3] == t[3:6] or t[:len(t) // 2] == t[len(t) // 2:])
+
+
 def _is_spam(text: str) -> bool:
     """
     Detecta de forma AGRESIVA si el texto es basura / spam / mash de teclado.
@@ -332,8 +372,23 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     logger.info(f"--- [DETECTOR V2.6] Texto: '{text}' | Project: '{project_id}' ---")
 
     if not text:
+        # "Por favor", "porfa", "gracias" a secas. Si Lyra acaba de proponer
+        # algo, "por favor" lo acepta: se lee contra el estado, no se descarta.
+        if project_id == "nexiservice":
+            _st = ConversationState.from_dict((current_context or {}).get("semantic_state"))
+            if _st.live_offer():
+                return _semantic_result(build_understanding(
+                    message=message, analysis=analyze_speech_act(message), state=_st,
+                    mentioned_city=mentioned_city))
         return {"intent": "conversation"}
-        
+
+    # Teclazos ("asdasdad", "adsada") antes que cualquier otra lectura: más
+    # abajo la búsqueda difusa de nombres los anclaba a un negocio cuyo nombre
+    # también es basura ("wdassdaasdad") y Lyra abría su perfil. Sólo palabras
+    # sueltas y sin el criterio de longitud (que marcaría "establecimientos").
+    if project_id == "nexiservice" and " " not in text and _is_keyboard_mash(text):
+        return {"intent": "spam"}
+
     current_context = current_context or {}
     last_assistant_msg = current_context.get("last_assistant_msg", "").lower()
     
@@ -445,8 +500,9 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
     # que repetirse.
     _too_short = (
         len(text) <= 3
-        and text not in ["si", "ok", "no", "dale", "vale", "zoom", "ver", "ir", "voy"]
-        and not semantic_state.pending_slot
+        and text not in ["si", "ok", "no", "dale", "vale", "zoom", "ver", "ir", "voy", "eso", "esa", "ese"]
+        and not semantic_state.is_collecting
+        and not semantic_state.live_offer()
     )
     if _too_short or _is_pure_greeting:
         logger.info(f"DETECCION: intent='greeting' (Fast Path) | is_pure={_is_pure_greeting}")
@@ -477,6 +533,20 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             if any(text == k for k in _FAREWELL_KEYWORDS):
                 logger.info("DETECCION: intent='farewell' (Fast Path post-greeting)")
                 return {"intent": "farewell", "args": {}}
+            # "Hola vida", "hola Nelson": saludo + UNA palabra. Si esa palabra sólo
+            # coincide con parte del nombre de un negocio, lo más probable es que
+            # se esté nombrando a alguien, no pidiendo ese negocio. Se saluda y se
+            # PROPONE el negocio: si era eso, basta un "sí".
+            # "Hola mi vida", "hola mi amor": apelativo cariñoso, no un negocio.
+            if project_id == "nexiservice" and re.fullmatch(r"(mi|mis)\s+\w+", text):
+                logger.info("DETECCION: saludo + apelativo '%s' → saludo", text)
+                return {"intent": "greeting", "args": {}}
+            _palabra = text
+            if project_id == "nexiservice" and " " not in _palabra and len(_palabra) > 2:
+                _vocativo = _business_named_by_one_word(_palabra, semantic_state, mentioned_city)
+                if _vocativo:
+                    logger.info("DETECCION: saludo + '%s' → saludo con propuesta de %s", text, _vocativo)
+                    return {"intent": "greeting_named", "args": _vocativo}
             break
 
 
@@ -743,7 +813,7 @@ def detect_intent(message: str, project_id: str, mentioned_city: Optional[str] =
             mentioned_city=mentioned_city,
             temporal=_temporal_slots(text, mentioned_date),
         )
-        if _understanding.disposition != Disposition.CLARIFY:
+        if _understanding.disposition != Disposition.CLARIFY or _understanding.final:
             return _semantic_result(_understanding)
         _semantic_fallback = _understanding
         logger.info("SEMÁNTICA: sin lectura clara → se consultan las reglas específicas")

@@ -267,3 +267,33 @@ def phrase_overlap(query: str, target: str) -> float:
         elif any(stem_compatible(qs, ts) for ts in t):
             hits += 0.8
     return hits / len(q)
+
+
+def strict_closeness(word: str, concept: str) -> float:
+    """
+    1.0 si es la misma palabra o raíz; 0.95 si es una errata o una variante
+    fonética; 0 si no.
+
+    Más estricta que `stem_compatible`, que acepta cualquier prefijo común de
+    4 letras ("entro"/"entrego", "activos"/"actividad", "medico"/"medicina").
+    Sirve donde un falso parecido cuesta caro: decidir una capacidad o afirmar
+    que un negocio ofrece algo.
+    """
+    word, concept = normalize(word), normalize(concept)
+    ws, cs = stem(word), stem(concept)
+    if word == concept or ws == cs:
+        return 1.0
+    if len(word) < 4 or len(concept) < 4:
+        return 0.0
+    # El recorte de sufijos no es simétrico ("estudiante" → "estud",
+    # "estudiantes" → "estudiant"): se comparan también las palabras enteras.
+    for a, b in ((word, concept), (phonetic(ws), phonetic(cs)), (phonetic(word), phonetic(concept))):
+        if a == b:
+            return 0.95
+        short, long_ = sorted((a, b), key=len)
+        if len(short) >= 5 and long_.startswith(short) and len(short) / len(long_) >= 0.7:
+            return 0.95
+    pw, pc = phonetic(word), phonetic(concept)
+    if len(pw) >= 5 and len(pc) >= 5 and SequenceMatcher(None, pw, pc).ratio() >= 0.84:
+        return 0.95
+    return 0.0

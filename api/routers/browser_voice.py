@@ -146,11 +146,10 @@ async def synthesize_speech(req: SynthesizeRequest):
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
     # Trigger stop signal to frontend to prevent overlapping audio
-    trigger_pusher_event("lyra-channel", "stop_audio", {"project_id": req.project_id})
 
     engine = get_voice_engine()
     result = await engine.synthesize(
-        text=req.text,
+        text=_spoken(req.text, req.project_id),
         voice=req.voice or voice_cfg.get("tts_voice", "nova"),
         tts_model=voice_cfg.get("tts_model", "tts-1-hd"),  # HD = más humano
         speed=req.speed or 1.0,
@@ -169,6 +168,12 @@ async def synthesize_speech(req: SynthesizeRequest):
 
 from fastapi.responses import StreamingResponse
 
+def _spoken(text: str, project_id: str) -> str:
+    """Versión hablada de la respuesta (NexiService y SchoolSena; los demás, sin cambios)."""
+    from core.speech_text import SPEECH_PROJECTS, to_speech
+    return to_speech(text) if project_id in SPEECH_PROJECTS else text
+
+
 @browser_voice_router.get("/synthesize_stream")
 async def synthesize_speech_stream(
     text: str, 
@@ -184,12 +189,13 @@ async def synthesize_speech_stream(
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
-    # Trigger stop signal to frontend to prevent overlapping audio
-    trigger_pusher_event("lyra-channel", "stop_audio", {"project_id": project_id})
+    # Antes se emitía "stop_audio" por Pusher en cada frase: ningún front lo
+    # escucha, el canal es compartido entre proyectos (y entre local y
+    # producción) y cada emisión abría una conexión TLS antes de sintetizar.
 
     engine = get_voice_engine()
     generator = engine.synthesize_stream(
-        text=text,
+        text=_spoken(text, project_id),
         voice=voice_cfg.get("tts_voice", "es-ES-AlvaroNeural"),
         speed=speed,
     )
@@ -217,5 +223,6 @@ async def get_voice_config_public(project_id: str):
         "language": voice_cfg.get("language", "es"),
         "tts_voice": voice_cfg.get("tts_voice", "nova"),
         "bot_name": bot_name,
-        "bot_greeting": config.get("greeting") or f"¡Hola! Bienvenido al portal de NexiService Colombia. Soy {bot_name}, tu guía para descubrir negocios y gestionar tus servicios. ¿Qué estás buscando hoy?",
+        # El saludo de respaldo no nombra ningún producto: cada proyecto trae el suyo.
+        "bot_greeting": config.get("greeting") or f"¡Hola! Soy {bot_name}. ¿En qué te ayudo?",
     }

@@ -1,0 +1,53 @@
+# SchoolSena — conjunto INDEPENDIENTE de la fase 5 (módulos, permisos, contexto,
+# compuestas, escritura). Frases nuevas con erratas y abreviaturas, escritas al
+# cerrar la fase y corridas UNA sola vez. Permisos por perfil simulados por el
+# arnés (los de sus roles en la base local).
+
+# ── Consultar vs navegar en módulos nuevos ──
+- {id: m01, role: coordinador, turns: [{say: "cuales regionales hay", expect: get_regionales}]}
+- {id: m02, role: coordinador, turns: [{say: "abre regionales", expect: nav}]}
+- {id: m03, role: coordinador, turns: [{say: "q eventos tenemos programados", expect: get_eventos}]}
+- {id: m04, role: coordinador, turns: [{say: "formularios publicados", expect: get_formularios}]}
+- {id: m05, role: coordinador, turns: [{say: "muestrame las carpetas viajeras", expect: get_carpetas_viajeras}]}
+- {id: m06, role: coordinador, turns: [{say: "conceptos de la configuracion de pagos", expect: get_configuracion_pagos}]}
+- {id: m07, role: coordinador, turns: [{say: "cuantos eventos hay", expect: get_eventos}]}
+- {id: m08, role: coordinador, turns: [{say: "llevame a medios de pago", expect: nav}]}
+- {id: m09, role: coordinador, turns: [{say: "informes de pago de los instructores", expect: [nav, not_integrated, denied]}]}
+
+# ── Contexto ──
+- id: c01
+  role: coordinador
+  turns:
+    - {say: "eventos", expect: nav}
+    - {say: "y cuantos hay?", expect: get_eventos}
+- id: c02
+  role: coordinador
+  turns:
+    - {say: "dime los formularios", expect: get_formularios}
+    - {say: "cuales estan activos", expect: get_formularios}
+    - {say: "el primero", expect: module_row}
+- id: c03
+  role: coordinador
+  turns:
+    - {say: "las sedes porfa", expect: get_sedes}
+    - {say: "llevame alla", expect: nav}
+
+# ── Compuestas ──
+- {id: k01, role: coordinador, turns: [{say: "abreme eventos o dime cuantos hay", expect: clarify}]}
+
+# ── Permisos ──
+- {id: p01, role: aprendiz, turns: [{say: "que permisos tengo", expect: permissions}]}
+- {id: p02, role: aprendiz, turns: [{say: "puedo crear formularios?", expect: permissions}]}
+- {id: p03, role: aprendiz, turns: [{say: "por que no puedo entrar a nomina", expect: permissions}]}
+- {id: p04, role: coordinador, turns: [{say: "a que modulos tengo acceso", expect: permissions}]}
+- {id: p05, role: coordinador, turns: [{say: "que puedo hacer en gestion laboral", expect: permissions}]}
+
+# ── Escritura ──
+- {id: w01, role: coordinador, turns: [{say: "necesito programar un evento nuevo", expect: create_flow}]}
+- {id: w02, role: coordinador, turns: [{say: "quiero borrar una sede", expect: not_integrated}]}
+- {id: w03, role: aprendiz, turns: [{say: "crear evento", expect: denied}]}
+
+# ── Sin acceso y regresión de lo propio ──
+- {id: n01, role: aprendiz, turns: [{say: "dame las regionales", expect: denied}]}
+- {id: n02, role: aprendiz, turns: [{say: "mis notas", expect: grades}]}
+- {id: n03, role: instructor, turns: [{say: "mi horario de mañana", expect: "schedule:tomorrow"}]}

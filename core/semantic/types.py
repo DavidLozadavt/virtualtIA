@@ -213,6 +213,25 @@ class ConversationState:
     #: Reemplazos que hizo el usuario: [{"slot", "from", "to"}]. Sirven para
     #: saber que un dato ya fue corregido y no volver a proponer el anterior.
     corrections: List[Dict[str, Any]] = field(default_factory=list)
+    #: Número del turno en curso. Lo fija ChatService al empezar cada petición
+    #: (`begin_turn`); todo lo que caduca se mide contra él.
+    turn: int = 0
+    #: Turno en que Lyra hizo la pregunta de `pending_slot`.
+    asked_turn: int = 0
+    #: Lo que Lyra PROPUSO en su respuesta: {"intent", "args", "label",
+    #: "options", "turn"}. Un "sí" sólo puede aceptar una propuesta del turno
+    #: inmediatamente anterior (`live_offer`). Es lo que separa "recordar" de
+    #: "volver a ejecutar": una intención vieja sigue en memoria, pero ya no es
+    #: algo que el usuario pueda aceptar con una palabra.
+    offer: Optional[Dict[str, Any]] = None
+    #: Listas mostradas antes de la actual, de la más vieja a la más reciente:
+    #: [{"category", "label", "domain", "items"}]. Permiten "volvamos a los
+    #: restaurantes" sin reactivar nada de lo que se hacía con ellas.
+    history: List[Dict[str, Any]] = field(default_factory=list)
+    #: Reserva que quedó a medias cuando el usuario cambió de tema. Se conserva
+    #: como dato, NO como objetivo: sólo vuelve a estar en curso si el usuario
+    #: lo pide ("retomemos la cita").
+    parked_booking: Dict[str, Any] = field(default_factory=dict)
 
     # ── serialización sobre final_data ──────────────────────────────────────
 
@@ -221,6 +240,8 @@ class ConversationState:
     #: Cuántas correcciones se conservan. Interesa la última palabra del
     #: usuario, no el historial completo de cambios de opinión.
     MAX_CORRECTIONS = 8
+    #: Cuántas listas anteriores se recuerdan.
+    MAX_HISTORY = 4
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -238,6 +259,11 @@ class ConversationState:
             "pending_slot": self.pending_slot,
             "confirmed": self.confirmed,
             "corrections": self.corrections,
+            "turn": self.turn,
+            "asked_turn": self.asked_turn,
+            "offer": self.offer,
+            "history": self.history,
+            "parked_booking": self.parked_booking,
         }
 
     @classmethod
@@ -258,6 +284,11 @@ class ConversationState:
             pending_slot=raw.get("pending_slot"),
             confirmed=list(raw.get("confirmed") or []),
             corrections=list(raw.get("corrections") or []),
+            turn=int(raw.get("turn") or 0),
+            asked_turn=int(raw.get("asked_turn") or 0),
+            offer=raw.get("offer") or None,
+            history=list(raw.get("history") or []),
+            parked_booking=dict(raw.get("parked_booking") or {}),
         )
 
     @classmethod
@@ -271,7 +302,22 @@ class ConversationState:
     # ── mutaciones ──────────────────────────────────────────────────────────
 
     def remember_list(self, kind: str, items: List[Dict[str, Any]]) -> None:
-        """Registra la lista que se le acaba de mostrar al usuario."""
+        """
+        Registra la lista que se le acaba de mostrar al usuario.
+
+        La lista de negocios que había antes no se pierde: pasa a `history`,
+        con el rubro del que trataba, para que el usuario pueda volver a ella.
+        """
+        previos = [p for p in self.presented if p.kind == ConceptKind.BUSINESS]
+        nuevos = {_as_int(i.get("id")) for i in items}
+        if kind == ConceptKind.BUSINESS and previos and {p.entity_id for p in previos} != nuevos:
+            ids_previos = {p.entity_id for p in previos}
+            self.history = [
+                h for h in self.history
+                if {i.get("entity_id") for i in h.get("items", [])} != ids_previos
+            ]
+            self.history.append(self.frame())
+            del self.history[:-self.MAX_HISTORY]
         self.presented = [
             PresentedItem(
                 kind=kind,
@@ -281,7 +327,7 @@ class ConversationState:
                 extra={
                     k: _as_json_safe(v)
                     for k, v in item.items()
-                    if k in ("address", "distance_km", "valor", "category")
+                    if k in ("address", "distance_km", "valor", "category", "lat", "lng")
                 },
             )
             for idx, item in enumerate(items, start=1)
@@ -291,6 +337,84 @@ class ConversationState:
         self.focus_kind = kind
         self.focus_id = _as_int(entity_id)
         self.focus_label = label
+
+    def frame(self) -> Dict[str, Any]:
+        """La lista de negocios actual, como marco al que se puede volver."""
+        items = [p for p in self.presented if p.kind == ConceptKind.BUSINESS]
+        cats = [p.extra.get("category") for p in items if p.extra.get("category")]
+        return {
+            "category": max(set(cats), key=cats.count) if cats else self.active_domain,
+            "label": self.active_domain_label,
+            "domain": self.active_domain,
+            "items": [p.to_dict() for p in items],
+        }
+
+    # ── el turno y lo que caduca con él ────────────────────────────────────
+
+    def begin_turn(self, turn: int) -> None:
+        """
+        Empieza el turno `turn`.
+
+        Lo que caduca se descarta aquí y además se comprueba al leerlo
+        (`live_offer`, `is_collecting`): si alguna ruta no pasa por este método,
+        lo viejo sigue sin poder ejecutarse.
+        """
+        self.turn = int(turn)
+        if self.offer and int(self.offer.get("turn") or 0) < self.turn - 1:
+            self.offer = None
+        if self.pending_slot and self.asked_turn and self.asked_turn < self.turn - 1:
+            self.pending_slot = None
+            self.pending_question = None
+
+    def propose(self, intent: str, args: Optional[Dict[str, Any]] = None, label: str = "",
+                options: Optional[List[Dict[str, Any]]] = None) -> None:
+        """
+        Anota lo que Lyra acaba de ofrecer hacer.
+
+        `options` se usa cuando la pregunta tiene alternativas ("¿ver sus
+        servicios o agendar?"): un "sí" a eso no elige ninguna.
+        """
+        self.offer = {
+            "intent": intent,
+            "args": {k: _as_json_safe(v) for k, v in (args or {}).items()},
+            "label": label,
+            "options": options or [],
+            "turn": self.turn,
+        }
+
+    def live_offer(self) -> Optional[Dict[str, Any]]:
+        """La propuesta de la respuesta inmediatamente anterior, o None."""
+        o = self.offer
+        if not o or self.turn <= 0:
+            return None
+        return o if int(o.get("turn") or 0) == self.turn - 1 else None
+
+    def withdraw_offer(self) -> None:
+        self.offer = None
+
+    def park_booking(self) -> bool:
+        """
+        El usuario se fue a otro tema: la reserva deja de estar en curso.
+
+        Lo acordado queda como dato (`parked_booking`) y el objetivo se cierra.
+        Devuelve True si había algo en curso.
+        """
+        datos = {k: v for k, v in self.booking.items() if v}
+        if not (datos or self.goal):
+            return False
+        if datos:
+            self.parked_booking = dict(datos)
+        self.clear_booking()
+        return True
+
+    def resume_booking(self) -> bool:
+        """Vuelve a poner en curso la reserva estacionada, si la hay."""
+        if not self.parked_booking:
+            return False
+        self.booking = dict(self.parked_booking)
+        self.parked_booking = {}
+        self.goal = "booking"
+        return True
 
     def clear_booking(self) -> None:
         self.booking = {}
@@ -314,6 +438,7 @@ class ConversationState:
         """
         self.pending_slot = slot
         self.pending_question = question
+        self.asked_turn = self.turn
         if goal:
             self.goal = goal
 
@@ -349,7 +474,10 @@ class ConversationState:
     @property
     def is_collecting(self) -> bool:
         """¿Hay un objetivo abierto esperando un dato concreto?"""
-        return bool(self.pending_slot)
+        if not self.pending_slot:
+            return False
+        # Una pregunta de hace más de un turno ya no es la pregunta abierta.
+        return not (self.asked_turn and self.turn and self.asked_turn < self.turn - 1)
 
     def missing(self, required: Sequence[str]) -> List[str]:
         """Ranuras que todavía faltan, en el orden en que se piden."""
@@ -425,6 +553,14 @@ class Understanding:
     #: estado: sin esta señal la reserva seguía viva en la base de datos y
     #: reaparecía en el turno siguiente.
     cancels_goal: bool = False
+    #: La aclaración es la lectura definitiva: no se prueban después las reglas
+    #: por palabras clave. Se usa cuando el mensaje es una respuesta corta ("sí",
+    #: "el segundo") sin nada a lo que pueda referirse: adivinar es justo lo
+    #: que no se debe hacer.
+    final: bool = False
+    #: Propuesta que acompaña a la aclaración: {"intent", "args", "label",
+    #: "options"}. El interceptor la registra para que el "sí" siguiente la acepte.
+    propose: Optional[Dict[str, Any]] = None
 
     def note(self, message: str) -> "Understanding":
         self.trace.append(message)

@@ -128,7 +128,11 @@ async def lifespan(app: FastAPI):
                 if pusher_client:
                     pusher_client.trigger('lyra-channel', 'personality_updated', {
                         'bot_name': cfg.get("assistant_name", "Nexo"),
-                        'bot_greeting': cfg.get("greeting", "¡Hola!")
+                        'bot_greeting': cfg.get("greeting", "¡Hola!"),
+                        # El canal es compartido: el front de cada proyecto
+                        # ignora lo que no es suyo (SchoolSena reemplazaba su
+                        # saludo por el de NexiService al arrancar Lyra).
+                        'project_id': 'nexiservice'
                     })
             except Exception:
                 pass
@@ -146,7 +150,11 @@ async def lifespan(app: FastAPI):
                         if pusher_client:
                             pusher_client.trigger('lyra-channel', 'personality_updated', {
                                 'bot_name': cfg.get("assistant_name", "Nexo"),
-                                'bot_greeting': cfg.get("greeting", "¡Hola!")
+                                'bot_greeting': cfg.get("greeting", "¡Hola!"),
+                        # El canal es compartido: el front de cada proyecto
+                        # ignora lo que no es suyo (SchoolSena reemplazaba su
+                        # saludo por el de NexiService al arrancar Lyra).
+                        'project_id': 'nexiservice'
                             })
                             logger.info(f"[Pusher] YAML editado. Sync rápido al Frontend -> {cfg.get('assistant_name')}")
                     except Exception as e:

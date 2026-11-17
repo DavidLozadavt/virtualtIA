@@ -1,0 +1,98 @@
+# Conversaciones INDEPENDIENTES de la fase 4 (refinar lo mostrado y reservas).
+# Escritas al cerrar la fase con frases que no se usaron al desarrollar, y
+# corridas UNA sola vez. Mismo formato que dialogos_fase3.yaml.
+# Expectativas corregidas tras la primera corrida SOLO en su forma: el evaluador
+# compara sin tildes ni mayúsculas, y 'no_booking' no aplica a turnos en que el
+# usuario pidió la cita. Resultado de la primera corrida: 5/12 (ver informe fase 4).
+
+- id: f01_entre_todos_el_mas_economico
+  turns:
+    - say: "muéstrame restaurantes"
+    - say: "entre todos esos, ¿cuál sale más económico?"
+      no_booking: true
+      reply_re: "economico"
+      reply_not_re: "No encontré"
+
+- id: f02_alguno_con_parqueadero
+  turns:
+    - say: "busca restaurantes"
+    - say: "de esos, ¿alguno tiene parqueadero?"
+      no_booking: true
+      reply_re: "registrad"
+
+- id: f03_de_las_que_mostraste_recomienda
+  turns:
+    - say: "busca restaurantes"
+    - say: "de los que me mostraste, ¿cuál me sugieres?"
+      no_booking: true
+      reply_re: "recomiendo|nota"
+
+- id: f04_el_tercero_con_postre
+  turns:
+    - say: "busca restaurantes"
+    - say: "el tercero, pero que tenga postre"
+      no_booking: true
+      reply_re: "parrilla"
+
+- id: f05_quita_sin_carta
+  turns:
+    - say: "busca restaurantes"
+    - say: "de los anteriores quita los que no tengan carta"
+      no_booking: true
+      reply_re: "descart|ninguno se descarta"
+
+- id: f06_resumen_y_ok
+  turns:
+    - say: "quiero una cita en Consultorio Médico Vida Sana"
+    - say: "consulta de medicina general"
+    - say: "el viernes a las 10"
+      reply_re: "la agendo\\?"
+    - say: "ok"
+      no_booking: true
+      reply_re: "si.*no"
+
+- id: f07_resumen_y_no
+  turns:
+    - say: "quiero una cita en Consultorio Médico Vida Sana"
+    - say: "consulta de medicina general"
+    - say: "el viernes a las 10"
+    - say: "no"
+      forbid_action: [require_auth]
+      reply_not_re: "quedo agendada"
+
+- id: f08_resumen_y_cambio_de_hora
+  turns:
+    - say: "quiero una cita en Consultorio Médico Vida Sana"
+    - say: "consulta de medicina general"
+    - say: "el viernes a las 10"
+    - say: "mejor a las 11"
+      reply_re: "11:00"
+
+- id: f09_de_esos_sin_decir_que
+  turns:
+    - say: "busca restaurantes"
+    - say: "de esos cuatro"
+      no_booking: true
+      reply_re: "que quieres saber"
+
+- id: f10_abren_domingos
+  turns:
+    - say: "busca restaurantes"
+    - say: "¿cuál de ellos abre los domingos?"
+      no_booking: true
+      reply_re: "horario"
+
+- id: f11_hora_suelta_tras_lista
+  turns:
+    - say: "busca restaurantes"
+    - say: "a las 13"
+      no_booking: true
+      reply_not_re: "negocios publicados"
+
+- id: f12_resumen_y_sin_sesion
+  turns:
+    - say: "quiero una cita en Consultorio Médico Vida Sana"
+    - say: "consulta de medicina general"
+    - say: "el viernes a las 9"
+    - say: "sí, confírmala"
+      reply_re: "inicies sesion"

@@ -139,7 +139,14 @@ def _assign_roles(toks: List[str], text_norm: str) -> tuple:
     for idx, tok in enumerate(toks):
         s = phonetic_stem(tok)
         claimed = False
-        if tok in lx.PLACE_NAME_FORMS:
+        if tok in lx.RETURN_FORMS:
+            frames.add("return")
+            claimed = True
+        elif tok == "mejor" and _discourse_mejor(toks, idx):
+            # "MEJOR busca veterinarias", "mejor no": "mejor" cambia de plan,
+            # no pide el mejor de nada.
+            claimed = True
+        elif tok in lx.PLACE_NAME_FORMS:
             # Un nombre de ciudad es el DÓNDE de la consulta, no un marco.
             claimed = True
         elif tok in lx.CALENDAR_WORDS or tok in lx.MERIDIEM_FORMS:
@@ -161,8 +168,24 @@ def _assign_roles(toks: List[str], text_norm: str) -> tuple:
 
     if _contains_phrase(text_norm, lx.REVIEW_PHRASES):
         frames.add("review")
+    if _contains_phrase(text_norm, lx.RETURN_PHRASES) and (
+            frames & {"return"} or text_norm.startswith(("a lo", "lo ", "a la lista"))):
+        frames.add("return")
 
     return frames, free_stems, free_tokens
+
+
+def _discourse_mejor(toks: List[str], idx: int) -> bool:
+    """¿Este "mejor" es un cambio de plan ("mejor busca…", "mejor no") y no un superlativo?"""
+    prev = toks[idx - 1] if idx > 0 else ""
+    if prev in lx.ARTICLES or prev in ("lo", "los", "las", "el", "la"):
+        return False  # "el mejor", "los mejores"
+    nxt = toks[idx + 1] if idx + 1 < len(toks) else ""
+    if not nxt or nxt in lx.NEGATIVE_FORMS or nxt in lx.DISCOURSE_MARKERS:
+        return bool(nxt)
+    from core.semantic.morphology import in_stem_set
+    # Le sigue un verbo de clase cerrada (busca, muéstrame, dame, llévame, quiero…).
+    return in_stem_set(phonetic_stem(nxt), lx.FUNCTION_STEMS) and nxt not in lx.ARTICLES
 
 
 def state_bearing_frames(frames: Set[str]) -> bool:
@@ -278,6 +301,17 @@ def _content_residue(toks: List[str]) -> List[str]:
         if in_stem_set(phonetic_stem(tok), lx.FRAME_STEMS):
             continue
         if len(tok) <= 1:
+            continue
+        # Un numeral no es un concepto del catálogo: es una hora, una cantidad o
+        # una posición, y de eso se ocupan el reloj, la cantidad y el ordinal.
+        # Sólo "a las 9" se salvaba (por tener una cifra); "a las 11" mandaba
+        # "11" a buscarse como negocio y acababa en el directorio.
+        if tok.isdigit():
+            continue
+        # Un gerundio es un verbo en curso ("estoy CONFIGURANDO mi empresa"), no
+        # la cosa que se busca. Leído como contenido, Lyra respondía "encontré 5
+        # configurandos".
+        if len(tok) > 6 and tok.endswith(("ando", "iendo", "yendo")):
             continue
         residue.append(tok)
     return residue
@@ -469,12 +503,15 @@ def _analyze_plain(message: str) -> Analysis:
         return result(Act.REFERENCE, 0.88)
 
     blocking_frames = frames - {"offering"}
+    # Un ordinal ("el primero") señala algo que ya se mostró: "¿cómo funciona
+    # el primero?" pregunta por ese negocio, no por el asistente.
+    points_back = ordinal is not None
     # "¿Cómo funciona esto?" pregunta por el funcionamiento del propio sistema.
     # La manera es la clave: no se está preguntando qué hay, sino cómo se usa.
-    if manner_q and has_agent_action and not residue and not blocking_frames:
+    if manner_q and has_agent_action and not residue and not blocking_frames and not points_back:
         return result(Act.AGENT_CAPABILITY, 0.85, agent_directed=True)
 
-    if has_agent_action and not residue and not blocking_frames and not third_person_agent:
+    if has_agent_action and not residue and not blocking_frames and not third_person_agent and not points_back:
         if second_person_verb or second_person_mark or has_potential or not toks[0:1]:
             return result(Act.AGENT_CAPABILITY, 0.9, agent_directed=True)
         return result(Act.AGENT_CAPABILITY, 0.75, agent_directed=True)
@@ -670,6 +707,10 @@ def _social_act(text_norm: str, toks: List[str], token_set: Set[str], residue: L
     if nucleo and nucleo <= lx.AFFIRMATIVE_FORMS:
         return Act.AFFIRM
     if nucleo and nucleo <= lx.NEGATIVE_FORMS:
+        return Act.DENY
+    # "Mejor no", "no gracias", "ahora no": un "no" con compañía que no le
+    # cambia la función sigue siendo una negativa.
+    if "no" in nucleo and nucleo - {"no"} <= (lx.NEGATION_COMPANIONS | lx.POLITENESS | lx.NEGATIVE_FORMS):
         return Act.DENY
 
     if nucleo and nucleo <= lx.BACKCHANNEL_FORMS:

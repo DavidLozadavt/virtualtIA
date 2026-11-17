@@ -29,6 +29,7 @@ from core.wording import (
     is_feminine as _feminine,
     natural_list,
     pluralize_es,
+    singularize_es,
     one_line as _one_line,
     them,
     user_facing_label,
@@ -54,6 +55,7 @@ class BookingState:
     WAITING_AUTH      = "waiting_auth"       # Todo acordado; falta que el usuario entre
     WAITING_DATE      = "waiting_date"       # Tenemos hora y servicio, falta fecha
     WAITING_PROF      = "waiting_prof"       # Hay múltiples profesionales, el usuario elige
+    WAITING_CONFIRM   = "waiting_confirm"    # Resumen mostrado; falta el sí del usuario
     COMPLETE          = "complete"           # Reserva confirmada
 
 
@@ -74,7 +76,7 @@ _SLOT_TO_STATE: Dict[str, str] = {
 #: Intenciones que continúan una reserva en curso. Cualquier otra es un cambio
 #: de tema y cierra la pregunta abierta, pero nunca lo ya acordado.
 _CONTINUES_BOOKING = frozenset({
-    "request_appointment", "confirm_appointment", "semantic_clarify",
+    "request_appointment", "confirm_appointment", "semantic_clarify", "execute_booking",
 })
 
 
@@ -104,13 +106,20 @@ def clear_booking_state(final_data: Dict) -> None:
 #: Identificadores que la aplicación usa cuando NO hay nadie autenticado.
 _ANONYMOUS_IDS = frozenset({"", "user_client_demo", "unknown", "guest", "none", "null"})
 
+#: Aviso del front: el usuario acaba de iniciar sesión o registrarse.
+AUTH_EVENT = "__AUTH_COMPLETED__"
+
 
 def is_authenticated(user_data: Dict) -> bool:
-    """¿Hay una sesión real detrás de este mensaje?"""
-    ext_id = str((user_data or {}).get("external_user_id") or "").strip()
-    if not ext_id or ext_id.lower() in _ANONYMOUS_IDS:
-        return False
-    return not ext_id.startswith("anon_")
+    """
+    ¿Hay una sesión real detrás de este mensaje?
+
+    Sólo cuenta la identidad verificada contra la pasarela a partir del token
+    (`verified_identity`, la pone `chat_service`). El `user_id` que manda el
+    navegador se puede escribir a mano: con él se saludaba por el nombre a
+    quien fuera, pero nunca debió bastar para reservar a nombre de nadie.
+    """
+    return bool((user_data or {}).get("verified_identity"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -411,6 +420,10 @@ def _filter_services_by_subcategory(services: List[Dict], subcategory: str) -> L
 # § 6. PRE-LLM INTERCEPTOR (Entry Point)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+#: Proyecto al que pertenece todo lo que produce este módulo (ver project_scope).
+PROJECT = "nexiservice"
+
+
 async def pre_llm_interceptor(project_id, intent_name, args, context):
     if project_id != "nexiservice":
         return None
@@ -428,6 +441,21 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
         "[INTERCEPTOR] intent=%s | state=%s | user_text='%s'",
         intent_name, current_state, user_text
     )
+
+    # Un síntoma contado ("hace días me duele mucho la cabeza") no es una
+    # búsqueda, ni una reserva, ni una charla que se responde con un saludo:
+    # se atiende con prudencia y sin tocar lo que la conversación tenía en
+    # curso. Si además pide buscar o reservar atención, eso manda.
+    from core.semantic.health import health_concern, asks_for_care, health_reply
+    _level = health_concern(user_text)
+    if _level and not asks_for_care(user_text):
+        # La oferta "¿te busco centros médicos?" queda registrada como propuesta
+        # de ESTE turno: un "sí" en el siguiente la acepta, y sólo en el siguiente.
+        _st = ConversationState.load(final_data)
+        _st.propose("search_care", {"level": _level}, label="buscar atención médica")
+        _st.save(final_data)
+        return {"reply": health_reply(_level, can_search_care=True), "final_data": final_data,
+                "voice_action": None, "properties": []}
 
     # Memoria semántica de la conversación: qué se mostró, qué está en foco y
     # qué ranuras de reserva ya se llenaron. Se lee al entrar y se guarda al
@@ -450,12 +478,29 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
     # estás?" recibía "tu cita ya ha sido agendada" por una reserva que había
     # dejado a medias días atrás. Una cita no se crea sin que el usuario lo pida
     # en ese turno.
+    # El front avisa con AUTH_EVENT cuando el usuario termina de entrar o de
+    # registrarse. Ese aviso no es un mensaje del usuario: sólo dispara la
+    # reanudación, que vuelve a validar sesión, horario y autorización.
+    if user_text == AUTH_EVENT:
+        if not is_authenticated(user_data):
+            return {"reply": "Todavía no veo tu sesión iniciada. Cuando entres, sigo con tu reserva.",
+                    "final_data": final_data}
+        if current_state == BookingState.WAITING_AUTH:
+            reanudada = await _resume_pending_reservation(user_data, final_data)
+            if reanudada:
+                return reanudada
+        return {"reply": "¡Listo, ya iniciaste sesión! ¿En qué te ayudo?", "final_data": final_data}
+
     if current_state == BookingState.WAITING_AUTH and is_authenticated(user_data):
-        if intent_name in _CONTINUES_BOOKING:
+        if intent_name == "confirm_appointment" and final_data.get("_pending_reservation"):
+            # "Sí, confírmala" ya con sesión: es la autorización expresa de ESA reserva.
+            final_data["_pending_reservation"]["authorized"] = True
+        if intent_name in _CONTINUES_BOOKING and intent_name != "execute_booking":
             return await _resume_pending_reservation(user_data, final_data)
-        oferta = _offer_pending_reservation(final_data)
-        if oferta:
-            return oferta
+        if intent_name != "execute_booking":
+            oferta = _offer_pending_reservation(final_data)
+            if oferta:
+                return oferta
 
     # ══════════════════════════════════════════════════════════════════════════
     # PRIORIDAD ABSOLUTA: Estado WAITING_FOR_NAME
@@ -525,6 +570,69 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
         sem_state.suspend()
         sem_state.save(final_data)
 
+    # Buscar OTRA cosa no es un desvío dentro de la reserva: es dejarla. Lo
+    # acordado se guarda como dato (por si dice "retomemos la cita") pero deja
+    # de estar en curso, y con ello ninguna confirmación, hora o "el segundo"
+    # posterior puede terminar agendando en el negocio de antes.
+    if intent_name in _CHANGES_DOMAIN and not args.get("_pending_booking") and sem_state.park_booking():
+        logger.info("[DIÁLOGO] nuevo dominio (intent=%s): la reserva en curso queda estacionada: %s",
+                    intent_name, sem_state.parked_booking)
+        clear_booking_state(final_data)
+        for _k in _BOOKING_KEYS:
+            final_data.pop(_k, None)
+        sem_state.save(final_data)
+
+    # ── Respuestas a una propuesta y vuelta a un contexto anterior ──────────
+    if intent_name == "greeting_named":
+        saludo = _handle_conversational("greeting", project_config, conversation_id, _resp, final_data, context)
+        termino = args.get("term") or ""
+        from tools.nexiservice import search_businesses as _sb
+        hallado = await _sb(category=termino, city=context.get("active_city"), grounded=True)
+        negocio = (hallado.get("businesses") or [None])[0] if hallado.get("success") else None
+        if negocio:
+            ref = {"business_id": negocio["id"], "business_name": negocio["name"]}
+            sem_state.propose("fly_to_business", ref, label=f"mostrar {negocio['name']}")
+            sem_state.save(final_data)
+            saludo["reply"] = (saludo.get("reply") or "¡Hola!").rstrip() + (
+                f" Si buscabas **{negocio['name']}**, dime y te lo muestro en el mapa.")
+            saludo["final_data"] = final_data
+        return saludo
+
+    if intent_name == "decline_offer":
+        sem_state.withdraw_offer()
+        sem_state.save(final_data)
+        return {"reply": "Listo, lo dejamos así. Si necesitas otra cosa, dime.",
+                "final_data": final_data, "voice_action": None}
+
+    # Con un resumen de reserva sobre la mesa, "sí, agéndala" o "confírmala"
+    # aceptan ESE resumen (si no cambian ningún dato), y un "listo" u "ok"
+    # suelto no basta: se le pregunta. Antes "agéndala" volvía a armar el
+    # resumen y "listo" se contestaba como un comentario sin más.
+    _offer = sem_state.live_offer()
+    if _offer and _offer.get("intent") == "execute_booking" and intent_name != "execute_booking":
+        if intent_name in ("request_appointment", "confirm_appointment") and not _changes_booking(args, _offer["args"]):
+            intent_name, args = "execute_booking", dict(_offer["args"])
+        elif _normalize(user_text).strip(" .!¡") in _WEAK_ASSENT:
+            intent_name, args = "execute_booking", dict(_offer["args"])
+
+    if intent_name == "execute_booking":
+        return await _handle_execute_booking(args, user_text, user_data, final_data, sem_state)
+
+    if intent_name == "refine_presented":
+        return await _handle_refine_presented(args, context, final_data, sem_state)
+
+    if intent_name == "recommend_with_requirements":
+        kind = args.get("kind") or ""
+        return await _recommend_with_requirements(
+            kind, args.get("requirements") or [], args.get("city") or context.get("active_city"),
+            kind, context, final_data, sem_state, category=kind or None)
+
+    if intent_name == "restore_context":
+        return await _handle_restore_context(args, context, final_data, sem_state)
+
+    if intent_name == "search_care":
+        return await _handle_care_search(args, context, final_data, sem_state)
+
     # ══════════════════════════════════════════════════════════════════════════
     # ROUTING ESTÁNDAR
     # ══════════════════════════════════════════════════════════════════════════
@@ -558,6 +666,14 @@ async def pre_llm_interceptor(project_id, intent_name, args, context):
 
     # — Búsqueda y navegación —
     if intent_name == "search_businesses":
+        # "Busco restaurantes que tengan pescado", "necesito un hospital para
+        # medicina general": una búsqueda con requisitos se resuelve igual que
+        # una recomendación con requisitos, con evidencia de lo registrado.
+        _kind, _reqs = request_constraints(user_text, args, args.get("category") or "")
+        if _kind:
+            return await _recommend_with_requirements(
+                _kind, _reqs, args.get("city") or context.get("active_city"),
+                _kind, context, final_data, sem_state, category=args.get("category"))
         return await _handle_search_businesses(args, context, final_data, sem_state)
 
     if intent_name == "get_business_services":
@@ -716,11 +832,17 @@ async def _handle_semantic_clarify(
     # 16:00?"), esa ranura sigue abierta: la respuesta del usuario debe caer
     # dentro de la reserva, no empezar una conversación nueva.
     expects = args.get("_expects")
+    propuesta = args.get("_propose")
+    if propuesta:
+        sem_state.propose(propuesta.get("intent"), propuesta.get("args"), propuesta.get("label") or "",
+                          propuesta.get("options"))
 
     # Cuando no se está afinando una ranura, el usuario pidió algo que aquí no
     # existe. Decirle sólo "no manejo eso" lo deja sin salida: la respuesta útil
     # es qué SÍ hay, que además le dice si vale la pena reformular.
-    if not expects:
+    # Una aclaración sobre una respuesta corta ("¿con cuál seguimos?") no es
+    # eso: el usuario no pidió nada que falte.
+    if not expects and not args.get("_final"):
         sugerencia = await _what_there_is((context or {}).get("active_city"))
         if sugerencia:
             cierre = f" {sugerencia} ¿Alguna de ésas te sirve?"
@@ -752,22 +874,69 @@ async def _what_there_is(city: Optional[str]) -> str:
 # § 6c. HANDLER: RESERVA A LA ESPERA DE SESIÓN
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _remember_pending_reservation(pending: Dict, final_data: Dict) -> Dict:
+#: Cuánto vive una reserva esperando a que el usuario entre a su cuenta.
+_PENDING_TTL_S = 30 * 60
+
+#: Lo que se le manda al front para mostrar mientras inicia sesión: sin ids
+#: internos ni datos personales, sólo lo que el usuario ya vio en el chat.
+_PENDING_PUBLIC = ("business_name", "service_name", "professional_name", "date", "start")
+
+
+def _remember_pending_reservation(pending: Dict, final_data: Dict, owner: Any = None) -> Dict:
     """
     Guarda una reserva ya acordada que sólo espera a que el usuario entre.
 
-    Se conserva entera —negocio, servicio, profesional, día y hora— para que al
-    volver no haya que preguntarle nada otra vez.
+    Vive en el estado de la conversación (servidor), no en el navegador: una
+    recarga o una redirección al login no la pierden mientras el front conserve
+    el id de la conversación. Caduca a los 30 minutos y, si se creó con una
+    sesión que luego expiró, sólo la puede retomar esa misma persona.
     """
+    import time as _t
     set_booking_state(final_data, BookingState.WAITING_AUTH)
-    final_data["_pending_reservation"] = dict(pending or {})
+    datos = dict(pending or {})
+    datos["expires_at"] = _t.time() + _PENDING_TTL_S
+    if owner:
+        datos["owner"] = owner
+    final_data["_pending_reservation"] = datos
     final_data["needs_auth"] = True
+    final_data.pop("_pending_reservation_offered", None)
 
     sem_state = ConversationState.load(final_data)
-    sem_state.booking.update({k: v for k, v in (pending or {}).items() if v})
+    sem_state.booking.update({k: v for k, v in (pending or {}).items()
+                              if v and k in ("business_id", "business_name", "service_name",
+                                             "professional_name", "date")})
+    if (pending or {}).get("start"):
+        sem_state.booking["time"] = pending["start"]
     sem_state.save(final_data)
-    logger.info("[STATE] Reserva guardada a la espera de sesión: %s", pending)
+    logger.info("[STATE] Reserva guardada a la espera de sesión: %s",
+                {k: v for k, v in datos.items() if k != "owner"})
     return final_data
+
+
+def _live_pending_reservation(final_data: Dict) -> Optional[Dict]:
+    """La reserva en espera si sigue vigente; si caducó, se descarta."""
+    import time as _t
+    pending = final_data.get("_pending_reservation") or {}
+    if not pending.get("business_id"):
+        clear_booking_state(final_data)
+        return None
+    if float(pending.get("expires_at") or 0) and float(pending["expires_at"]) < _t.time():
+        logger.info("[STATE] reserva en espera caducada: se descarta")
+        clear_booking_state(final_data)
+        return None
+    return pending
+
+
+def _pending_detail(pending: Dict) -> str:
+    if pending.get("service_id") and pending.get("start"):
+        from tools.nexiservice import booking_summary
+        return booking_summary(pending)
+    partes = [p for p in (
+        pending.get("service_name"),
+        f"en {pending['business_name']}" if pending.get("business_name") else None,
+        f"a las {pending.get('start') or pending.get('time')}" if (pending.get("start") or pending.get("time")) else None,
+    ) if p]
+    return " ".join(partes) or "tu reserva"
 
 
 def _offer_pending_reservation(final_data: Dict) -> Optional[Dict]:
@@ -775,74 +944,216 @@ def _offer_pending_reservation(final_data: Dict) -> Optional[Dict]:
     Le recuerda al usuario la reserva que dejó a medias, y le deja decidir.
 
     Se pregunta UNA vez: repetirlo en cada mensaje convierte el recordatorio en
-    un obstáculo. Si no contesta, la conversación sigue su curso y la reserva
-    queda guardada hasta que él la retome.
+    un obstáculo. La pregunta queda registrada como propuesta de este turno: un
+    "sí" en el siguiente la agenda; cualquier otra cosa la deja guardada.
     """
-    pending = final_data.get("_pending_reservation") or {}
-    if not pending.get("business_id"):
-        clear_booking_state(final_data)
+    pending = _live_pending_reservation(final_data)
+    if not pending:
         return None
     if final_data.get("_pending_reservation_offered"):
         return None
 
     final_data["_pending_reservation_offered"] = True
-    partes = [p for p in (
-        pending.get("service_name"),
-        f"en {pending['business_name']}" if pending.get("business_name") else None,
-        f"a las {pending['time']}" if pending.get("time") else None,
-    ) if p]
-    detalle = " ".join(partes) or "tu reserva"
-    logger.info("[STATE] Reserva pendiente ofrecida al usuario: %s", pending)
-
+    logger.info("[STATE] Reserva pendiente ofrecida al usuario")
     sem_state = ConversationState.load(final_data)
-    sem_state.expect("confirm_pending", "¿Confirmo la reserva que dejaste pendiente?",
-                     goal="booking")
+    sem_state.propose("execute_booking", _booking_args_from_pending(pending),
+                      label="agendar la reserva pendiente")
     sem_state.save(final_data)
-
     return {
-        "reply": (
-            f"Antes de seguir: dejaste pendiente **{detalle}**. "
-            "¿Quieres que la confirme?"
-        ),
+        "reply": f"Antes de seguir: dejaste pendiente {_pending_detail(pending)}. ¿La agendo?",
         "voice_action": None,
         "final_data": final_data,
     }
 
 
+def _booking_args_from_pending(pending: Dict) -> Dict:
+    """Lo que `confirm_appointment` necesita para volver a validar y crear."""
+    return {
+        "business_id": pending.get("business_id"),
+        "service_name": pending.get("service_name"),
+        "professional_name": pending.get("professional_name"),
+        "date": pending.get("date"),
+        "time": pending.get("start") or pending.get("time"),
+        "reservation_name": pending.get("reservation_name"),
+    }
+
+
+def _changes_booking(args: Dict, offered: Dict) -> bool:
+    """¿El mensaje trae algún dato de la reserva distinto del resumen propuesto?"""
+    from tools.nexiservice import resolve_date_token
+
+    def _hora(v):
+        m = re.match(r"\s*(\d{1,2})(?::(\d{2}))?", str(v or ""))
+        return f"{int(m.group(1)):02d}:{m.group(2) or '00'}" if m else None
+
+    for key in ("business_id", "service_name", "professional_name", "date", "time"):
+        nuevo, antes = args.get(key), offered.get(key)
+        if not nuevo or not antes:
+            continue
+        if key == "date":
+            nuevo, antes = resolve_date_token(nuevo), resolve_date_token(antes)
+        elif key == "time":
+            nuevo, antes = _hora(nuevo), _hora(antes)
+        elif key == "business_id":
+            nuevo, antes = int(nuevo), int(antes)
+        else:
+            nuevo, antes = _normalize(str(nuevo)), _normalize(str(antes))
+            if nuevo in antes or antes in nuevo:
+                continue
+        if nuevo != antes:
+            return True
+    return False
+
+
+def _session_owner(user_data: Dict) -> Any:
+    return ((user_data or {}).get("verified_identity") or {}).get("persona_id")
+
+
 async def _resume_pending_reservation(user_data: Dict, final_data: Dict) -> Optional[Dict]:
-    """Confirma la reserva que quedó esperando, ahora que hay sesión."""
-    pending = final_data.get("_pending_reservation") or {}
-    if not pending.get("business_id"):
-        clear_booking_state(final_data)
+    """
+    Ya hay sesión: se retoma la reserva que esperaba.
+
+    Si el usuario la había aceptado expresamente (dijo "sí" al resumen antes de
+    que se le pidiera entrar), se vuelve a validar —horario libre, que no haya
+    pasado— y se crea sin preguntarle otra vez. Si no la había aceptado, se le
+    muestra el resumen y se espera su sí: entrar a la cuenta no autoriza nada.
+    """
+    pending = _live_pending_reservation(final_data)
+    if not pending:
         return None
-
-    logger.info("[STATE] Sesión detectada → confirmando reserva pendiente: %s", pending)
-    tool_output = await _call_confirm_appointment(
-        business_id=pending.get("business_id"),
-        service_name=pending.get("service_name"),
-        time=pending.get("time"),
-        date=pending.get("date"),
-        reservation_name=None,          # el nombre sale de la cuenta
-        user_data=user_data,
-    )
-
-    if tool_output.get("success"):
+    owner = pending.get("owner")
+    if owner and str(owner) != str(_session_owner(user_data)):
+        # La sesión que la pidió no es la que volvió: no se ejecuta a nombre de otro.
+        logger.warning("[STATE] la reserva en espera es de otra sesión: se descarta")
         clear_booking_state(final_data)
+        return {"reply": "Había una reserva pendiente de otra sesión; la descarté. ¿Te ayudo con una nueva?",
+                "final_data": final_data}
+
+    args = _booking_args_from_pending(pending)
+    if not pending.get("authorized"):
+        return _offer_pending_reservation(final_data)
+
+    logger.info("[STATE] Sesión verificada → se retoma la reserva aceptada antes del login")
+    tool_output = await _call_confirm_appointment(user_data=user_data, execute=True, **args)
+    outcome = _booking_outcome(tool_output, final_data)
+    if outcome:
+        return outcome
+    # Ya no se puede como estaba (horario ocupado, servicio que desapareció):
+    # se explica y la reserva vuelve a estar en curso para elegir otra opción.
+    clear_booking_state(final_data)
+    sem_state = ConversationState.load(final_data)
+    sem_state.booking.update({k: v for k, v in args.items() if v})
+    sem_state.goal = "booking"
+    if tool_output.get("asking"):
+        sem_state.expect(tool_output["asking"], tool_output.get("message"), goal="booking")
+    sem_state.save(final_data)
+    return {
+        "reply": "Ya entraste. " + (tool_output.get("message") or "No pude cerrar la reserva; ¿lo intentamos otra vez?"),
+        "final_data": final_data,
+    }
+
+
+def _booking_outcome(tool_output: Dict, final_data: Dict) -> Optional[Dict]:
+    """
+    Traduce el resultado de `confirm_appointment` a estado y respuesta.
+
+    - `ready`: resumen listo → queda PROPUESTO para el turno siguiente. Sólo un
+      sí a esa propuesta lo crea (`execute_booking`).
+    - `needs_auth`: aceptada, falta sesión → se guarda en el servidor con
+      caducidad y el front abre el login.
+    - `unknown`: se envió y no se sabe si quedó → se propone verificar (crear es
+      idempotente: primero busca si ya existe).
+    - confirmada (con id real) → se cierra el proceso.
+    Devuelve None para los casos que el llamador maneja (preguntas de ranura).
+    """
+    from tools.nexi_booking import BookingStatus
+
+    status = tool_output.get("status")
+    sem_state = ConversationState.load(final_data)
+
+    if tool_output.get("ready"):
+        booking = tool_output["booking"]
+        sem_state.expect(None)
+        sem_state.goal = "booking"
+        sem_state.propose("execute_booking", _booking_args_from_pending(booking),
+                          label="agendar la reserva")
+        sem_state.save(final_data)
+        set_booking_state(final_data, BookingState.WAITING_CONFIRM)
+        final_data["_booking_tx"] = {"status": status, "booking": booking}
+        return {"reply": tool_output.get("message"), "voice_action": None,
+                "final_data": final_data}
+
+    if tool_output.get("needs_auth"):
+        pending = tool_output.get("pending_reservation") or {}
+        _remember_pending_reservation(pending, final_data)
+        final_data["_booking_tx"] = {"status": status or BookingStatus.AWAITING_AUTH}
+        return {
+            "reply": tool_output.get("message"),
+            "voice_action": "require_auth",
+            "voice_action_payload": {
+                "reason": "reservation",
+                "pending": {k: pending.get(k) for k in _PENDING_PUBLIC if pending.get(k)},
+            },
+            "final_data": {**final_data, "needs_input": True},
+        }
+
+    if status == BookingStatus.UNKNOWN:
+        pending = tool_output.get("pending_reservation") or {}
+        sem_state.propose("execute_booking", _booking_args_from_pending(pending),
+                          label="verificar la reserva")
+        sem_state.save(final_data)
+        final_data["_booking_tx"] = {"status": status, "booking": pending}
+        return {"reply": tool_output.get("message"), "final_data": final_data}
+
+    if tool_output.get("success") and tool_output.get("agenda_id"):
+        clear_booking_state(final_data)
+        sem_state.clear_booking()
+        sem_state.withdraw_offer()
+        sem_state.save(final_data)
+        final_data["_booking_tx"] = {"status": status, "agenda_id": tool_output["agenda_id"]}
         return {
             "reply": tool_output.get("message"),
             "voice_action": "navigate" if tool_output.get("url") else None,
-            "voice_action_payload": (
-                {"url": tool_output.get("url")} if tool_output.get("url") else None
-            ),
+            "voice_action_payload": {"url": tool_output["url"]} if tool_output.get("url") else None,
             "final_data": {**final_data, "last_booking_status": True},
         }
 
-    # No se pudo cerrar: se deja el proceso abierto y se explica.
-    return {
-        "reply": tool_output.get("message")
-        or "Ya entraste, pero no pude cerrar la reserva. ¿Lo intentamos otra vez?",
-        "final_data": final_data,
-    }
+    if status in (BookingStatus.REJECTED, BookingStatus.FAILED) and not tool_output.get("asking"):
+        final_data["_booking_tx"] = {"status": status}
+        return {"reply": tool_output.get("message"), "final_data": final_data}
+    return None
+
+
+#: Respuestas que asienten sin decir qué. Ante un resumen de reserva no bastan:
+#: crear una cita merece un sí inequívoco.
+_WEAK_ASSENT = frozenset({"listo", "ok", "okay", "vale", "bueno", "va", "aja", "ajá", "mmm", "ya"})
+
+
+async def _handle_execute_booking(args: Dict, user_text: str, user_data: Dict,
+                                  final_data: Dict, sem_state: ConversationState) -> Dict:
+    """El usuario aceptó el resumen del turno anterior: se crea esa reserva, no otra."""
+    if _normalize(user_text).strip(" .!¡") in _WEAK_ASSENT:
+        sem_state.propose("execute_booking", args, label="agendar la reserva")
+        sem_state.save(final_data)
+        return {"reply": "¿Entonces la agendo? Respóndeme *sí* o *no*.", "final_data": final_data}
+    sem_state.withdraw_offer()
+    sem_state.save(final_data)
+    tool_output = await _call_confirm_appointment(user_data=user_data, execute=True, **args)
+    if tool_output.get("needs_auth"):
+        # Si había una sesión y expiró, la reserva queda atada a esa persona.
+        tool_output.setdefault("pending_reservation", {})
+    outcome = _booking_outcome(tool_output, final_data)
+    if outcome:
+        return outcome
+    # Cambió algo entre el resumen y el sí (alguien tomó el horario): se dice y
+    # se vuelve a la ranura que hay que elegir de nuevo.
+    if tool_output.get("asking"):
+        sem_state.goal = "booking"
+        sem_state.booking.update({k: v for k, v in args.items() if v})
+        sem_state.expect(tool_output["asking"], tool_output.get("message"), goal="booking")
+        sem_state.save(final_data)
+    return {"reply": tool_output.get("message") or "No pude completar la reserva.",
+            "final_data": final_data}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -949,17 +1260,11 @@ async def _handle_waiting_name_state(
         user_data=user_data,
     )
 
-    if tool_output.get("needs_auth"):
-        _remember_pending_reservation(tool_output.get("pending_reservation") or {}, final_data)
-        return {
-            "reply": tool_output.get("message"),
-            "voice_action": "require_auth",
-            "voice_action_payload": {
-                "reason": "reservation",
-                "pending": tool_output.get("pending_reservation") or {},
-            },
-            "final_data": final_data,
-        }
+    # Resumen por confirmar, reserva esperando sesión, creada o en duda: un
+    # solo sitio decide qué se dice y qué queda pendiente (`_booking_outcome`).
+    outcome = _booking_outcome(tool_output, final_data)
+    if outcome:
+        return outcome
 
     if tool_output.get("success"):
         clear_booking_state(final_data)
@@ -983,20 +1288,23 @@ async def _handle_waiting_name_state(
 
 
 async def _call_confirm_appointment(
-    business_id, service_name, time, date, reservation_name, user_data
+    business_id, service_name, time, date, reservation_name, user_data,
+    professional_name=None, execute=False,
 ) -> Dict:
     """Thin wrapper para confirm_appointment con logging."""
     from tools.nexiservice import confirm_appointment
     logger.info(
-        "[CONFIRM] biz=%s srv='%s' time=%s date=%s name='%s'",
-        business_id, service_name, time, date, reservation_name
+        "[CONFIRM] biz=%s srv='%s' time=%s date=%s prof=%s execute=%s",
+        business_id, service_name, time, date, professional_name, execute,
     )
     return await confirm_appointment(
         business_id=business_id,
         service_name=service_name,
         time=time,
         date=date,
+        professional_name=professional_name,
         reservation_name=reservation_name,
+        execute=execute,
         user_data=user_data,
     )
 
@@ -1019,41 +1327,15 @@ async def _handle_request_appointment(
     service_arg  = args.get("service_name")
     prof_name    = args.get("professional_name")
 
-    # ── 1. Resolver usuario ──────────────────────────────────────────────────
-    ext_id = user_data.get("external_user_id", "")
-    is_anon = (
-        not ext_id
-        or str(ext_id) in ("user_client_demo", "unknown", "guest")
-        or str(ext_id).startswith("anon_")
-    )
-
-    if not is_anon:
-        res_name = (
-            final_data.get("reservation_name")
-            or user_data.get("name")
-            or user_data.get("full_name")
-            or user_data.get("nombre")
-        )
-        if not res_name:
-            res_name = await _resolve_logged_user_name(ext_id, user_data)
-            if res_name:
-                final_data["reservation_name"] = res_name
-    else:
-        candidate = (
-            args.get("reservation_name")
-            or final_data.get("reservation_name")
-            or _recover_last_reservation_context_from_history(messages).get("reservation_name")
-            or _extract_name_from_messages(messages)
-        )
-        # Guard: afirmaciones no son nombres
-        if candidate and _normalize(candidate) in _AFFIRMATIVE:
-            candidate = _extract_confirmed_name_from_assistant(messages)
-        
-        # Si el candidato ya estaba en final_data y es válido, lo respetamos
-        if final_data.get("reservation_name") and _is_valid_name(final_data.get("reservation_name")):
-            res_name = final_data.get("reservation_name")
-        else:
-            res_name = candidate if _is_valid_name(candidate) else None
+    # ── 1. A nombre de quién ────────────────────────────────────────────────
+    # La reserva es de quien tiene la sesión: la confirmación la crea con su
+    # identidad verificada. Aquí sólo cuenta un nombre que el usuario DIJO ("a
+    # nombre de mi mamá, Rosa"). Antes se buscaba el nombre de la persona cuyo
+    # id mandara el navegador, y con un id cambiado a mano el resumen mostraba
+    # el nombre real de otra persona.
+    res_name = args.get("reservation_name")
+    if res_name and (_normalize(res_name) in _AFFIRMATIVE or not _is_valid_name(res_name)):
+        res_name = None
 
     # ── 2. Context Recovery ──────────────────────────────────────────────────
     if not biz_id and (_is_generic_query(biz_name) or not biz_name):
@@ -1159,17 +1441,11 @@ async def _handle_request_appointment(
 
     # La reserva está completa pero hace falta una cuenta para dejarla a nombre
     # de alguien. Se guarda entera y se espera a que el usuario entre.
-    if tool_output.get("needs_auth"):
-        _remember_pending_reservation(tool_output.get("pending_reservation") or {}, final_data)
-        return {
-            "reply": message,
-            "voice_action": "require_auth",
-            "voice_action_payload": {
-                "reason": "reservation",
-                "pending": tool_output.get("pending_reservation") or {},
-            },
-            "final_data": {**final_data, "needs_input": True},
-        }
+    # Resumen por confirmar, reserva esperando sesión, creada o en duda: un
+    # solo sitio decide qué se dice y qué queda pendiente (`_booking_outcome`).
+    outcome = _booking_outcome(tool_output, final_data)
+    if outcome:
+        return outcome
 
     # DETECTAR si la tool pidió nombre → activar estado WAITING_FOR_NAME
     _ASKING_NAME_SIGNALS = (
@@ -1281,6 +1557,25 @@ def _handle_conversational(intent_name, project_config, conversation_id, _resp, 
     # dárselas a quien administra su negocio es contestarle a otra persona.
     if intent_name == "capabilities" and _is_business_owner(context):
         local_reply = _ADMIN_CAPABILITIES
+
+    # La plantilla "conversation" es un saludo. Sólo responde a un saludo (o a
+    # un "gracias", un "ok"): una queja, un comentario o una frase que no se
+    # entendió recibían "Nexo en línea. ¿En qué puedo asistirte?", como si la
+    # persona no hubiera dicho nada.
+    act = _social_act_of(context.get("user_text") or "")
+    from core.semantic.types import Act
+    if act == Act.THANKS:
+        # A un "gracias" no se le responde con un saludo.
+        local_reply = "¡Con gusto!"
+    elif act == Act.BACKCHANNEL:
+        # "Listo", "ok", "perfecto": acuse de recibo. Saludar aquí era hacer como
+        # si la conversación empezara de nuevo.
+        local_reply = "Perfecto. Si necesitas algo más, aquí estoy."
+    elif intent_name in ("conversation", None, "") and act not in _SOCIAL_ACTS:
+        local_reply = (
+            "No estoy seguro de cómo ayudarte con eso. Puedo buscar negocios y servicios, "
+            "mostrártelos en el mapa o ayudarte a reservar. ¿Qué necesitas?"
+        )
     final_data["_fallback_reply"] = local_reply
 
     # Con el modelo externo apagado, Lyra responde con lo suyo. La respuesta no
@@ -1290,7 +1585,7 @@ def _handle_conversational(intent_name, project_config, conversation_id, _resp, 
     if not settings.LLM_EXTERNAL_ENABLED:
         sem_state = ConversationState.load(final_data)
         return {
-            "reply": _with_conversational_context(local_reply, intent_name, sem_state),
+            "reply": _with_conversational_context(local_reply, intent_name, sem_state, act),
             "voice_action": None,
             "final_data": final_data,
         }
@@ -1336,7 +1631,28 @@ def _is_business_owner(context: Dict) -> bool:
     return rol in ("admin", "administrador", "empresario", "owner")
 
 
-def _with_conversational_context(reply: str, intent_name: str, sem_state: ConversationState) -> str:
+def _social_act_of(text: str):
+    from core.semantic.speech_act import analyze
+    try:
+        return analyze(text).act if text else None
+    except Exception:
+        return None
+
+
+def _social_acts():
+    from core.semantic.types import Act
+    return {Act.GREET, Act.THANKS, Act.BACKCHANNEL, Act.FAREWELL, Act.AGENT_CAPABILITY, Act.AGENT_IDENTITY}
+
+
+class _LazyActs:
+    def __contains__(self, item):
+        return item in _social_acts()
+
+
+_SOCIAL_ACTS = _LazyActs()
+
+
+def _with_conversational_context(reply: str, intent_name: str, sem_state: ConversationState, act=None) -> str:
     """
     Engancha la respuesta con lo que la conversación ya tenía abierto.
 
@@ -1345,6 +1661,13 @@ def _with_conversational_context(reply: str, intent_name: str, sem_state: Conver
     convierte una plantilla en una respuesta.
     """
     if intent_name == "farewell":
+        return reply
+
+    # Retomar el hilo sólo tiene sentido tras un "gracias" o un "ok". Pegado a
+    # cualquier respuesta, insistía con el restaurante de antes cuando la
+    # persona ya hablaba de otra cosa.
+    from core.semantic.types import Act
+    if act not in (Act.THANKS, Act.BACKCHANNEL):
         return reply
 
     if sem_state.focus_label:
@@ -1452,8 +1775,12 @@ def _focus_business(final_data: Dict, sem_state: ConversationState, business: Di
     final_data["selected_business_id"] = biz_id
     final_data["_pending_biz_id"] = biz_id
     sem_state.set_focus(ConceptKind.BUSINESS, biz_id, business.get("name") or "")
-    sem_state.booking["business_id"] = biz_id
-    sem_state.booking["business_name"] = business.get("name")
+    # Que un negocio esté en foco no abre una reserva. Antes cada recomendación
+    # dejaba su negocio escrito en las ranuras de la cita, y cualquier "sí"
+    # posterior —aunque respondiera a otra cosa— agendaba ahí.
+    if sem_state.goal == "booking":
+        sem_state.booking["business_id"] = biz_id
+        sem_state.booking["business_name"] = business.get("name")
 
 
 async def _handle_get_business_professionals(
@@ -1527,20 +1854,17 @@ async def _handle_confirm_appointment(args: Dict, messages: List, user_data: Dic
         res_name = res_ctx.get("reservation_name")
 
     args["reservation_name"] = res_name
+    # Crear sólo ocurre al aceptar un resumen (`execute_booking`); estos
+    # argumentos vienen de la comprensión o del modelo y no pueden saltárselo.
+    args.pop("execute", None)
     tool_output = await confirm_appointment(**args, user_data=user_data)
 
     # Sin sesión no se cierra la reserva: se guarda y se pide entrar.
-    if tool_output.get("needs_auth"):
-        _remember_pending_reservation(tool_output.get("pending_reservation") or {}, final_data)
-        return {
-            "reply": tool_output.get("message"),
-            "voice_action": "require_auth",
-            "voice_action_payload": {
-                "reason": "reservation",
-                "pending": tool_output.get("pending_reservation") or {},
-            },
-            "final_data": final_data,
-        }
+    # Resumen por confirmar, reserva esperando sesión, creada o en duda: un
+    # solo sitio decide qué se dice y qué queda pendiente (`_booking_outcome`).
+    outcome = _booking_outcome(tool_output, final_data)
+    if outcome:
+        return outcome
 
     if tool_output.get("success"):
         clear_booking_state(final_data)
@@ -1680,6 +2004,9 @@ async def _handle_search_businesses(
         otra_ciudad = tool_output.get("suggested_next_city")
         if otra_ciudad:
             reply += f" Sí hay opciones en **{otra_ciudad}**, ¿quieres que las mire? [CITY:{otra_ciudad}]"
+            sem_state.propose("search_businesses", {**{k: v for k, v in args.items() if not k.startswith("_p")},
+                                                    "city": otra_ciudad},
+                              label=f"buscar en {otra_ciudad}")
         else:
             reply += " ¿Quieres que busque en otra ciudad, o te muestro algo parecido?"
         _center_on_city(final_data, tool_output)
@@ -1696,6 +2023,11 @@ async def _handle_search_businesses(
                 + ("¿Quieres ver quién puede atenderte ahí?" if wants_professional
                    else "¿Agendamos ahí?")
             )
+            _ref = {"business_id": b["id"], "business_name": b["name"]}
+            if wants_professional:
+                sem_state.propose("get_business_professionals", _ref, label="ver quién atiende")
+            else:
+                sem_state.propose("request_appointment", {**sem_state.booking, **_ref}, label="agendar ahí")
         else:
             reply = (
                 f"Encontré **{b['name']}**"
@@ -1703,6 +2035,11 @@ async def _handle_search_businesses(
                 + f"{_distance_phrase(b)}. Te lo estoy señalando en el mapa. "
                 "¿Quieres ver sus servicios o agendar una cita?"
             )
+            _ref = {"business_id": b["id"], "business_name": b["name"]}
+            sem_state.propose("get_business_services", _ref, options=[
+                {"intent": "get_business_services", "args": _ref, "label": "ver sus servicios"},
+                {"intent": "request_appointment", "args": _ref, "label": "agendar una cita"},
+            ])
         _show_on_map(final_data, businesses, tool_output)
     else:
         if is_booking:
@@ -2100,6 +2437,424 @@ def _rating_label(business: Dict) -> str:
     return f"⭐ {business['rating']} de {reseñas} {plural}"
 
 
+_CONNECTOR_RE = None
+
+
+def _asks_to_book(text: str) -> bool:
+    """¿El mensaje pide reservar? Es el marco de cita del análisis, no una palabra suelta."""
+    from core.semantic.speech_act import analyze
+    try:
+        return "appointment" in analyze(text).frames
+    except Exception:
+        return False
+
+
+def request_constraints(user_text: str, args: Dict, category_label: str = "") -> tuple:
+    """
+    (tipo de establecimiento, [requisitos]) que expresa una petición.
+
+    "recomiéndame hospitales para medicina general" → ("hospitales", ["medicina general"])
+    "qué restaurantes me recomiendas, me gusta el pescado" → ("restaurantes", ["pescado"])
+    "¿cuál me recomiendas?" → ("", [])
+
+    El tipo es el sustantivo que encabeza la petición (el que va antes de
+    "para/con/de/que" o el que la comprensión ancló como rubro); el resto del
+    contenido son requisitos. Antes la comprensión se quedaba con UN concepto y
+    descartaba los demás: la recomendación ignoraba lo que la persona pedía.
+    """
+    import re as _re
+    from core.semantic.morphology import normalize, strict_closeness
+    from core.semantic.speech_act import analyze
+
+    text = normalize(user_text)
+    if not text:
+        return "", []
+    try:
+        content = []
+        for w in analyze(user_text).content_terms:
+            w = normalize(w)
+            if w and w not in content:
+                content.append(w)
+    except Exception:
+        return "", []
+    city = normalize(args.get("city") or "")
+    content = [w for w in content if w not in city.split() and len(w) > 2]
+    from tools.nexiservice import establishment_kind
+    label_words = [w for w in normalize(category_label).split() if len(w) > 2]
+
+    def _kind_is_label(k: str) -> bool:
+        return bool(k) and any(strict_closeness(k, lw) for lw in label_words)
+
+    if len(content) < 2:
+        # Un solo sustantivo puede ser ya una exigencia: "recomiéndame una
+        # CLÍNICA" se ancla a "Salud y Bienestar", pero pedía un tipo concreto de
+        # establecimiento, más estrecho que la categoría. Sin esto la
+        # recomendación ordenaba por nota toda la categoría y salía una óptica.
+        if content and establishment_kind(content[0]) and not _kind_is_label(content[0]):
+            return content[0], []
+        return "", []
+
+    # Verbos de "tener/ofrecer" que introducen el requisito: son clase cerrada
+    # y no son lo que se pide ("que TENGA almuerzo" pide almuerzo).
+    _OFFER_VERBS = ("tenga", "tengan", "tener", "ofrezca", "ofrezcan", "ofrece", "ofrecen", "venda",
+                    "vendan", "sirva", "sirvan", "haga", "hagan", "maneje", "manejen", "atienda", "atiendan")
+    # Valoraciones, cantidades y cercanía no son algo que un negocio "tenga
+    # registrado": "bueno y barato" o "para dos personas" no se exigen como
+    # servicio (se volvían "ninguno tiene registrado barato").
+    _QUALIFIERS = ("menu", "carta", "plato", "platos", "oferta", "lista", "catalogo",
+                   "encanta", "gusta", "fascina", "encantan", "gustan", "prefiero",
+                   "bueno", "buena", "buenos", "buenas", "barato", "barata", "baratos", "baratas", "economico",
+                   "economica", "economicos", "rico", "rica", "ricos", "mejor", "mejores", "cerca", "cercano",
+                   "cercana", "lejos", "grande", "pequeno", "pequena", "rapido", "rapida", "bonito", "bonita",
+                   "persona", "personas", "gente", "familia", "amigos", "pareja", "dos", "tres", "cuatro")
+    content = [w for w in content if w not in _OFFER_VERBS and w not in _QUALIFIERS]
+    anchored = [normalize(t) for t in (args.get("_user_terms") or [])]
+
+    kind, groups = "", []
+    connector = _re.compile(r"\b(?:para|con|de|que|donde)\s+")
+    for m in connector.finditer(text):
+        before = [w for w in text[:m.start()].split() if w in content]
+        after = [w for w in text[m.end():].split() if w in content]
+        if before and after:
+            # El tipo es el último sustantivo de contenido antes del conector.
+            kind = before[-1]
+            # Un requisito es un CONCEPTO, no la secuencia de palabras tal como
+            # salió: "que tenga pescado, me encanta el pescado" pide pescado una
+            # vez, y "pescado y carne" son DOS requisitos, no "pescado carne".
+            tramo = text[m.end():]
+            groups = []
+            for parte in _re.split(r",|\by\b|\be\b|\bo\b", tramo):
+                g = " ".join(dict.fromkeys(w for w in parte.split() if w in content and w != kind))
+                if g:
+                    groups.append(g)
+            break
+    if not kind:
+        kind = next((w for w in content if w in anchored), content[0])
+        groups = list(dict.fromkeys(w for w in content if w != kind))
+    # Si la etiqueta con que se consultó ES el tipo ("restaurante" → Restaurantes
+    # y Gastronomía), un requisito que repite esa etiqueta no añade nada. Si la
+    # etiqueta es un SERVICIO ("Consulta de Medicina General") y el tipo es otro
+    # ("hospitales"), ese requisito es justo lo que hay que comprobar.
+    label_is_kind = _kind_is_label(kind)
+    # "Talleres de MECÁNICA" se ancló a la categoría "Mecánica y Automotriz": el
+    # requisito ES la categoría y "taller" sólo la nombra. Se busca la categoría;
+    # exigir "taller" en el nombre devolvía un "Taller de Arte".
+    if (args.get("_grounded_kind") == "business_category" and groups and not label_is_kind
+            and all(all(any(strict_closeness(x, lw) for lw in label_words) for x in g.split()) for g in groups)):
+        return "", []
+    if label_is_kind:
+        groups = [g for g in groups if g and not all(
+            any(strict_closeness(x, lw) for lw in label_words) for x in g.split())]
+    groups = [g for g in dict.fromkeys(groups) if g]
+    if not groups and not (establishment_kind(kind) and not label_is_kind):
+        return "", []
+    return kind, groups
+
+
+async def _handle_refine_presented(args: Dict, context: Dict, final_data: Dict,
+                                   sem_state: ConversationState) -> Dict:
+    """
+    "De esos cuatro, ¿cuál tiene pescado?": se responde SOBRE lo mostrado.
+
+    No se busca de nuevo: se evalúan los negocios que el usuario acaba de ver
+    (en el orden en que los vio) con lo que tienen registrado —carta/servicios,
+    precios, calificaciones, distancia—. Lo que no está registrado (horarios de
+    atención, domicilio si ningún servicio lo menciona) se dice que no consta;
+    nunca se supone.
+    """
+    from core.semantic.refinement import CATALOG_REQUIREMENT
+    from core.speech_format import format_price
+    from tools.nexiservice import rank_with_constraints
+
+    shown = [p for p in sem_state.presented if p.kind == ConceptKind.BUSINESS and p.entity_id]
+    op = args.get("operation") or "unclear"
+    raw_reqs = list(args.get("requirements") or [])
+    needs_catalog = CATALOG_REQUIREMENT in raw_reqs
+    reqs = [r for r in raw_reqs if r != CATALOG_REQUIREMENT]
+    ordinal = args.get("ordinal")
+
+    def _reply(text, focus=None, keep=None):
+        if keep is not None and keep:
+            sem_state.remember_list(ConceptKind.BUSINESS, [
+                {"id": b["id"], "name": b["name"], "category": b.get("category"),
+                 "lat": b.get("lat"), "lng": b.get("lng"), "address": b.get("address")} for b in keep])
+        if focus:
+            sem_state.set_focus(ConceptKind.BUSINESS, focus["id"], focus["name"])
+        sem_state.save(final_data)
+        out = {"reply": text, "final_data": final_data, "voice_action": None, "properties": []}
+        mostrar = [focus] if focus else (keep or [])
+        if mostrar:
+            _show_on_map(final_data, mostrar, {}, focus_id=focus["id"] if focus else None)
+            out["voice_action"] = final_data.get("voice_action")
+            out["voice_action_payload"] = final_data.get("voice_action_payload")
+        return out
+
+    if not shown:
+        return _reply("No tengo una lista reciente sobre la cual elegir. ¿Qué quieres que busque?")
+
+    n = len(shown)
+    cuantos = "los dos" if n == 2 else f"los {n}"
+    if op == "unclear":
+        return _reply(f"¿Qué quieres saber de {'esos' if n > 1 else 'ese'} {n if n > 1 else ''}? Puedo "
+                      "recomendarte uno, decirte cuál queda más cerca, cuál es más económico o cuál tiene "
+                      "algo en su carta.".replace("  ", " "))
+
+    if op == "open_now":
+        # No hay horario de atención registrado en NexiService: se dice.
+        return _reply("No tengo registrado el horario de atención de estos negocios, así que no puedo "
+                      "decirte cuáles abren hoy sin inventarlo. Si quieres, te abro el perfil de alguno "
+                      "para que veas su contacto y les preguntes.")
+
+    if ordinal is not None:
+        idx = n - 1 if ordinal == -1 else ordinal - 1
+        if not 0 <= idx < n:
+            return _reply(f"Sólo te mostré {n} {'opción' if n == 1 else 'opciones'}. ¿Cuál de ellas?")
+        shown = [shown[idx]]
+
+    if op == "nearest":
+        con_dist = [p for p in shown if p.extra.get("distance_km") is not None]
+        if not con_dist:
+            return _reply("No tengo tu ubicación para medir distancias. Si activas la ubicación, te digo "
+                          "cuál queda más cerca.")
+        p = min(con_dist, key=lambda x: float(x.extra["distance_km"]))
+        km = f"{float(p.extra['distance_km']):.1f}".replace(".", ",")
+        b = {"id": p.entity_id, "name": p.label, "lat": p.extra.get("lat"), "lng": p.extra.get("lng")}
+        return _reply(f"De {cuantos}, el más cercano a ti es **{p.label}** (a {km} km).", focus=b)
+
+    data = await rank_with_constraints("", reqs, only_ids=[p.entity_id for p in shown])
+    if not data.get("success"):
+        return _reply(data.get("message") or "No pude revisar esos negocios en este momento.")
+    por_id = {b["id"]: b for b in data.get("businesses") or []}
+    items = [por_id[p.entity_id] for p in shown if p.entity_id in por_id]
+    if not items:
+        return _reply("No pude revisar esos negocios en este momento.")
+
+    def _nota(b):
+        return f"⭐ {b['rating']} de {b['reviews']} reseña{'s' if b['reviews'] != 1 else ''}" if b.get("rating") else "sin reseñas aún"
+
+    def _mejor(cands):
+        return max(cands, key=lambda b: (b.get("rating") or -1, b.get("reviews") or 0))
+
+    req_txt = natural_list([f"**{r}**" for r in reqs]) if reqs else ""
+
+    if op == "exclude":
+        if needs_catalog:
+            quedan = [b for b in items if b["n_services"] > 0]
+            fuera = [b for b in items if b["n_services"] == 0]
+            motivo = "no tienen carta ni servicios registrados"
+        elif reqs:
+            quedan = [b for b in items if not b["missing"]]
+            fuera = [b for b in items if b["missing"]]
+            motivo = f"no tienen registrado {req_txt}"
+        else:
+            return _reply("¿Qué quieres que descarte? Dime qué tienen que tener.")
+        if not fuera:
+            return _reply(f"Revisé {cuantos} y ninguno se descarta: todos tienen "
+                          f"{'su carta registrada' if needs_catalog else req_txt}.", keep=items)
+        if not quedan:
+            return _reply(f"Si descarto los que {motivo}, no queda ninguno de {cuantos}.")
+        return _reply(f"Descarté {natural_list([f'**{b['name']}**' for b in fuera])} porque {motivo}. "
+                      f"Quedan {natural_list([f'**{b['name']}**' for b in quedan])}.", keep=quedan)
+
+    if op in ("cheapest", "priciest"):
+        con_precio = [b for b in items if b.get("avg_price")]
+        if not con_precio:
+            return _reply("Ninguno tiene precios registrados en su carta, así que no puedo compararlos sin inventar.")
+        elegido = (min if op == "cheapest" else max)(con_precio, key=lambda b: b["avg_price"])
+        adj = "más económico" if op == "cheapest" else "más costoso"
+        extra = "" if len(con_precio) == len(items) else " (entre los que tienen precios registrados)"
+        return _reply(
+            f"Por los precios de su carta registrada, el {adj} de {cuantos}{extra} es **{elegido['name']}**: "
+            f"en promedio {format_price(round(elegido['avg_price']))}, desde {format_price(elegido['min_price'])}.",
+            focus=elegido)
+
+    if op in ("filter", "pick") or reqs:
+        cumplen = [b for b in items if not b["missing"]]
+        quien = f"**{items[0]['name']}**" if len(items) == 1 else cuantos
+        if not cumplen:
+            sem_state.propose("recommend_with_requirements",
+                              {"kind": items[0].get("category") or "", "requirements": reqs,
+                               "city": context.get("active_city")},
+                              label="buscar en otros negocios")
+            return _reply(f"Revisé la carta registrada de {quien} y {'no tiene' if len(items) == 1 else 'ninguno tiene'} "
+                          f"{req_txt} registrado. No te puedo asegurar que lo ofrezca{'n' if len(items) > 1 else ''}. "
+                          "¿Quieres que busque en otros negocios que sí lo tengan registrado?")
+        b = _mejor(cumplen)
+        prueba = "; ".join(f"{k}: {v}" for k, v in b["evidence"].items())
+        otros = [x for x in cumplen if x["id"] != b["id"]]
+        cola = (f" También lo tiene{'n' if len(otros) > 1 else ''} {natural_list([f'**{x['name']}**' for x in otros])}."
+                if otros else "")
+        return _reply(f"De {quien if len(items) > 1 else 'esa opción'}, **{b['name']}** tiene {req_txt} en lo que "
+                      f"registra ({prueba}) — {_nota(b)}.{cola}", focus=b, keep=None)
+
+    # Recomendar dentro de lo mostrado: la nota de sus clientes decide.
+    b = _mejor(items)
+    if not b.get("rating"):
+        return _reply(f"Ninguno de {cuantos} tiene reseñas todavía, así que no tengo con qué recomendarte uno sobre "
+                      "otro. ¿Prefieres el más cercano o el más económico?")
+    return _reply(f"De {cuantos}, te recomiendo **{b['name']}**: {_nota(b)}, la mejor nota del grupo.", focus=b)
+
+
+async def _recommend_with_requirements(kind, requirements, ciudad, palabra, context, final_data, sem_state,
+                                       category=None):
+    """Recomendación que sólo afirma lo que consta en lo registrado de cada negocio."""
+    from tools.nexiservice import rank_with_constraints
+
+    salida = await rank_with_constraints(kind, requirements, city=ciudad)
+    if not salida.get("success"):
+        return {"reply": salida.get("message"), "final_data": final_data}
+    negocios = salida.get("businesses") or []
+    ciudad_real = salida.get("city") or ciudad or "tu zona"
+    user_text = context.get("user_text") or ""
+    req_txt = natural_list([f"**{_surface(r, user_text)}**" for r in requirements])
+    tipo_singular = singularize_es(_surface(kind or palabra or "negocio", user_text))
+    tipo = pluralize_es(tipo_singular) if tipo_singular else "negocios"
+
+    completos = [b for b in negocios if b["kind_match"] and not b["missing"]]
+    del_tipo = [b for b in negocios if b["kind_match"]]
+    con_evidencia = [b for b in negocios if b["evidence"] and not b["missing"]]
+
+    def _ev(b):
+        # La evidencia se dice con las palabras del usuario (tildes incluidas).
+        return "; ".join(_surface_all(v, requirements, user_text) for v in b["evidence"].values())
+
+    def linea(b, mostrar_categoria=False):
+        ev = _ev(b)
+        nota = f" — {_rating_label(b)}" if b.get("rating") else ""
+        cat = f" ({b['category']})" if mostrar_categoria and b.get("category") else ""
+        return f"- **{b['name']}**{cat}{nota}" + (f": ofrece {ev}" if ev else "")
+
+    if completos:
+        elegidos = sorted(completos, key=lambda b: (b.get("rating") or -1, b.get("reviews") or 0), reverse=True)
+        top = elegidos[0]
+        partes = [f"Busqué {tipo} en **{ciudad_real}** que tengan registrado {req_txt}."]
+        if top.get("rating"):
+            partes.append(f"Me quedo con **{top['name']}** — {_rating_label(top)}, y en sus servicios figura "
+                          f"**{_ev(top)}**.")
+        else:
+            partes.append(f"**{top['name']}** lo tiene registrado (**{_ev(top)}**), "
+                          "aunque todavía no tiene reseñas.")
+        if len(elegidos) > 1:
+            partes.append("También cumplen:\n" + "\n".join(linea(b) for b in elegidos[1:4]))
+        mostrados = elegidos
+    elif del_tipo:
+        mostrados = sorted(del_tipo, key=lambda b: (b.get("rating") or -1, b.get("reviews") or 0), reverse=True)
+        partes = [f"Revisé {len(del_tipo)} {tipo} en **{ciudad_real}** y ninguno tiene registrado {req_txt} "
+                  "en sus servicios, así que no puedo confirmarte cuál lo ofrece.",
+                  "Estos son los que hay, por si quieres preguntarles:\n" + "\n".join(linea(b) for b in mostrados[:4])]
+    elif con_evidencia:
+        mostrados = con_evidencia
+        partes = [f"No tengo **{tipo}** registrados en **{ciudad_real}**.",
+                  f"Quienes sí tienen registrado {req_txt} son:\n" + "\n".join(linea(b, True) for b in mostrados[:5]),
+                  f"Ninguno figura como {tipo}: revisa si alguno te sirve."]
+    elif not requirements:
+        return await _kind_not_found(kind, tipo, ciudad, ciudad_real, context, final_data, sem_state, category)
+    else:
+        # Nadie es de ese tipo ni registra lo pedido. "Barbería VIP" suele ser
+        # un NOMBRE, no una barbería con el servicio "vip": se dice que no está,
+        # con las palabras del usuario, y se cuenta qué hay de ese tipo.
+        from tools.nexiservice import establishment_kind
+        buscado = _surface(" ".join([kind] + list(requirements)).strip(), user_text)
+        aviso = f"No encontré **{buscado}** en **{ciudad_real}**."
+        if establishment_kind(kind):
+            resto = await _kind_not_found(kind, tipo, ciudad, ciudad_real, context, final_data, sem_state, category)
+            # "No tengo barberías…" → "Tampoco tengo barberías…"
+            resto["reply"] = f"{aviso} " + re.sub(r"^No tengo ", "Tampoco tengo ", resto["reply"])
+            return resto
+        return {"reply": aviso, "final_data": final_data}
+
+    negocios_ui = _with_distances(mostrados[:6], context)
+    _present_businesses(final_data, negocios_ui)
+    sem_state.remember_list(ConceptKind.BUSINESS, negocios_ui)
+    _focus_business(final_data, sem_state, negocios_ui[0])
+    sem_state.save(final_data)
+    partes.append("Te los marco en el mapa." if len(negocios_ui) > 1 else "Te lo marco en el mapa.")
+    return {
+        "reply": "\n\n".join(partes) + f"\n[BIZ:{negocios_ui[0]['id']}]",
+        "final_data": final_data,
+        "properties": final_data.get("properties"),
+    }
+
+
+def _surface(term: str, user_text: str) -> str:
+    """
+    La forma en que el USUARIO escribió `term` (con sus tildes), si aparece.
+
+    La comprensión trabaja con palabras normalizadas ("clinica"); devolverlas
+    tal cual en la respuesta sale sin tildes y, en voz, mal pronunciado.
+    """
+    from core.semantic.morphology import normalize
+    objetivo = normalize(term or "").split()
+    if not objetivo:
+        return term
+    toks = re.findall(r"[\wÁÉÍÓÚÜÑáéíóúüñ]+", user_text or "")
+    normas = [normalize(t) for t in toks]
+    n = len(objetivo)
+    for i in range(len(toks) - n + 1):
+        if normas[i:i + n] == objetivo:
+            return " ".join(toks[i:i + n])
+    return term
+
+
+def _surface_all(texto: str, terminos, user_text: str) -> str:
+    for t in terminos or []:
+        texto = texto.replace(t, _surface(t, user_text))
+    return texto
+
+
+def _marked(n: int) -> str:
+    return "Te lo marco en el mapa." if n == 1 else "Te los marco en el mapa."
+
+
+async def _kind_not_found(kind, tipo, ciudad, ciudad_real, context, final_data, sem_state, category=None) -> Dict:
+    """
+    El usuario exigió un tipo de establecimiento y en su ciudad no hay ninguno.
+
+    Se dice así, sin rellenar con lo mejor valorado de la categoría. Si hay de
+    ese tipo en otra ciudad se nombra, y si el tipo es médico se ofrecen los
+    centros de atención que sí hay, presentados como lo que son.
+    """
+    from tools.nexiservice import CARE_KINDS, establishment_kind, find_by_kind, find_care
+
+    clave = establishment_kind(kind) or kind
+    salida = await find_by_kind([clave], city=ciudad)
+    singular = singularize_es(tipo)
+    partes = [f"No tengo {tipo} registrad{'as' if _feminine(singular) else 'os'} en **{ciudad_real}**."]
+    mostrados = []
+    otra = (salida or {}).get("other_city")
+    if otra and otra.get("matches"):
+        partes.append(f"En **{otra['city']}** sí hay: "
+                      + natural_list([f"**{b['name']}**" for b in otra["matches"][:3]]) + ".")
+        mostrados = otra["matches"][:5]
+    if clave in CARE_KINDS:
+        cerca = await find_care(city=ciudad)
+        centros = [b for b in (cerca.get("care") or []) if b["id"] not in {m["id"] for m in mostrados}]
+        if centros:
+            partes.append("Aquí, lo más parecido que tengo es "
+                          + natural_list([f"**{b['name']}** ({b['category'].lower()})" for b in centros[:3]])
+                          + f", aunque no figura{'n' if len(centros) > 1 else ''} como {singular}.")
+            mostrados = centros[:3] + mostrados
+    elif category:
+        # Lo que sí hay en la categoría a la que se ancló la petición, dicho como
+        # lo que es: "negocios de mascotas", no "veterinarias".
+        from tools.nexiservice import search_businesses as _sb
+        misma = await _sb(category=category, city=ciudad, grounded=True)
+        cercanos = [b for b in (misma.get("businesses") or []) if b["id"] not in {m["id"] for m in mostrados}]
+        if cercanos:
+            partes.append(f"En **{ciudad_real}** tengo negocios de {category.lower()}, aunque ninguno figura como "
+                          f"{singular}: " + natural_list([f"**{b['name']}**" for b in cercanos[:3]]) + ".")
+            mostrados = cercanos[:3] + mostrados
+    if mostrados:
+        negocios_ui = _with_distances(mostrados[:6], context)
+        _present_businesses(final_data, negocios_ui)
+        sem_state.remember_list(ConceptKind.BUSINESS, negocios_ui)
+        sem_state.focus_kind = sem_state.focus_id = sem_state.focus_label = None
+        _show_on_map(final_data, negocios_ui, {})
+        partes.append(_marked(len(negocios_ui)))
+    sem_state.save(final_data)
+    return {"reply": "\n\n".join(partes), "final_data": final_data, "properties": final_data.get("properties")}
+
+
 async def _handle_recommend_businesses(
     args: Dict, context: Dict, final_data: Dict, sem_state: ConversationState = None
 ) -> Optional[Dict]:
@@ -2142,6 +2897,13 @@ async def _handle_recommend_businesses(
             "reply": "¿Sobre qué quieres que te recomiende? Dime el servicio o el tipo de negocio.",
             "final_data": final_data,
         }
+
+    # Lo que el usuario EXIGE además del rubro ("me gusta el pescado", "para
+    # medicina general") se comprueba contra lo registrado de cada negocio.
+    kind, requirements = request_constraints(context.get("user_text") or "", args, termino)
+    if kind:
+        return await _recommend_with_requirements(
+            kind, requirements, ciudad, palabra or termino, context, final_data, sem_state, category=termino)
 
     salida = await rank_businesses_for(termino, city=ciudad)
     if not salida.get("success"):
@@ -2198,7 +2960,11 @@ async def _handle_recommend_businesses(
     sem_state.active_domain = termino
     sem_state.active_domain_label = palabra
 
-    if servicio:
+    # El servicio sólo se anota para reservar si el usuario habló de reservar.
+    # Recomendar es informar: antes cada recomendación dejaba la reserva
+    # preparada y cerraba con "¿Te agendo?" aunque sólo se estuviera mirando.
+    quiere_reservar = _asks_to_book(context.get("user_text") or "")
+    if servicio and quiere_reservar:
         sem_state.booking["service_name"] = servicio
         final_data["_pending_service"] = servicio
         final_data["booking_service"] = servicio
@@ -2253,10 +3019,11 @@ async def _handle_recommend_businesses(
         "\nYa lo tienes marcado en el mapa."
     )
 
-    if servicio:
-        partes.append(f"\n¿Te agendo la **{servicio}** en **{elegido['name']}**?")
-    else:
-        partes.append(f"\n¿Te agendo en **{elegido['name']}**?")
+    if quiere_reservar:
+        if servicio:
+            partes.append(f"\n¿Te agendo la **{servicio}** en **{elegido['name']}**?")
+        else:
+            partes.append(f"\n¿Te agendo en **{elegido['name']}**?")
     partes.append(f"\n[BIZ:{elegido['id']}]")
 
     # Las opciones se ven mientras se explican: la recomendación pierde la mitad
@@ -2860,6 +3627,158 @@ def _handle_gps(intent_name: str, context: Dict, final_data: Dict) -> Dict:
     }
 
 
+#: Intenciones que abren un tema nuevo: si había una reserva en curso, se estaciona.
+_CHANGES_DOMAIN = frozenset({
+    "search_businesses", "recommend_businesses", "compare_businesses",
+    "search_care", "restore_context",
+})
+
+#: Claves de final_data que el flujo de reserva lee además del estado semántico.
+_BOOKING_KEYS = (
+    "_pending_biz_id", "booking_time", "booking_date", "_pending_service", "booking_service",
+    "_pending_time", "_pending_date",
+)
+
+
+def _frame_matches(frame: Dict, target: List[str]) -> bool:
+    from core.semantic.morphology import normalize, strict_closeness
+    words = set(normalize(" ".join(str(frame.get(k) or "") for k in ("category", "label", "domain"))).split())
+    for t in target:
+        t = normalize(t)
+        if not any(strict_closeness(t, w) or (len(t) > 4 and w.startswith(t[:5])) for w in words):
+            return False
+    return bool(target)
+
+
+async def _handle_restore_context(args: Dict, context: Dict, final_data: Dict, sem_state: ConversationState) -> Dict:
+    """
+    "Volvamos a los restaurantes", "regresa a lo anterior", "retomemos la cita".
+
+    Recupera CONTEXTO: vuelve a poner delante una lista ya vista (con su mapa)
+    o vuelve a poner en curso la reserva que quedó a medias. No repite ninguna
+    acción: la lista se muestra, no se re-ejecuta lo que se hizo con ella.
+    """
+    target = [t for t in (args.get("target") or []) if t]
+    if args.get("booking"):
+        if sem_state.resume_booking():
+            sem_state.save(final_data)
+            from core.semantic.dialogue import next_missing_slot, SLOT_QUESTIONS
+            falta = next_missing_slot(sem_state)
+            negocio = sem_state.booking.get("business_name") or "el negocio que habías elegido"
+            pregunta = SLOT_QUESTIONS.get(falta, "¿Seguimos?") if falta else "¿Confirmamos?"
+            if falta:
+                sem_state.expect(falta, pregunta, goal="booking")
+                sem_state.save(final_data)
+            return {"reply": f"Retomamos tu cita en **{negocio}**. {pregunta}", "final_data": final_data}
+        return {"reply": "No tengo ninguna cita a medias. ¿En qué negocio quieres agendar?",
+                "final_data": final_data}
+
+    frames = list(sem_state.history)
+    elegido = None
+    if target:
+        elegido = next((f for f in reversed(frames) if _frame_matches(f, target)), None)
+    elif frames:
+        elegido = frames[-1]
+
+    if not elegido:
+        if target:
+            # Nunca se vio esa lista: volver a ella es buscarla.
+            termino = " ".join(target)
+            return await _handle_search_businesses(
+                {"category": termino, "_user_terms": target}, context, final_data, sem_state)
+        return {"reply": "No tengo una lista anterior a la que volver. ¿Qué quieres que busque?",
+                "final_data": final_data}
+
+    items = elegido.get("items") or []
+    negocios = [{
+        "id": i.get("entity_id"), "name": i.get("label"),
+        **{k: v for k, v in (i.get("extra") or {}).items()},
+    } for i in items]
+    sem_state.history = [f for f in sem_state.history if f is not elegido]
+    sem_state.remember_list(ConceptKind.BUSINESS, negocios)
+    sem_state.active_domain = elegido.get("domain") or elegido.get("category")
+    sem_state.active_domain_label = elegido.get("label")
+    sem_state.focus_kind = sem_state.focus_id = sem_state.focus_label = None
+    _present_businesses(final_data, negocios)
+    _show_on_map(final_data, negocios, {})
+    sem_state.save(final_data)
+
+    palabra = elegido.get("label") or (elegido.get("category") or "")
+    if palabra:
+        plural = pluralize_es(singularize_es(palabra.lower()))
+        nombre = f"{'las' if _feminine(singularize_es(plural)) else 'los'} {plural}"
+    else:
+        nombre = "las opciones"
+    listado = "\n".join(f"{n}. **{b['name']}**{_distance_phrase(b)}" for n, b in enumerate(negocios[:5], start=1))
+    return {
+        "reply": (f"Volvemos a {nombre} que te mostré:\n{listado}\n\n"
+                  f"{'Lo' if len(negocios) == 1 else 'Los'} tienes otra vez en el mapa. ¿Cuál quieres ver?"),
+        "final_data": final_data,
+    }
+
+
+async def _handle_care_search(args: Dict, context: Dict, final_data: Dict, sem_state: ConversationState) -> Dict:
+    """
+    Buscar atención médica después de que el usuario contó un síntoma.
+
+    No es una búsqueda comercial cualquiera:
+      - El tipo de establecimiento es obligatorio: consultorio, centro médico,
+        clínica, hospital, IPS o urgencias. Que una óptica liste "Consulta Médica
+        General" no la convierte en un sitio donde atender un dolor de cabeza; si
+        aparece, aparece como alternativa y dicho así.
+      - Con signos de alarma, lo primero es la urgencia (123), antes que la lista.
+      - No se ofrece agendar: quien tiene un síntoma fuerte no necesita una cita
+        para dentro de tres días.
+    """
+    from tools.nexiservice import find_care
+
+    level = args.get("level") or "concern"
+    ciudad = args.get("city") or context.get("active_city")
+    salida = await find_care(city=ciudad)
+    if not salida.get("success"):
+        return _tool_failed(salida, final_data, "buscar centros médicos")
+
+    medicos = salida.get("care") or []
+    # Las alternativas (negocios que registran una consulta médica sin ser un
+    # centro médico) sólo cuando no hay ningún centro de atención: si hay uno,
+    # ponerle al lado una óptica es ruido, y para un síntoma, ruido peligroso.
+    alternativas = [] if medicos else (salida.get("alternatives") or [])
+    donde = salida.get("city") or ciudad or "tu zona"
+    partes = []
+    if level == "alarm":
+        partes.append("Si el dolor es muy fuerte, empezó de golpe o viene con dificultad para respirar, "
+                      "desmayo o confusión, ve a urgencias o llama al **123**.")
+    mostrados = medicos + alternativas
+    if medicos:
+        lista = "\n".join(f"{n}. **{b['name']}** ({b['category']}){_distance_phrase(b)}"
+                          for n, b in enumerate(_with_distances(medicos, context)[:5], start=1))
+        partes.append(f"Estos son los centros de atención médica registrados en **{donde}**:\n{lista}")
+    else:
+        partes.append(f"No tengo consultorios, clínicas ni centros médicos registrados en **{donde}**.")
+    if alternativas:
+        desde = len(medicos[:5]) + 1
+        lista = "\n".join(f"{n}. **{b['name']}** ({b['category']}): registra {b['evidence']}"
+                          for n, b in enumerate(alternativas[:4], start=desde))
+        partes.append("Estos otros registran consultas médicas, aunque no figuran como centro médico:\n" + lista)
+    if salida.get("other_city"):
+        partes.append(f"En **{salida['other_city']['city']}** sí hay: "
+                      + ", ".join(f"**{b['name']}**" for b in salida["other_city"]["care"][:3]) + ".")
+
+    if mostrados:
+        # Mismo orden que el texto: primero los centros médicos, luego las
+        # alternativas. "El segundo" tiene que ser el segundo que se leyó.
+        negocios_ui = _with_distances(medicos[:5], context) + _with_distances(alternativas[:4], context)
+        _present_businesses(final_data, negocios_ui)
+        sem_state.remember_list(ConceptKind.BUSINESS, negocios_ui)
+        sem_state.active_domain = "atención médica"
+        sem_state.active_domain_label = "centros médicos"
+        sem_state.focus_kind = sem_state.focus_id = sem_state.focus_label = None
+        _show_on_map(final_data, negocios_ui, {})
+        partes.append(_marked(len(negocios_ui)))
+    sem_state.save(final_data)
+    return {"reply": "\n\n".join(partes), "final_data": final_data, "properties": final_data.get("properties")}
+
+
 async def _handle_bare_confirmation(
     intent_name: str, args: Dict, messages: List, context: Dict,
     user_data: Dict, final_data: Dict, sem_state: ConversationState,
@@ -2871,19 +3790,17 @@ async def _handle_bare_confirmation(
     orden: una reserva a medias, un negocio en foco, o una lista sin elegir. Un
     "dale" no significa nada por sí solo; significa lo último que se preguntó.
     """
-    if sem_state.goal == "booking" and sem_state.booking.get("business_id"):
+    # Sólo se continúa lo que la respuesta anterior propuso o preguntó. Un
+    # negocio en foco o una reserva que quedó en memoria no son una propuesta.
+    offer = sem_state.live_offer()
+    if offer and not offer.get("options"):
+        return await pre_llm_interceptor(
+            "nexiservice", offer.get("intent"), dict(offer.get("args") or {}),
+            {**context, "user_text": "", "final_data": final_data},
+        )
+    if sem_state.goal == "booking" and sem_state.booking.get("business_id") and sem_state.is_collecting:
         return await _handle_request_appointment(
             dict(sem_state.booking), messages, user_data, final_data, sem_state
-        )
-
-    if sem_state.focus_id and sem_state.focus_kind == ConceptKind.BUSINESS:
-        if intent_name == "confirm_navigation":
-            return await _handle_navigate_to_company(
-                {"business_id": sem_state.focus_id, "business_name": sem_state.focus_label},
-                context, final_data, sem_state,
-            )
-        return await _handle_get_business_services(
-            {"business_id": sem_state.focus_id}, messages, context, final_data, sem_state
         )
 
     conocidos = _known_businesses(final_data, sem_state)
@@ -2900,25 +3817,6 @@ async def _handle_bare_confirmation(
         "reply": "¿Con qué seguimos? Dime qué necesitas y te busco opciones.",
         "final_data": final_data,
     }
-
-
-async def _resolve_logged_user_name(ext_id, user_data: Dict) -> Optional[str]:
-    name = (
-        user_data.get("name") or user_data.get("full_name")
-        or user_data.get("username") or user_data.get("nombre")
-        or user_data.get("display_name")
-    )
-    logger.info("[INTERCEPTOR] user_data keys: %s", list(user_data.keys()))
-    if name:
-        return name
-    # La misma traducción de identidades que usa la confirmación. Aquí se leía
-    # el id de la persona como si fuera el de la cuenta y se unía contra
-    # `tercero`: la reserva salía a nombre de una empresa que no tenía nada que
-    # ver con quien estaba escribiendo.
-    from tools.nexiservice import resolve_booking_identity
-
-    identidad = await resolve_booking_identity(ext_id)
-    return identidad["nombre"] if identidad else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

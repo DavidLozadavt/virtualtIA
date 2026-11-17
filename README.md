@@ -282,7 +282,9 @@ python main.py
 
 El puerto sale de `PORT` en el `.env` (8098 en local). Los fronts apuntan a Lyra con
 `VITE_LYRA_API_URL` y Lyra apunta al backend de SchoolSena con `SCHOOLSENA_API_BASE`
-(en local `http://127.0.0.1:8000/api`; nunca mezclar un front local con la API de producción).
+(en local, la URL de `php artisan serve` del backend de SchoolSena: `http://127.0.0.1:8000/api` si corre solo, o el puerto
+que tenga si el 8000 está ocupado; nunca mezclar un front local con la API de producción). `INTELLITAXI_API_BASE` también
+debe apuntar a un backend local: con la URL de producción, las pruebas de voz o WhatsApp crean servicios reales.
 
 > Si hay conflicto de puerto en Windows:
 > ```powershell
@@ -294,7 +296,7 @@ El puerto sale de `PORT` en el `.env` (8098 en local). Los fronts apuntan a Lyra
 ### Paso 5 — Verificar
 
 ```
-GET http://localhost:8010/admin/health
+GET http://127.0.0.1:8098/admin/health
 ```
 
 Respuesta esperada: JSON con todos los servicios en `"status": "healthy"`.
