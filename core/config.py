@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # reconoce—, nunca como requisito: si falla, Lyra responde igual.
     LLM_EXTERNAL_ENABLED: bool = False
 
+    # Clave compartida con el backend del ERP para /crm/assist (cabecera
+    # X-Lyra-Key). Vacía = el endpoint no atiende a nadie.
+    CRM_API_KEY: str = ""
+
     # Control de gasto (core/llm_usage.py). Un turno no llama al modelo más de
     # LLM_MAX_CALLS_PER_TURN veces; con el gasto estimado del día por encima de
     # LLM_DAILY_BUDGET_USD (0 = sin límite) Lyra pasa a modo local.
