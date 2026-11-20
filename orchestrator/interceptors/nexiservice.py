@@ -3079,7 +3079,7 @@ async def _handle_get_business_reviews(args: Dict, messages: List, final_data: D
         f"({total} {'opinión' if total == 1 else 'opiniones'})\n\n"
     )
     for r in reseñas[:3]:
-        reply += f"- \"{r['comentario']}\" ({r['rating']}⭐)\n"
+        reply += f"- \"{r.get('comment') or 'Sin comentario'}\" ({r['rating']}⭐)\n"
 
     return {"reply": reply, "final_data": final_data}
 
