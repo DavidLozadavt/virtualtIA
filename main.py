@@ -25,6 +25,7 @@ from api.routers.freeswitch import freeswitch_router
 from api.routers.whatsapp import whatsapp_router
 from api.routers.browser_voice import browser_voice_router
 from api.routers.tts import router as tts_router
+from api.routers.crm import crm_router
 from api.middleware import RateLimitMiddleware
 
 # ── Logging ──────────────────────────────────────────────────────
@@ -228,6 +229,7 @@ app.include_router(freeswitch_router)      # FreeSWITCH direct (/freeswitch/*)
 app.include_router(whatsapp_router)        # Meta WhatsApp webhooks (/wh/whatsapp)
 app.include_router(browser_voice_router)   # Browser voice STT/TTS (/voice/transcribe, /voice/synthesize)
 app.include_router(tts_router)             # Serve generated MP3 files (/tts/{audio_id})
+app.include_router(crm_router)             # Asistencia comercial del ERP (/crm/assist)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     import json

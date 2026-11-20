@@ -35,6 +35,7 @@ Defensa contra eco, en capas (de la señal al texto):
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 import random
 import re
@@ -161,6 +162,9 @@ class VoiceCallRuntime:
         self._initialized = False
         self._ending = False
         self._turns_done = 0
+        # Diálogo de la llamada (hablante, texto) para el CRM del ERP al colgar.
+        self._dialogo: list[tuple[str, str]] = []
+        self._inicio: Optional[float] = None
         self._turn_queue: asyncio.Queue = asyncio.Queue()
         self._tasks: list[asyncio.Task] = []
 
@@ -252,6 +256,7 @@ class VoiceCallRuntime:
         self._tasks.append(asyncio.create_task(self._watchdog_loop()))
         self._tasks.append(asyncio.create_task(self._turn_worker()))
 
+        self._inicio = time.monotonic()
         logger.info(
             "[runtime] call started call_uuid=%s caller=%s",
             call_uuid,
@@ -513,6 +518,7 @@ class VoiceCallRuntime:
             norm[:200],
         )
 
+        self._dialogo.append(("Cliente", norm))
         nlu_result = await self.nlu.extract(norm, session.state, session.last_message)
         turn = await self._process_turn_with_filler(session, norm, nlu_result, confidence)
         self.store.save(session)
@@ -640,6 +646,7 @@ class VoiceCallRuntime:
         """Reproduce `text`; retorna al terminar o al ser interrumpido."""
         if not (text or "").strip() or self._ending:
             return
+        self._dialogo.append(("Lyra", text.strip()))
         task = asyncio.create_task(self._play_text(text))
         self._playout_task = task
         await asyncio.wait({task})
@@ -804,6 +811,20 @@ class VoiceCallRuntime:
             )
         if self.recorder is not None:
             self.recorder.write_wav()
+        # CRM del ERP: si el número es de un contacto, la llamada queda en su conversación.
+        # getattr: _shutdown corre también si el constructor no llegó a terminar.
+        inicio = getattr(self, "_inicio", None)
+        if inicio is not None and self.transport.caller_number:
+            try:
+                from services.telephony import crm_calls
+                crm_calls.avisar_llamada_ia(
+                    self.transport.call_uuid or "",
+                    self.transport.caller_number,
+                    int(time.monotonic() - inicio),
+                    getattr(self, "_dialogo", []),
+                )
+            except Exception as e:  # noqa: BLE001 — el cierre nunca se rompe por el CRM
+                logger.warning("[runtime] aviso CRM falló: %s", e)
         if self.session is not None:
             if self.session.service_created or self.session.state == STATE_FINISHED:
                 self.store.save(self.session)
