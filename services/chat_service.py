@@ -32,12 +32,95 @@ def _strip_debug_markers(text: str) -> str:
     """Removes technical markers like [BIZ:123], [ANALIZANDO DATOS], etc. from the final output."""
     if not text:
         return text
-    # Strip all technical markers in brackets (e.g. [BIZ:123], [ANALIZANDO DATOS], [CONFIRMACIÓN NECESARIA])
-    text = re.sub(r"\[[A-ZÁÉÍÓÚÑ\s]{3,}(?::.*?)?\]", "", text, flags=re.IGNORECASE)
+    # Sólo los marcadores que de verdad emite el sistema: etiquetas con dos
+    # puntos ([BIZ:123], [CITY:Cali], [HORA:9]) y las tres banderas fijas. Antes
+    # se borraba cualquier texto entre corchetes en mayúsculas, incluidos datos
+    # reales (el título de una actividad "[TALLER] Ciclos" perdía su etiqueta).
+    text = re.sub(r"\[(?:[A-Z_]{2,}:[^\]\n]*|CONFIRMACI[OÓ]N NECESARIA|ANALIZANDO DATOS|MOSTRAR TODOS)\]", "", text)
 
-    # Clean up multiple newlines or trailing spaces left by stripping
-    text = re.sub(r"\n\s*\n", "\n", text)
+    # Se limpia el hueco que deja un marcador, pero sin borrar los párrafos: la
+    # línea en blanco es lo que separa en markdown una lista del texto que la
+    # sigue (sin ella, "Te los estoy mostrando..." quedaba pegado al último ítem).
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+#: Proyectos cuyo mensaje pasa por la limpieza del habla antes de interpretarse.
+#: Los demás (IntelliTaxi, RentUs) conservan su comportamiento.
+_CLEANED_PROJECTS = {"nexiservice", "schoolsena"}
+
+
+#: user_id que mandan los fronts cuando nadie ha iniciado sesión.
+_ANONYMOUS_USER = "user_client_demo"
+_THREAD_NS = uuid.UUID("6f1c2b0e-4a57-4d0e-9a51-6c9b3e1d2f10")
+
+
+def _is_anonymous(internal_user_id) -> bool:
+    from core.database import get_connection
+    try:
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT external_user_id FROM lyra_users WHERE id = %s", (internal_user_id,))
+            row = cur.fetchone() or {}
+        return row.get("external_user_id") == _ANONYMOUS_USER
+    except Exception:
+        return False
+
+
+def _adopt(conversation_id: str, user_id: int) -> None:
+    from core.database import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE lyra_conversations SET user_id = %s WHERE id = %s", (user_id, conversation_id))
+        conn.commit()
+
+
+def _display_message(payload) -> Optional[str]:
+    """Versión para mostrar de un mensaje dictado (NexiService y SchoolSena)."""
+    if payload.project_id not in _CLEANED_PROJECTS or (payload.input_mode or "").lower() != "voice":
+        return None
+    from core.semantic.display_text import format_transcript
+    return format_transcript(payload.message)
+
+
+def _narration(project_id: str, reply: str, properties) -> list:
+    """Segmentos hablados (sólo NexiService y SchoolSena)."""
+    if project_id not in _CLEANED_PROJECTS:
+        return []
+    try:
+        from core.narration import build_narration
+        return build_narration(reply, properties)
+    except Exception as exc:  # la voz no puede costarle al usuario su respuesta
+        logger.error("No se pudo armar la narración: %s", exc)
+        return []
+
+
+def _own_conversation(conversation_id: str, user_id: int, project_slug: str):
+    """
+    La conversación pedida, sólo si es de este usuario y de este proyecto.
+
+    El id lo manda el cliente. Si pertenece a otra persona o a otro proyecto,
+    continuar ese hilo entregaría su contexto e historial. Los fronts no adoptan
+    el id que devuelve el servidor (siguen mandando el suyo), así que el hilo
+    propio se DERIVA del id recibido: es el mismo en cada turno y el contexto se
+    conserva. Un hilo anónimo del mismo proyecto pasa al usuario que acaba de
+    iniciar sesión: es la misma persona a mitad de conversación (p. ej. una
+    reserva que pidió login).
+
+    Sólo para NexiService y SchoolSena; los demás proyectos siguen como antes.
+    """
+    conversation = get_or_create_conversation(conversation_id, user_id, project_slug)
+    if project_slug not in _CLEANED_PROJECTS:
+        return conversation_id, conversation
+    if conversation.get("user_id") == user_id and conversation.get("project_slug") == project_slug:
+        return conversation_id, conversation
+    if conversation.get("project_slug") == project_slug and _is_anonymous(conversation.get("user_id")):
+        _adopt(conversation_id, user_id)
+        conversation["user_id"] = user_id
+        return conversation_id, conversation
+    logger.warning("conversation_id ajeno (otro usuario o proyecto); se usa un hilo propio derivado.")
+    derived = str(uuid.uuid5(_THREAD_NS, f"{conversation_id}|{user_id}|{project_slug}"))
+    return derived, get_or_create_conversation(derived, user_id, project_slug)
+
 
 class ChatService:
     def __init__(self, db_conn, config: Settings, llm_engine, registries: Dict[str, Any] = None):
@@ -67,7 +150,17 @@ class ChatService:
         user = get_or_create_user(payload.project_id, payload.user_id)
         
         # Handle personality override
-        active_personality = payload.personality or user.get("active_personality") or "nexo"
+        # Sin elección previa se usa la personalidad por defecto del proyecto:
+        # "nexo" sólo existe en NexiService y en SchoolSena dejaba al asistente
+        # sin su prompt de personalidad.
+        default_personality = "nexo"
+        if payload.project_id in _CLEANED_PROJECTS:
+            default_personality = (load_project_config(payload.project_id) or {}).get("active_personality") or "nexo"
+        active_personality = payload.personality or user.get("active_personality") or default_personality
+        # "Sena" era el nombre de Nexo en SchoolSena: quien lo tenía elegido sigue
+        # con el mismo asistente, ahora con su nombre unificado.
+        if payload.project_id == "schoolsena" and str(active_personality).lower() == "sena":
+            active_personality = "nexo"
         logger.info(f"PERSONALITY CHECK | Payload: {payload.personality} | DB: {user.get('active_personality')} | Active: {active_personality}")
         
         if active_personality and active_personality != user.get("active_personality"):
@@ -88,7 +181,7 @@ class ChatService:
             bot_name = project_config.get("assistant_name", "Lyra")
             greeting = project_config.get("greeting") or f"¡Hola! Soy {bot_name}. ¿Cómo puedo ayudarte hoy?"
             
-            get_or_create_conversation(conversation_id, user["id"], payload.project_id)
+            conversation_id, _ = _own_conversation(conversation_id, user["id"], payload.project_id)
             save_message(conversation_id, "assistant", greeting)
             
             return ChatResponse(
@@ -102,11 +195,7 @@ class ChatService:
         trust_level = user["trust_level"]
 
         # Get or create conversation
-        conversation = get_or_create_conversation(
-            conversation_id=conversation_id,
-            user_id=user["id"],
-            project_slug=payload.project_id,
-        )
+        conversation_id, conversation = _own_conversation(conversation_id, user["id"], payload.project_id)
         # Lo que sigue vigente de los turnos anteriores. La respuesta del turno
         # pasado no entra —es una salida, no memoria— y un hilo abandonado hace
         # horas entra vacío: retomarlo hacía que un "hola" recibiera el desenlace
@@ -114,6 +203,17 @@ class ChatService:
         last_message_at = conversation.get("last_message_at")
         thread_is_stale = is_stale(last_message_at)
         final_data = carry_over_context(conversation.get("final_data"), last_message_at)
+
+        # Cada petición es un turno numerado. Lo que Lyra propuso o preguntó
+        # queda atado al turno en que lo hizo y caduca con él: un "sí" sólo puede
+        # aceptar lo de la respuesta inmediatamente anterior.
+        from orchestrator.memory_manager import next_turn
+        turn_id = next_turn(conversation_id, final_data)
+        final_data["_turn"] = turn_id
+        if payload.project_id == "nexiservice":
+            _st = ConversationState.load(final_data)
+            _st.begin_turn(turn_id)
+            _st.save(final_data)
 
         # Fetch conversation history
         # Un hilo caducado tampoco arrastra sus mensajes: si el contexto empieza
@@ -126,7 +226,10 @@ class ChatService:
         )
 
         # Save user message
-        save_message(conversation_id, "user", payload.message)
+        # Los avisos del front (p. ej. "terminó de iniciar sesión") no son algo
+        # que el usuario dijo: no entran al historial que lee la comprensión.
+        if not (payload.message.startswith("__") and payload.message.endswith("__")):
+            save_message(conversation_id, "user", payload.message)
 
         # Intentos de sacar al asistente de su papel (pedir sus instrucciones,
         # declararse administrador): respuesta fija, sin modelo ni herramientas.
@@ -137,6 +240,7 @@ class ChatService:
             save_message(conversation_id, "assistant", guarded["reply"])
             update_conversation_timestamp(conversation_id)
             return ChatResponse(
+                turn_id=turn_id,
                 reply=guarded["reply"],
                 conversation_id=conversation_id,
                 trust_level=trust_level,
@@ -163,6 +267,16 @@ class ChatService:
                 logger.warning("Rol enviado por el cliente (%s) distinto al del token (%s); se usa el del token.",
                                payload.role, effective_role)
         user_with_role = {**user, "role": effective_role}
+        if payload.project_id == "nexiservice":
+            # Quién es de verdad: lo dice el token, verificado contra la pasarela.
+            # El `user_id` del cuerpo lo escribe el navegador y sólo sirve para
+            # ubicar la conversación; reservar exige esta identidad.
+            from tools.nexi_booking import verify_session
+            verified = await verify_session(auth_header)
+            if verified and str(verified["persona_id"]) != str(payload.user_id):
+                logger.warning("user_id del cliente (%s) distinto al del token (%s); manda el token.",
+                               payload.user_id, verified["persona_id"])
+            user_with_role["verified_identity"] = verified
 
         from orchestrator.navigation import sanitize_catalog
         nav_catalog = sanitize_catalog([i.model_dump() for i in (payload.nav_catalog or [])])
@@ -182,29 +296,43 @@ class ChatService:
         # La comprensión puede consultar la base y, para NexiService, al modelo
         # (resolución semántica): se ejecuta fuera del event loop para no
         # congelar al resto de usuarios mientras tanto.
+        # Lo que se interpreta es la petición final, sin arranques, muletillas ni
+        # versiones que el propio usuario descartó ("bueno no, mejor..."). Se
+        # guarda el mensaje original; sólo cambia lo que lee la comprensión.
+        understood_message = payload.message
+        if payload.project_id in _CLEANED_PROJECTS:
+            from core.semantic.utterance import prepare_for_understanding
+            understood_message = prepare_for_understanding(payload.message, payload.project_id, project_config)
+
         import asyncio as _asyncio
-        local_intent = await _asyncio.to_thread(
-            detect_intent,
-            payload.message,
-            payload.project_id,
-            mentioned_city=payload.active_city,
-            current_context={
-                "last_assistant_msg": last_assistant_msg,
-                "semantic_state": final_data.get(ConversationState.STORAGE_KEY),
-                # Quién habla cambia qué significan algunas frases: "llévame a
-                # mi agenda" abre una pantalla para el dueño del negocio y
-                # empieza una cita para quien lo visita.
-                "role": effective_role,
-                "active_company_id": payload.active_company_id,
-            }
-        )
+        if payload.project_id == "schoolsena":
+            # SchoolSena entiende con su propio NLU (schoolsena_nlu). El router
+            # general y la capa semántica son de NexiService (catálogo de
+            # negocios, intenciones de reserva): no deben tocar un turno de School.
+            local_intent = {"intent": None, "args": {}}
+        else:
+            local_intent = await _asyncio.to_thread(
+                detect_intent,
+                understood_message,
+                payload.project_id,
+                mentioned_city=payload.active_city,
+                current_context={
+                    "last_assistant_msg": last_assistant_msg,
+                    "semantic_state": final_data.get(ConversationState.STORAGE_KEY),
+                    # Quién habla cambia qué significan algunas frases: "llévame a
+                    # mi agenda" abre una pantalla para el dueño del negocio y
+                    # empieza una cita para quien lo visita.
+                    "role": effective_role,
+                    "active_company_id": payload.active_company_id,
+                }
+            )
         
         messages = build_system_prompt(
             project_config=project_config,
             user_trust_level=trust_level,
             user_data=user_with_role,
             conversation_history=history,
-            user_message=payload.message,
+            user_message=understood_message,
             active_company_id=payload.active_company_id,
             local_intent=local_intent,
         )
@@ -239,7 +367,8 @@ class ChatService:
             new_final_data = agent_data
 
         from orchestrator.memory_manager import update_conversation_final_data
-        update_conversation_final_data(conversation_id, new_final_data)
+        new_final_data["_turn"] = turn_id
+        update_conversation_final_data(conversation_id, new_final_data, turn=turn_id)
         final_data = new_final_data
 
         # Persist tool results
@@ -258,6 +387,9 @@ class ChatService:
                 save_message(conversation_id, m["role"], candidate_content)
 
         reply = agent_data["reply"]
+        # La respuesta tiene que venir del proyecto de la petición (ver project_scope).
+        from orchestrator.project_scope import enforce
+        reply = enforce(payload.project_id, new_final_data, reply)
 
         # Clean reply for the user output
         clean_reply = _strip_debug_markers(reply)
@@ -312,6 +444,8 @@ class ChatService:
                 audio_url = f"/tts/{audio_id}"
 
         return ChatResponse(
+
+            turn_id=turn_id,
             reply=clean_reply,
             conversation_id=conversation_id,
             trust_level=trust_level,
@@ -326,7 +460,11 @@ class ChatService:
             clarification_question=agent_data.get("clarification_question") or _fd.get("clarification_question"),
             audio_url=audio_url,
             needs_auth=bool(_fd.get("needs_auth")),
+            narration=_narration(payload.project_id, reply, _properties),
+            display_message=_display_message(payload),
             pending_reservation=_fd.get("_pending_reservation"),
+            form_draft=_fd.get("form_draft"),
+            school_outcome=_fd.get("school_outcome"),
         )
 
 
@@ -344,6 +482,9 @@ class ChatService:
             or "es-CO-SalomeNeural"
         )
         try:
+            from core.speech_text import SPEECH_PROJECTS, to_speech
+            if project_config.get("project_id") in SPEECH_PROJECTS or project_config.get("slug") in SPEECH_PROJECTS:
+                text = to_speech(text)
             return await get_voice_engine().synthesize_to_bytes(text, voice=voice_id)
         except Exception as exc:
             # Quedarse sin audio no puede costarle al usuario su respuesta.

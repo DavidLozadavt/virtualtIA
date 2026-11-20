@@ -629,6 +629,10 @@ def _inject_ids_into_titles(properties: list[dict]) -> list[dict]:
 
 def _resolve_personality(project_config: dict) -> str:
     """Resuelve el nombre de la personalidad activa desde project_config."""
+    # SchoolSena tiene sus propias plantillas: Nexo es el mismo asistente en las
+    # dos conexiones, pero en School no puede usar las frases comerciales.
+    if (project_config.get("slug") or project_config.get("project_id")) == "schoolsena":
+        return "schoolsena"
     name = (project_config.get("assistant_name") or "Lyra").lower()
     return name if name in ("lyra", "nexo") else "lyra"
 
@@ -640,15 +644,21 @@ def _resp(project_config: dict, conv_id: str, intent: str, scenario: str = "defa
     return generate_response(conv_id, personality, intent, scenario, variables)
 
 
-def _local_default_reply(user_text: str) -> str:
+def _local_default_reply(user_text: str, project_id: str = "") -> str:
     """
     Qué decir cuando no hay nada preparado y no se sale a un modelo.
 
     Es el último recurso del modo local: no se sabe qué quiere el usuario, así
-    que se le pregunta en vez de inventarle una intención.
+    que se le pregunta en vez de inventarle una intención. La pregunta es la de
+    cada proyecto: a un aprendiz de SchoolSena no se le ofrecen negocios.
     """
     if not (user_text or "").strip():
         return "¿En qué te puedo ayudar?"
+    if project_id == "schoolsena":
+        return (
+            "No estoy seguro de haberte entendido. ¿Quieres ver tus clases, tus "
+            "actividades pendientes o tus notas?"
+        )
     return (
         "No estoy seguro de haberte entendido. ¿Buscas un negocio, quieres ver "
         "servicios o prefieres agendar una cita?"
@@ -695,7 +705,23 @@ def _compact_tool_output(output) -> str:
     return text
 
 
-async def run_agent_loop(
+async def run_agent_loop(engine, messages: list[dict], project_id: str, *args, **kwargs) -> dict:
+    """
+    Bucle del agente, con la respuesta marcada con el proyecto que la produjo.
+
+    Todo lo que sale de aquí —interceptor, respuesta local, modelo— se produjo
+    para `project_id`; la marca permite que ChatService lo compruebe.
+    """
+    from orchestrator.interceptors.manager import SOURCE_KEY
+
+    out = await _run_agent_loop(engine, messages, project_id, *args, **kwargs)
+    fd = out.get("final_data") if isinstance(out.get("final_data"), dict) else None
+    if fd is not None:
+        fd.setdefault(SOURCE_KEY, project_id)
+    return out
+
+
+async def _run_agent_loop(
     engine,
     messages: list[dict],
     project_id: str,
@@ -795,7 +821,7 @@ async def run_agent_loop(
     # pida (y gaste tokens describiéndola).
     if project_id == "schoolsena":
         from orchestrator.interceptors.schoolsena import allowed_tools
-        allowed = allowed_tools((user_data or {}).get("role", ""))
+        allowed = allowed_tools((user_data or {}).get("role", ""), (final_data or {}).get("_school_caps"))
         tools_schema = [t for t in tools_schema if t.get("name") in allowed]
     if nav_catalog:
         tools_schema = list(tools_schema) + [_NAV_TOOL_SCHEMA]
@@ -804,11 +830,22 @@ async def run_agent_loop(
     # sin respuesta, se usa la que dejó preparada el interceptor antes que
     # colgarse de una API que puede no estar.
     from core.config import settings
-    if not settings.LLM_EXTERNAL_ENABLED:
+    from core import llm_usage
+    from orchestrator.escalation import decide as _decide_escalation
+
+    decision = _decide_escalation(project_id, user_text, intent_result, final_data)
+    final_data.pop("_escalation_reason", None)
+    if not settings.LLM_EXTERNAL_ENABLED or not decision.escalate:
+        # "+motivo": habría escalado, pero el modelo externo está apagado.
+        # Sin "+": la compuerta decidió que no valía la pena escalar.
+        llm_usage.note_gate(("+" + decision.reason) if decision.escalate else decision.reason)
         fallback = final_data.pop("_fallback_reply", None)
-        final_data["reply"] = fallback or _local_default_reply(user_text)
-        logger.info("Modo local: respuesta resuelta sin modelo externo.")
+        final_data["reply"] = fallback or _local_default_reply(user_text, project_id)
+        logger.info("Turno resuelto sin modelo externo (motivo: %s, externo=%s).",
+                    decision.reason, settings.LLM_EXTERNAL_ENABLED)
         return {"final_data": final_data, "reply": final_data["reply"]}
+    llm_usage.note_gate(decision.reason)
+    logger.info("Escalamiento al modelo externo (motivo: %s).", decision.reason)
 
     llm_cfg = project_config.get("llm") or {}
     max_tokens = int(llm_cfg.get("max_tokens") or settings.LLM_DEFAULT_MAX_TOKENS)

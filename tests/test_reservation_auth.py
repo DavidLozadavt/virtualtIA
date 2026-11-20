@@ -35,14 +35,18 @@ from tools.nexiservice import _format_slot, _natural_list
 # 1. QUIÉN CUENTA COMO AUTENTICADO
 # ═══════════════════════════════════════════════════════════════════════════════
 
+SESION = {"external_user_id": "61",
+          "verified_identity": {"persona_id": 61, "email": "cliente.uno@lyra-prueba.local"}}
+
+
 @pytest.mark.parametrize("user_data,expected", [
-    ({"external_user_id": "1"}, True),
-    ({"external_user_id": 42}, True),
+    # Sólo cuenta la identidad verificada con el token, no el id que manda el navegador.
+    (SESION, True),
+    ({"external_user_id": "1"}, False),
+    ({"external_user_id": 42}, False),
+    ({"external_user_id": "1", "verified_identity": None}, False),
     ({"external_user_id": "user_client_demo"}, False),
     ({"external_user_id": "anon_9f3c"}, False),
-    ({"external_user_id": "guest"}, False),
-    ({"external_user_id": "unknown"}, False),
-    ({"external_user_id": ""}, False),
     ({}, False),
 ])
 def test_reconocimiento_de_sesion(user_data, expected):
@@ -93,14 +97,15 @@ def test_la_reserva_pendiente_sobrevive_al_guardado():
 # 3. AL ENTRAR, LA CITA SE CIERRA SOLA
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def test_al_iniciar_sesion_la_reserva_se_confirma(monkeypatch):
+def test_al_iniciar_sesion_la_reserva_aceptada_se_crea(monkeypatch):
+    """Aceptada antes del login: al entrar se vuelve a validar y se crea, sin preguntar."""
     llamadas = []
 
     async def fake_confirm(**kwargs):
         llamadas.append(kwargs)
         return {
-            "success": True,
-            "message": "¡Listo, Sofía Restrepo! Tu cita queda para mañana a las 09:00.",
+            "success": True, "status": "confirmed", "agenda_id": 77,
+            "message": "¡Listo! Quedó agendada. Tu número de reserva es #77.",
             "url": "/perfil/mis-reservas",
         }
 
@@ -109,38 +114,77 @@ def test_al_iniciar_sesion_la_reserva_se_confirma(monkeypatch):
     )
 
     final_data = {}
-    _remember_pending_reservation(PENDIENTE, final_data)
+    _remember_pending_reservation({**PENDIENTE, "authorized": True}, final_data)
 
-    out = asyncio.run(_resume_pending_reservation({"external_user_id": "1"}, final_data))
+    out = asyncio.run(_resume_pending_reservation(SESION, final_data))
 
     assert out is not None
-    assert "Listo" in out["reply"]
-    # Se confirmó con lo que ya se había acordado, sin volver a preguntar.
+    assert "#77" in out["reply"]
+    # Se crea (execute) con lo acordado, revalidándolo en la herramienta.
+    assert llamadas[0]["execute"] is True
     assert llamadas[0]["business_id"] == 103
     assert llamadas[0]["service_name"] == "Consulta de Medicina General"
     assert llamadas[0]["time"] == "09:00"
-    # Y el nombre sale de la cuenta, no de un texto escrito en el chat.
-    assert llamadas[0]["reservation_name"] is None
-    # El proceso queda cerrado.
     assert get_booking_state(out["final_data"]) == BookingState.IDLE
     assert "needs_auth" not in out["final_data"]
 
 
-def test_si_la_confirmacion_falla_el_proceso_no_se_pierde(monkeypatch):
+def test_entrar_no_autoriza_una_reserva_no_aceptada(monkeypatch):
+    """Sin un sí previo, iniciar sesión sólo trae el resumen: no crea nada."""
+    async def no_debe_llamarse(**kwargs):
+        raise AssertionError("iniciar sesión no es autorizar la reserva")
+
+    monkeypatch.setattr(
+        "orchestrator.interceptors.nexiservice._call_confirm_appointment", no_debe_llamarse
+    )
+    final_data = {}
+    _remember_pending_reservation(PENDIENTE, final_data)
+    out = asyncio.run(_resume_pending_reservation(SESION, final_data))
+    assert "¿La agendo?" in out["reply"]
+
+
+def test_la_reserva_de_otra_sesion_no_se_ejecuta(monkeypatch):
+    async def no_debe_llamarse(**kwargs):
+        raise AssertionError("no se reserva a nombre de otra persona")
+
+    monkeypatch.setattr(
+        "orchestrator.interceptors.nexiservice._call_confirm_appointment", no_debe_llamarse
+    )
+    final_data = {}
+    _remember_pending_reservation({**PENDIENTE, "authorized": True}, final_data, owner=99)
+    out = asyncio.run(_resume_pending_reservation(SESION, final_data))
+    assert "descarté" in out["reply"]
+    assert not out["final_data"].get("_pending_reservation")
+
+
+def test_la_reserva_en_espera_caduca(monkeypatch):
+    final_data = {}
+    _remember_pending_reservation({**PENDIENTE, "authorized": True}, final_data)
+    final_data["_pending_reservation"]["expires_at"] = 1.0
+    assert asyncio.run(_resume_pending_reservation(SESION, final_data)) is None
+    assert get_booking_state(final_data) == BookingState.IDLE
+
+
+def test_si_el_horario_se_ocupo_el_proceso_no_se_pierde(monkeypatch):
     async def fake_confirm(**kwargs):
-        return {"success": False, "message": "El horario ya no está libre."}
+        return {"success": False, "asking": "time", "needs_input": True,
+                "message": "Esa hora ya está tomada. Puedo dejártela a las 10:00."}
 
     monkeypatch.setattr(
         "orchestrator.interceptors.nexiservice._call_confirm_appointment", fake_confirm
     )
 
-    final_data = {}
-    _remember_pending_reservation(PENDIENTE, final_data)
-    out = asyncio.run(_resume_pending_reservation({"external_user_id": "1"}, final_data))
+    from core.semantic.types import ConversationState
 
-    assert "horario" in out["reply"]
-    # Sigue guardada: el usuario puede elegir otra hora sin empezar de cero.
-    assert out["final_data"]["_pending_reservation"]["business_id"] == 103
+    final_data = {}
+    _remember_pending_reservation({**PENDIENTE, "authorized": True}, final_data)
+    out = asyncio.run(_resume_pending_reservation(SESION, final_data))
+
+    assert "tomada" in out["reply"]
+    # Lo acordado sigue en curso: el usuario elige otra hora sin empezar de cero.
+    estado = ConversationState.load(out["final_data"])
+    assert estado.booking["business_id"] == 103
+    assert estado.pending_slot == "time"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

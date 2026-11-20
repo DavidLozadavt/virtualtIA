@@ -77,7 +77,7 @@ _DISPLAY_FORMS = {
 
 #: Sustantivos frecuentes cuyo género no se deduce de la terminación. La lista es
 #: corta a propósito: sólo lo que de verdad aparece en un directorio comercial.
-_MASCULINE_EXCEPTIONS = frozenset({"dia", "mapa", "problema", "sistema", "cine", "hotel", "bar"})
+_MASCULINE_EXCEPTIONS = frozenset({"dia", "mapa", "problema", "sistema", "cine", "hotel", "bar", "spa", "programa", "tema", "clima", "sofa"})
 _FEMININE_EXCEPTIONS = frozenset({"mano", "moto", "foto", "sede", "clase", "carne", "noche", "salud"})
 
 

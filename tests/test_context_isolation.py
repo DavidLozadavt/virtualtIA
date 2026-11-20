@@ -194,8 +194,8 @@ def test_pedir_la_cita_si_la_confirma(monkeypatch):
 
     async def fake_confirm(**kwargs):
         llamadas.append(kwargs)
-        return {"success": True, "message": "¡Listo! Tu cita quedó agendada.",
-                "url": "/perfil/mis-reservas"}
+        return {"success": True, "status": "confirmed", "agenda_id": 5,
+                "message": "¡Listo! Tu cita quedó agendada.", "url": "/perfil/mis-reservas"}
 
     monkeypatch.setattr(nexiservice, "_call_confirm_appointment", fake_confirm)
 
@@ -207,7 +207,7 @@ def test_pedir_la_cita_si_la_confirma(monkeypatch):
         {
             "messages": [],
             "final_data": final_data,
-            "user_data": {"external_user_id": "55"},
+            "user_data": {"external_user_id": "55", "verified_identity": {"persona_id": 55, "email": "x@lyra-prueba.local"}},
             "project_config": {},
             "conversation_id": "c1",
             "user_text": "sí, confírmala",
@@ -352,6 +352,11 @@ def _reserva_ofrecida() -> ConversationState:
     estado = ConversationState()
     estado.set_focus(ConceptKind.BUSINESS, 12, "Óptica Claridad Este Popayán")
     estado.booking = {"business_id": 12, "business_name": "Óptica Claridad Este Popayán"}
+    # La pregunta "¿Te agendo…?" es una PROPUESTA del turno anterior: es lo que
+    # el "sí" acepta (fase 3). Sin ella, unas ranuras en memoria no bastan.
+    estado.begin_turn(1)
+    estado.propose("request_appointment", dict(estado.booking), label="agendar ahí")
+    estado.begin_turn(2)
     return estado
 
 

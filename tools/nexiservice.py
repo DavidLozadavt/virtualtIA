@@ -832,7 +832,7 @@ async def fly_to_business(
     if not target_id:
         return {
             "success": False,
-            "message": f"No pude encontrar el negocio '{business_name}' en la base de datos.",
+            "message": _not_found(business_name, "en la base de datos"),
         }
 
     try:
@@ -996,7 +996,7 @@ async def get_business_reviews(
     if not target_id:
         return {
             "success": False,
-            "message": f"No pude encontrar el negocio '{business_name}' para ver sus reseñas.",
+            "message": _not_found(business_name, "para ver sus reseñas"),
         }
 
     # Si tenemos ID pero no nombre real (recuperado de contexto), lo buscamos
@@ -1324,7 +1324,7 @@ async def get_business_mission_vision(
     if not target_id:
         return {
             "success": False,
-            "message": f"No pude encontrar el negocio '{business_name}' para ver su historia.",
+            "message": _not_found(business_name, "para ver su historia"),
         }
 
     try:
@@ -1356,6 +1356,16 @@ async def get_business_mission_vision(
         }
 
 
+def _not_found(business_name, what: str) -> str:
+    """Mensaje cuando no se identifica el negocio; sin nombre, se pregunta cuál.
+
+    Antes, sin nombre, la respuesta decía "No pude encontrar el negocio 'None'".
+    """
+    if not business_name or str(business_name).strip().lower() in ("none", "null"):
+        return "¿De qué negocio? Dime el nombre o elige uno de la lista."
+    return f"No pude encontrar el negocio '{business_name}' {what}."
+
+
 async def get_business_services(
     business_name: str = None, business_id: int = None, city: str = None, **kwargs
 ) -> dict:
@@ -1366,7 +1376,7 @@ async def get_business_services(
     if not target_id:
         return {
             "success": False,
-            "message": f"No pude encontrar el negocio '{business_name}' para ver sus servicios.",
+            "message": _not_found(business_name, "para ver sus servicios"),
         }
 
     try:
@@ -1656,7 +1666,9 @@ def resolve_date_token(date: Optional[str]) -> Optional[str]:
         "day_after_tomorrow": 2, "pasado manana": 2, "pasado mañana": 2,
     }.get(clave)
     if desplazamiento is not None:
-        return (datetime.now() + timedelta(days=desplazamiento)).strftime("%Y-%m-%d")
+        # En hora del negocio, no de la máquina donde corre Lyra.
+        from tools.nexi_booking import now_local
+        return (now_local() + timedelta(days=desplazamiento)).strftime("%Y-%m-%d")
     return date
 
 
@@ -2281,6 +2293,304 @@ async def rank_businesses_for(term: str, city: str = None, limit: int = 6, **kwa
         return {"success": False, "message": "No pude revisar las reseñas en este momento."}
 
 
+async def rank_with_constraints(kind: str, requirements: list, city: str = None, limit: int = 6,
+                               only_ids: list = None) -> dict:
+    """
+    Negocios para una petición con REQUISITOS: un tipo de establecimiento
+    ("hospitales", "restaurantes") y lo que tiene que ofrecer ("medicina
+    general", "pescado").
+
+    Cada negocio sale con la EVIDENCIA de lo que cumple, tomada de lo que tiene
+    registrado (nombre, categoría, servicios y su descripción). Lo que no está
+    registrado no se da por cumplido: una buena nota no demuestra que un
+    restaurante tenga pescado, y que una óptica liste "Consulta Médica General"
+    no la convierte en un hospital.
+
+    Devuelve los negocios con:
+      kind_match   — el tipo pedido aparece en su nombre o categoría
+      evidence     — {requisito: "dónde consta"} para cada requisito cumplido
+      missing      — requisitos sin evidencia
+      n_services, min_price, avg_price — su carta/servicios registrados
+
+    `only_ids` evalúa SÓLO esos negocios (los que el usuario acaba de ver) y
+    los devuelve todos, cumplan o no: refinar "de esos cuatro" no es buscar.
+    """
+    from core.database import get_connection
+    from core.semantic.morphology import normalize, strict_closeness
+
+    if only_ids:
+        ids_ok = [int(i) for i in only_ids if str(i).isdigit()]
+        city_filter = f"AND e.id IN ({', '.join(str(i) for i in ids_ok) or '0'})"
+        official_city = city
+    else:
+        city_filter, official_city = await _city_box(city)
+    sql = f"""
+        SELECT e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud, e.longitud,
+               COUNT(DISTINCT s.id) AS n_servicios, MIN(s.valor) AS min_valor, AVG(s.valor) AS avg_valor,
+               COALESCE(MAX(ce.nombre), '') AS categoria,
+               GROUP_CONCAT(DISTINCT CONCAT(s.nombre, '::', COALESCE(s.descripcion, '')) SEPARATOR '||') AS servicios,
+               GROUP_CONCAT(DISTINCT cs.nombre SEPARATOR '||') AS categorias_servicio
+        FROM empresa e
+        LEFT JOIN servicios s           ON s.idCompany = e.id AND s.idEstado = 1
+        LEFT JOIN categoriaservicios cs ON s.idCategoriaServicio = cs.id
+        LEFT JOIN categoriaempresa ce   ON e.idCategoriaEmpresa = ce.id
+        WHERE e.idEstado = 1 AND e.publicado = 1 {city_filter}
+        GROUP BY e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud, e.longitud
+        LIMIT 400
+    """
+
+    def has(words: set, term: str) -> float:
+        """2 si la palabra está (o es una errata suya); 1 si es de su familia
+        ("médica"/"medicina": raíz común de 5+ letras); 0 si no."""
+        best = 0.0
+        for w in words:
+            if strict_closeness(w, term):
+                return 2.0
+            n = 0
+            for a, b in zip(w, term):
+                if a != b:
+                    break
+                n += 1
+            if n >= 5 and min(len(w), len(term)) >= 5:
+                best = 1.0
+        return best
+
+    req_groups = [[w for w in normalize(r).split() if len(w) > 2] for r in requirements if r]
+    req_groups = [g for g in req_groups if g]
+    kind_words = [w for w in normalize(kind or "").split() if len(w) > 2]
+
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall() or []
+                out = []
+                for row in rows:
+                    name_cat = set(normalize(f"{row.get('razonSocial') or ''} {row.get('categoria') or ''}").split())
+                    kind_match = bool(kind_words) and all(has(name_cat, w) >= 2 for w in kind_words)
+                    services = []
+                    for chunk in (row.get("servicios") or "").split("||"):
+                        if "::" in chunk:
+                            nombre, desc = chunk.split("::", 1)
+                            services.append((nombre.strip(), set(normalize(f"{nombre} {desc}").split())))
+                    svc_cats = set(normalize((row.get("categorias_servicio") or "").replace("||", " ")).split())
+                    evidence, missing, score = {}, [], 0.0
+                    for group in req_groups:
+                        label = " ".join(group)
+                        found, strength = None, 0.0
+                        for n, ws in services:
+                            sc = [has(ws, w) for w in group]
+                            if all(sc) and sum(sc) > strength:
+                                found, strength = n, sum(sc)
+                        for where, ws in (("categoría de sus servicios", svc_cats), ("nombre o categoría del negocio", name_cat)):
+                            sc = [has(ws, w) for w in group]
+                            if not found and all(sc):
+                                found, strength = where, sum(sc)
+                        if found:
+                            # Un servicio se nombra; si constó por categoría o por
+                            # el nombre del negocio, se dice qué y dónde consta.
+                            evidence[label] = found if found not in (
+                                "categoría de sus servicios", "nombre o categoría del negocio") else f"{label} ({found})"
+                            score += strength
+                        else:
+                            missing.append(label)
+                    if not (kind_match or evidence) and not only_ids:
+                        continue
+                    out.append({
+                        "id": row["id"],
+                        "name": row["razonSocial"] or f"Negocio #{row['id']}",
+                        "category": row.get("categoria") or "Negocio",
+                        "address": row.get("direccion"),
+                        "logo": _format_logo(row.get("rutaLogo")),
+                        "lat": float(row["latitud"]) if row.get("latitud") else None,
+                        "lng": float(row["longitud"]) if row.get("longitud") else None,
+                        "kind_match": kind_match,
+                        "evidence": evidence,
+                        "missing": missing,
+                        "evidence_score": score,
+                        "n_services": int(row.get("n_servicios") or 0),
+                        "min_price": float(row["min_valor"]) if row.get("min_valor") is not None else None,
+                        "avg_price": float(row["avg_valor"]) if row.get("avg_valor") is not None else None,
+                    })
+                if not out:
+                    return {"success": True, "businesses": [], "city": official_city}
+                ids = [b["id"] for b in out]
+                marks = ", ".join(["%s"] * len(ids))
+                cur.execute(
+                    f"SELECT idCompany, AVG(calificacion) AS r, COUNT(*) AS n FROM calificacionCompany "
+                    f"WHERE idCompany IN ({marks}) GROUP BY idCompany", ids)
+                notas = {r["idCompany"]: r for r in (cur.fetchall() or [])}
+        for b in out:
+            n = notas.get(b["id"]) or {}
+            b["rating"] = round(float(n["r"]), 1) if n.get("r") else None
+            b["reviews"] = int(n.get("n") or 0)
+        # Primero lo que cumple la petición (tipo + requisitos), y sólo después
+        # la nota: la nota ordena entre quienes cumplen, no reemplaza el cumplir.
+        out.sort(key=lambda b: (b["kind_match"] and not b["missing"], len(b["evidence"]), b["kind_match"],
+                                b["evidence_score"], b["rating"] or -1, b["reviews"]), reverse=True)
+        return {"success": True, "businesses": out[:max(limit, 12)], "city": official_city}
+    except Exception as e:
+        logger.error(f"Error en rank_with_constraints: {e}")
+        return {"success": False, "message": "No pude revisar los negocios en este momento."}
+
+
+#: Tipos de establecimiento que el usuario puede EXIGIR. Son clase cerrada: se
+#: reconocen en el nombre o la categoría del negocio, nunca en sus servicios. Que
+#: una óptica registre "Consulta Médica General" no la vuelve una clínica.
+ESTABLISHMENT_KINDS = {
+    "clinica": r"\bclinicas?\b",
+    "hospital": r"\bhospital(es)?\b",
+    "consultorio": r"\bconsultorios?\b",
+    "centro medico": r"\bcentros? medicos?\b",
+    "ips": r"\bips\b",
+    "urgencias": r"\burgencias?\b",
+    "optica": r"\bopticas?\b",
+    "veterinaria": r"\bveterinari[ao]s?\b",
+    "barberia": r"\bbarberias?\b",
+    "peluqueria": r"\bpeluquerias?\b",
+    "gimnasio": r"\b(gimnasios?|gym)\b",
+    "hotel": r"\bhotel(es)?\b",
+    "panaderia": r"\bpanaderias?\b",
+    "farmacia": r"\b(farmacias?|droguerias?)\b",
+    "colegio": r"\bcolegios?\b",
+    "instituto": r"\binstitutos?\b",
+    "academia": r"\bacademias?\b",
+    "taller": r"\btaller(es)?\b",
+    "ferreteria": r"\bferreterias?\b",
+    "laboratorio": r"\blaboratorios?\b",
+    "fisioterapia": r"\bfisioterap\w*\b",
+}
+
+#: Dónde se atiende a una persona con un síntoma: tipos de establecimiento
+#: médicos, no cualquier negocio "de salud y bienestar".
+CARE_KINDS = ("clinica", "hospital", "consultorio", "centro medico", "ips", "urgencias")
+_CARE_EVIDENCE = r"\b(consulta medica|medicina general|urgencias?|medico general)\b"
+_CARE_CATEGORY = r"\bconsultorios y centros medicos\b"
+
+
+def establishment_kind(text: str):
+    """El tipo de establecimiento que nombra el texto ("clínica", "veterinarias"), o None."""
+    import re as _re
+    t = _normalize(text or "")
+    for kind, pattern in ESTABLISHMENT_KINDS.items():
+        if _re.search(pattern, t):
+            return kind
+    return None
+
+
+async def find_by_kind(kinds, city: str = None, evidence: str = None, category_re: str = None) -> dict:
+    """
+    Negocios cuyo NOMBRE o CATEGORÍA dice que son de uno de esos tipos.
+
+    Devuelve:
+      matches      — los que son de ese tipo, en la ciudad
+      alternatives — en la ciudad, los que no son de ese tipo pero registran un
+                     servicio que encaja con `evidence` (se presentan como
+                     alternativa y diciendo qué registran)
+      other_city   — si en la ciudad no hay ninguno: {"city", "matches"} con los
+                     más cercanos de otra ciudad
+    """
+    import re as _re
+    from core.database import get_connection
+
+    patrones = [ESTABLISHMENT_KINDS[k] for k in kinds if k in ESTABLISHMENT_KINDS]
+    kind_re = _re.compile("|".join(patrones)) if patrones else None
+    cat_re = _re.compile(category_re) if category_re else None
+    ev_re = _re.compile(evidence) if evidence else None
+
+    def es_del_tipo(row) -> bool:
+        nombre = _normalize(row.get("razonSocial") or "")
+        categoria = _normalize(row.get("categoria") or "")
+        return bool((kind_re and (kind_re.search(nombre) or kind_re.search(categoria)))
+                    or (cat_re and cat_re.search(categoria)))
+
+    def ficha(row, extra=None):
+        b = {
+            "id": row["id"],
+            "name": row["razonSocial"] or f"Negocio #{row['id']}",
+            "category": row.get("categoria") or "Negocio",
+            "address": row.get("direccion"),
+            "logo": _format_logo(row.get("rutaLogo")),
+            "lat": float(row["latitud"]) if row.get("latitud") else None,
+            "lng": float(row["longitud"]) if row.get("longitud") else None,
+        }
+        b.update(extra or {})
+        return b
+
+    city_filter, official_city = await _city_box(city)
+    base = """
+        SELECT e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud, e.longitud,
+               COALESCE(MAX(ce.nombre), '') AS categoria,
+               GROUP_CONCAT(DISTINCT s.nombre SEPARATOR '||') AS servicios
+        FROM empresa e
+        LEFT JOIN servicios s ON s.idCompany = e.id AND s.idEstado = 1
+        LEFT JOIN categoriaempresa ce ON e.idCategoriaEmpresa = ce.id
+        WHERE e.idEstado = 1 AND e.publicado = 1 {filtro}
+        GROUP BY e.id, e.razonSocial, e.direccion, e.rutaLogo, e.latitud, e.longitud
+        LIMIT 600
+    """
+    try:
+        with get_connection("vt_inventario") as conn:
+            with conn.cursor() as cur:
+                cur.execute(base.format(filtro=city_filter))
+                locales = cur.fetchall() or []
+                globales = []
+                if not any(es_del_tipo(r) for r in locales):
+                    cur.execute(base.format(filtro=""))
+                    globales = cur.fetchall() or []
+    except Exception as e:
+        logger.error(f"Error en find_by_kind: {e}")
+        return {"success": False, "message": "No pude revisar los negocios en este momento."}
+
+    matches = [ficha(r) for r in locales if es_del_tipo(r)]
+    alternatives = []
+    if ev_re:
+        for r in locales:
+            if es_del_tipo(r):
+                continue
+            hits = [s for s in (r.get("servicios") or "").split("||") if s and ev_re.search(_normalize(s))]
+            if hits:
+                alternatives.append(ficha(r, {"evidence": hits[0]}))
+
+    other_city = None
+    if not matches and globales:
+        ids_locales = {r["id"] for r in locales}
+        fuera = [ficha(r) for r in globales if es_del_tipo(r) and r["id"] not in ids_locales]
+        if fuera:
+            try:
+                from services.geo import resolve_city_coords_async
+                lat0, lng0, _ = await resolve_city_coords_async(city or "Popayan")
+            except Exception:
+                lat0 = lng0 = None
+            if lat0 and lng0:
+                fuera.sort(key=lambda b: ((b["lat"] or 99) - lat0) ** 2 + ((b["lng"] or 99) - lng0) ** 2)
+            nombre_ciudad = None
+            try:
+                geo = await reverse_geocode(fuera[0]["lat"], fuera[0]["lng"]) if fuera[0]["lat"] else {}
+                nombre_ciudad = geo.get("city") if geo.get("success") else None
+                if nombre_ciudad:
+                    nombre_ciudad = _re.sub(r"\s+ciudad$", "", nombre_ciudad.strip(), flags=_re.I)
+            except Exception:
+                nombre_ciudad = None
+            if nombre_ciudad:
+                cerca = [b for b in fuera
+                         if b["lat"] and abs(b["lat"] - fuera[0]["lat"]) < 0.2 and abs(b["lng"] - fuera[0]["lng"]) < 0.2]
+                other_city = {"city": nombre_ciudad, "matches": cerca[:5]}
+
+    return {"success": True, "city": official_city, "matches": matches,
+            "alternatives": alternatives, "other_city": other_city}
+
+
+async def find_care(city: str = None) -> dict:
+    """Dónde atender un síntoma: consultorios, centros médicos, clínicas, hospitales."""
+    out = await find_by_kind(CARE_KINDS, city=city, evidence=_CARE_EVIDENCE, category_re=_CARE_CATEGORY)
+    if out.get("success"):
+        out["care"] = out.pop("matches")
+        if out.get("other_city"):
+            out["other_city"]["care"] = out["other_city"].pop("matches")
+    return out
+
+
 async def request_appointment(
     business_name: str = None,
     business_id: int = None,
@@ -2655,406 +2965,264 @@ async def confirm_appointment(
     date: str = None,
     professional_name: str = None,
     reservation_name: str = None,
+    execute: bool = False,
     **kwargs,
 ) -> dict:
     """
-    Realiza la inserción REAL en la tabla `agenda` y vincula profesional si aplica.
+    Reserva en dos fases. Nada se crea sin un "sí" a un resumen concreto.
 
-    Flujo:
-    1. Resolver usuario (por external_user_id o reserva anónima con nombre).
-    2. Validar/pedir nombre si el usuario es anónimo.
-    3. Resolver servicio (ID) con búsqueda ultra-flexible.
-    4. Resolver profesional (si se proporcionó).
-    5. Parsear y normalizar fecha y hora.
-    6. Insertar en `agenda` + `asignacionresponsableservicio`.
-    7. Emitir evento Pusher para UI en tiempo real.
-
-    Args:
-        business_id:       ID del negocio donde se agenda.
-        time:              Hora deseada (HH:MM o "2 pm").
-        service_name:      Nombre del servicio a agendar.
-        date:              Fecha en formato ISO, "today" o "tomorrow".
-        professional_name: Nombre del profesional preferido (opcional).
-        reservation_name:  Nombre del beneficiario de la reserva.
-        **kwargs:          user_data con external_user_id.
-
-    Returns:
-        Dict con success, message y opcionalmente url y datos de la cita.
+    - `execute=False` (por defecto): valida negocio, servicio, profesional,
+      fecha, hora, que no haya pasado y que la franja esté libre. Devuelve
+      `ready=True` con la reserva resuelta (fecha absoluta, ids) y un resumen
+      que termina en "¿La agendo?". Es lo que llega desde el modelo o desde el
+      diálogo cuando ya están todos los datos.
+    - `execute=True`: sólo cuando el usuario aceptó ESE resumen. Exige sesión
+      verificada (`user_data["verified_identity"]`); sin ella devuelve
+      `needs_auth` con la reserva entera y marcada como autorizada. Con ella
+      crea la reserva con el backend (`tools.nexi_booking`) y sólo la anuncia
+      con el id real y una vez visible en «Mis Reservas».
     """
     from core.database import get_connection
     from datetime import datetime, timedelta
+    from tools.nexi_booking import BookingStatus, create_booking, is_past, reservation_number
 
-    user_data = kwargs.get("user_data", {})
-    external_user_id = user_data.get("external_user_id") or user_data.get("id")
+    user_data = kwargs.get("user_data") or {}
+    identity = user_data.get("verified_identity")
 
     logger.info(
-        "[CONFIRM_APPOINTMENT] biz=%s | srv=%s | time=%s | res_name=%s | ext_id=%s",
-        business_id,
-        service_name,
-        time,
-        reservation_name,
-        external_user_id,
+        "[CONFIRM_APPOINTMENT] biz=%s | srv=%s | date=%s | time=%s | execute=%s | sesión=%s",
+        business_id, service_name, date, time, execute, bool(identity),
     )
 
     try:
         with get_connection("vt_inventario") as conn:
             with conn.cursor() as cur:
-
-                # ── FIX 1: Obtener nombre real del negocio desde la DB ────────
-                cur.execute(
-                    "SELECT razonSocial FROM empresa WHERE id = %s LIMIT 1",
-                    (business_id,),
-                )
+                cur.execute("SELECT razonSocial FROM empresa WHERE id = %s LIMIT 1", (business_id,))
                 biz_row = cur.fetchone()
-                real_name = (
-                    biz_row["razonSocial"] if biz_row else f"Negocio #{business_id}"
-                )
+                if not biz_row:
+                    return {"success": False, "asking": "business",
+                            "message": "No encontré ese negocio. ¿En cuál quieres agendar?"}
+                real_name = biz_row["razonSocial"]
 
-                # ── Paso 1: Resolver usuario ──────────────────────────────────
-                user_id = None
-                user_name = None
-
-                # Identificar si es un usuario real o una sesión demo/anónima
-                is_real_user = external_user_id and str(external_user_id) not in ("user_client_demo", "unknown", "guest") and not str(external_user_id).startswith("anon_")
-
-                if is_real_user:
-                    # ✅ Seteamos user_id para indicar que hay sesión activa
-                    user_id = external_user_id
-
-                    # 1. Intentar obtener nombre desde la sesión (user_data) para evitar nombres de semilla
-                    user_name = (
-                        user_data.get("name")
-                        or user_data.get("full_name")
-                        or user_data.get("nombre")
-                        or user_data.get("display_name")
-                    )
-
-                    # 2. Resolver las tres identidades a partir del id recibido.
-                    #    Ver `resolve_booking_identity`: aquí se leía el id de la
-                    #    persona como si fuera el de la cuenta, y se unía contra
-                    #    `tercero` en vez de contra `persona`. No fallaba, que
-                    #    habría sido lo bueno: acertaba a otra persona.
-                    identidad = await resolve_booking_identity(external_user_id)
-
-                    if identidad:
-                        if not user_name:
-                            user_name = identidad["nombre"] or "Usuario"
-                        # La ficha de cliente es por donde el perfil lista las
-                        # reservas; sin ella la cita existe y nadie la ve.
-                        idtercero_final = (
-                            identidad["tercero_id"] or identidad["persona_id"]
-                        )
-                        if not identidad["tercero_id"]:
-                            logger.warning(
-                                "Persona %s sin ficha de cliente: la reserva puede "
-                                "no aparecer en su perfil.", identidad["persona_id"],
-                            )
-                        user_id_for_agenda = identidad["usuario_id"] or external_user_id
-                    else:
-                        idtercero_final = external_user_id
-                        user_id_for_agenda = external_user_id
-                        if not user_name:
-                            user_name = "Usuario"
-
-                    user_id_for_client = idtercero_final
-                else:
-                    # Caso anónimo: se resolverá más adelante con el nombre proporcionado
-                    user_id = None
-                    user_id_for_agenda = None
-                    user_id_for_client = None
-
-                # ── Paso 2: Validar nombre de reserva ─────────────────────────
-                _GENERIC_NAMES = frozenset(
-                    {
-                        "usuario",
-                        "cliente",
-                        "invitado",
-                        "anonimo",
-                        "anónimo",
-                        "alguien",
-                        "persona",
-                    }
-                )
-                _AFFIRMATIVE = frozenset(
-                    {
-                        "si",
-                        "sí",
-                        "yes",
-                        "ok",
-                        "claro",
-                        "correcto",
-                        "así es",
-                        "exacto",
-                        "ese",
-                        "esa",
-                    }
-                )
-
-                if not user_id:
-                    # Sin sesión no se crea la reserva.
-                    #
-                    # Un nombre escrito en el chat no identifica a nadie: no hay
-                    # forma de avisar al cliente, de que consulte su cita ni de
-                    # que la cancele, y el negocio recibe una reserva que no
-                    # puede verificar. Se conserva todo lo acordado y se pide
-                    # entrar; en cuanto haya sesión, la cita se confirma sola.
-                    logger.info(
-                        "Reserva pendiente de autenticación | biz=%s srv=%s time=%s date=%s",
-                        business_id, service_name, time, date,
-                    )
-                    return {
-                        "success": False,
-                        "needs_auth": True,
-                        "pending_reservation": {
-                            "business_id": business_id,
-                            "business_name": real_name,
-                            "service_name": service_name,
-                            "professional_name": professional_name,
-                            "time": time,
-                            "date": date,
-                        },
-                        "message": (
-                            "Tengo todo listo para dejarla agendada. Sólo falta que "
-                            "entres a tu cuenta —o que crees una si aún no la tienes— "
-                            "para poder confirmarla a tu nombre. En cuanto lo hagas, "
-                            "termino de reservarla sin que tengas que repetirme nada."
-                        ),
-                    }
-
-                else:
-                    # ✅ Usuario logueado: user_name ya fue resuelto desde DB en el Paso 1.
-                    # Si reservation_name es una afirmación ("si", "sí") o el propio user_name,
-                    # simplemente usamos user_name. NUNCA pedimos confirmación al logueado.
-                    if (
-                        reservation_name
-                        and reservation_name.strip().lower() not in _AFFIRMATIVE
-                        and reservation_name.strip().lower() not in _GENERIC_NAMES
-                        and len(reservation_name.strip()) >= 2
-                    ):
-                        # El usuario quiere reservar a nombre de otra persona
-                        user_name = reservation_name.strip()
-                        logger.info(
-                            "Logged-in user %s reserving for: %s", user_id, user_name
-                        )
-                    else:
-                        # Usar el nombre del propio usuario logueado, sin preguntar
-                        logger.info(
-                            "Logged-in user %s reserving as self: %s",
-                            user_id,
-                            user_name,
-                        )
-                        # user_name ya está seteado desde el Paso 1 — no hacer nada
-
-                # ── Paso 3: Resolver servicio ──────────────────────────────────
+                # ── Servicio ─────────────────────────────────────────────────
                 srv_data = await _resolve_service_id(business_id, service_name)
                 if not srv_data:
                     if names_nothing_concrete(service_name):
                         return {
-                            "success": False,
-                            "asking": "service_name",
-                            "needs_input": True,
+                            "success": False, "asking": "service_name", "needs_input": True,
                             "message": f"¿Qué servicio deseas agendar en **{real_name}**?",
                         }
                     return {
-                        "success": False,
-                        "asking": "service_name",
-                        "message": f"Lo siento, no encontré el servicio '**{service_name}**' en **{real_name}**.",
+                        "success": False, "asking": "service_name",
+                        "message": f"No encontré el servicio **{service_name}** en **{real_name}**.",
                     }
-
                 srv_id = srv_data["id"]
                 srv_real_name = srv_data["nombre"]
                 duration_min = srv_data["tiempoServicio"] or 30
 
-                # ── Paso 4: Resolver profesional ───────────────────────────────
-                professional_id = None
+                # ── Profesional ──────────────────────────────────────────────
+                professional_id = responsable_id = None
                 if professional_name:
                     prof_clean = _normalize(professional_name)
-                    profs = await get_service_professionals(srv_id)
-                    for p in profs:
+                    for p in await get_service_professionals(srv_id):
                         if prof_clean in _normalize(p["nombre"]):
                             professional_id = p["id"]
+                            responsable_id = p.get("responsable_id")
                             professional_name = p["nombre"]
                             break
 
-                # ── Paso 5: ── FIX 2: Resolver fecha ──────────────────────────
+                # ── Fecha ────────────────────────────────────────────────────
                 if not date:
                     return {
-                        "success": False,
-                        "needs_input": True,
+                        "success": False, "needs_input": True, "asking": "date",
                         "message": (
                             f"Para dejar tu **{srv_real_name}** en **{real_name}**, "
                             "¿qué día te viene bien? Dime *hoy*, *mañana* o una fecha."
-                            f"\n\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
-                            f"[SERVICIO:{srv_real_name}] [HORA:{time}]"
+                            f"\n\n[BIZ:{business_id}] [SERVICIO:{srv_real_name}]"
+                            + (f" [HORA:{time}]" if time else "")
                         ),
                     }
-
+                # "Mañana" se fija aquí, en hora del negocio: lo que se resume y
+                # lo que se crea es la MISMA fecha aunque el sí llegue después
+                # de medianoche o tras iniciar sesión.
                 target_date = resolve_date_token(date)
 
-                # ── Parsear hora ───────────────────────────────────────────────
+                # ── Hora ─────────────────────────────────────────────────────
                 if not time:
                     return {
-                        "success": False,
-                        "needs_input": True,
+                        "success": False, "needs_input": True, "asking": "time",
                         "message": (
                             f"¿A qué hora quieres tu **{srv_real_name}** en **{real_name}**?"
-                            f"\n\n[BIZ:{business_id}] [CONFIRMACIÓN NECESARIA] "
-                            f"[SERVICIO:{srv_real_name}]"
+                            f"\n\n[BIZ:{business_id}] [SERVICIO:{srv_real_name}]"
                         ),
                     }
-
                 try:
-                    if ":" not in str(time):
-                        h_match = re.search(r"(\\d{1,2})", str(time))
+                    texto_hora = str(time).strip().lower()
+                    if ":" not in texto_hora:
+                        h_match = re.search(r"(\d{1,2})", texto_hora)
                         if not h_match:
                             raise ValueError(f"Hora no reconocible: {time}")
                         h = int(h_match.group(1))
-                        if "pm" in str(time).lower() and h < 12:
+                        if "pm" in texto_hora and h < 12:
                             h += 12
                         start_time = f"{h:02d}:00:00"
                     else:
-                        t_parts = str(time).split(":")
-                        start_time = str(time) if len(t_parts) == 3 else f"{time}:00"
-
+                        partes = texto_hora.split(":")
+                        start_time = texto_hora if len(partes) == 3 else f"{texto_hora[:5]}:00"
                     start_dt = datetime.strptime(start_time, "%H:%M:%S")
-                    end_dt = start_dt + timedelta(minutes=duration_min)
-                    end_time = end_dt.strftime("%H:%M:%S")
-
+                    end_time = (start_dt + timedelta(minutes=duration_min)).strftime("%H:%M:%S")
                 except Exception as exc:
                     logger.error("Error parseando hora '%s': %s", time, exc)
                     return {
-                        "success": False,
-                        "needs_input": True,
-                        "message": (
-                            f"No pude entender la hora '**{time}**'. "
-                            "¿Puedes indicarla en formato '2:30 pm' o '14:00'?"
-                        ),
+                        "success": False, "needs_input": True, "asking": "time",
+                        "message": (f"No pude entender la hora **{time}**. "
+                                    "¿Me la dices como '2:30 pm' o '14:00'?"),
                     }
 
-                # ── Paso 5b: ¿La franja está libre de verdad? ──────────────────
-                #
-                # Es la última puerta antes de escribir, y hasta ahora no
-                # existía: Lyra podía nombrar una cita ocupada en un turno y
-                # crear otra encima en el siguiente. Se mira la agenda de QUIEN
-                # va a atender —dos personas distintas sí pueden tener las
-                # nueve— y sólo el negocio entero cuando no hay nadie asignado.
-                choque = _find_overlap(
-                    cur, business_id, target_date, start_time, end_time, professional_id
-                )
+                if is_past(target_date, start_time):
+                    return {
+                        "success": False, "needs_input": True, "asking": "time",
+                        "message": (f"Las **{start_time[:5]}** del día {target_date} ya pasaron. "
+                                    "¿Qué otro día u hora te sirve?"
+                                    f"\n\n[BIZ:{business_id}] [SERVICIO:{srv_real_name}]"),
+                    }
+
+                # ── ¿La franja está libre? ───────────────────────────────────
+                # Se mira la agenda de QUIEN atiende (dos profesionales sí pueden
+                # tener las nueve) y la del negocio cuando no hay nadie asignado.
+                choque = _find_overlap(cur, business_id, target_date, start_time, end_time, professional_id)
                 if choque:
-                    libres = _free_hours(
-                        cur, business_id, target_date, duration_min, professional_id
-                    )
+                    libres = _free_hours(cur, business_id, target_date, duration_min, professional_id)
                     quien = f" con **{professional_name}**" if professional_name else ""
                     sugerencia = (
                         " Puedo dejártela a las "
-                        # Alternativas, no una lista: se enumeran con "o".
                         + natural_list([f"**{h}**" for h in libres[:3]], conjunction="o")
                         + ", si te sirve alguna."
-                        if libres
-                        else " Ese día ya está completo; ¿probamos otro?"
+                        if libres else " Ese día ya está completo; ¿probamos otro?"
                     )
-                    logger.info(
-                        "[CONFIRM] choque de agenda: %s %s-%s (prof=%s) contra %s",
-                        target_date, start_time, end_time, professional_id, choque,
-                    )
+                    logger.info("[CONFIRM] choque de agenda: %s %s-%s (prof=%s) contra %s",
+                                target_date, start_time, end_time, professional_id, choque)
                     return {
-                        "success": False,
-                        "asking": "time",
-                        "needs_input": True,
+                        "success": False, "asking": "time", "needs_input": True,
                         "message": (
                             f"Esa hora ya está tomada{quien}: hay algo de "
                             f"**{choque['start']}** a **{choque['end']}**.{sugerencia}"
                             f"\n\n[BIZ:{business_id}] [SERVICIO:{srv_real_name}]"
                         ),
                     }
-
-                # ── Paso 6: Insertar en agenda ─────────────────────────────────
-                descripcion = (
-                    f"Reserva vía Lyra: {srv_real_name} a nombre de {user_name}"
-                )
-
-                cur.execute(
-                    """
-                    INSERT INTO agenda
-                        (idCompany, fechaInicial, horaInicial, horaFinal,
-                         descripcion, estado, tipo, idUser, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, 'agendado', 'servicio', %s, NOW(), NOW())
-                    """,
-                    (
-                        business_id,
-                        target_date,
-                        start_time,
-                        end_time,
-                        descripcion,
-                        user_id_for_agenda,
-                    ),
-                )
-                agenda_id = cur.lastrowid
-
-                cur.execute(
-                    """
-                    INSERT INTO asignacionresponsableservicio
-                        (idAgenda, idCliente, idServicio, idResponsable, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW(), NOW())
-                    """,
-                    (agenda_id, user_id_for_client, srv_id, professional_id),
-                )
-                conn.commit()
-
-                # ── Paso 7: Emitir evento Pusher ───────────────────────────────
-                from core.pusher import trigger_pusher_event
-
-                trigger_pusher_event(
-                    "lyra-channel",
-                    "appointment_created",
-                    {
-                        "business_id": business_id,
-                        "service_name": srv_real_name,
-                        "professional_name": professional_name,
-                        "user_id": user_id_for_agenda,
-                        "external_user_id": external_user_id,
-                    },
-                )
-
-                # ── Formatear fecha para el mensaje de confirmación ────────────
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-                if target_date == today_str:
-                    date_msg = "hoy"
-                elif target_date == tomorrow_str:
-                    date_msg = "mañana"
-                else:
-                    date_msg = f"el {target_date}"
-
-                prof_msg = f" con **{professional_name}**" if professional_name else ""
-
-                return {
-                    "success": True,
-                    "business_id": business_id,
-                    "service_name": srv_real_name,
-                    "professional_name": professional_name,
-                    "date": target_date,
-                    "time": start_time[:5],
-                    "action": "navigate",
-                    "url": "/perfil/mis-reservas",
-                    "message": (
-                        f"¡Listo, **{user_name}**! Tu **{srv_real_name}**"
-                        f"{prof_msg} queda para {date_msg} a las **{start_time[:5]}**.\n\n"
-                        "Te dejo en **Mis Reservas** por si quieres revisarla. ¡Nos vemos! ✨"
-                    ),
-                }
-
     except Exception as exc:
-        logger.error("Error insertando reserva: %s", exc, exc_info=True)
+        logger.error("Error preparando la reserva: %s", exc, exc_info=True)
+        return {"success": False, "status": BookingStatus.FAILED,
+                "message": "No pude revisar la agenda del negocio en este momento. ¿Lo intentamos otra vez?"}
+
+    a_nombre = (reservation_name or "").strip()
+    if _normalize(a_nombre) in {"si", "ok", "claro", "yo", "mi", "a mi nombre"} or len(a_nombre) < 2:
+        a_nombre = ""
+    booking = {
+        "business_id": int(business_id),
+        "business_name": real_name,
+        "service_id": int(srv_id),
+        "service_name": srv_real_name,
+        "professional_name": professional_name,
+        "responsable_id": responsable_id,
+        "date": target_date,
+        "start": start_time[:5],
+        "end": end_time[:5],
+        "reservation_name": a_nombre or None,
+    }
+    resumen = booking_summary(booking)
+
+    # ── Fase 1: resumen y pregunta ───────────────────────────────────────────
+    if not execute:
         return {
             "success": False,
+            "ready": True,
+            "status": BookingStatus.AWAITING_CONFIRMATION,
+            "booking": booking,
+            "message": f"Te confirmo los datos: {resumen}. ¿La agendo?\n\n[BIZ:{business_id}]",
+        }
+
+    # ── Fase 2: crear ────────────────────────────────────────────────────────
+    if not identity:
+        logger.info("[RESERVA] aceptada pero sin sesión verificada: queda esperando login")
+        return {
+            "success": False,
+            "needs_auth": True,
+            "status": BookingStatus.AWAITING_AUTH,
+            "pending_reservation": {**booking, "authorized": True},
             "message": (
-                "Ocurrió un error técnico al crear tu reserva. "
-                "Por favor, inténtalo nuevamente."
+                "Perfecto. Para dejarla a tu nombre necesito que inicies sesión (o crees tu cuenta). "
+                f"Guardé todo: {resumen}. Apenas entres, reviso que el horario siga libre y la agendo."
             ),
         }
+
+    nota = "Reserva hecha con Nexo" + (f" a nombre de {a_nombre}" if a_nombre else "")
+    result = await create_booking(identity, {**booking, "description": nota, "note": nota})
+    status = result.get("status")
+
+    if status == BookingStatus.CONFIRMED:
+        from core.pusher import trigger_pusher_event
+        trigger_pusher_event("lyra-channel", "appointment_created", {
+            "business_id": business_id, "agenda_id": result.get("agenda_id"),
+            "external_user_id": identity.get("persona_id"),
+        })
+        visible = result.get("visible", True)
+        return {
+            "success": True,
+            "status": status,
+            "agenda_id": result.get("agenda_id"),
+            "business_id": int(business_id),
+            "service_name": srv_real_name,
+            "professional_name": professional_name,
+            "date": target_date,
+            "time": start_time[:5],
+            "action": "navigate",
+            "url": "/perfil/mis-reservas",
+            "message": (
+                (f"Esa reserva ya estaba hecha: {resumen}. Es la número **{reservation_number(result)}**."
+                 if result.get("existing") else
+                 f"¡Listo! Quedó agendada: {resumen}. Tu número de reserva es **{reservation_number(result)}**.")
+                + ("\n\nTe abro **Mis Reservas** para que la veas." if visible else
+                   "\n\nTodavía no aparece en **Mis Reservas**; si en unos minutos no la ves, avísame.")
+            ),
+        }
+    if status == BookingStatus.UNKNOWN:
+        return {
+            "success": False, "status": status, "pending_reservation": {**booking, "authorized": True},
+            "message": ("Envié la reserva pero el sistema no me respondió y todavía no la veo en tus reservas, "
+                        "así que no te la doy por hecha. Dime *revisa la reserva* y verifico antes de "
+                        "intentarlo de nuevo, sin duplicarla."),
+        }
+    if status == BookingStatus.REJECTED and result.get("reason") == "past":
+        return {"success": False, "status": status, "asking": "time", "needs_input": True,
+                "message": "Ese horario ya pasó. ¿Qué otro día u hora te sirve?"}
+    detalle = result.get("message") or "error desconocido"
+    return {
+        "success": False, "status": status,
+        "message": (f"No pude crear la reserva: el sistema respondió *{detalle}*. "
+                    "No quedó agendada. ¿Probamos con otro horario o lo intento de nuevo?"),
+    }
+
+
+def booking_summary(b: dict) -> str:
+    """'**Consulta** en **Vida Sana**, mañana miércoles 18/11 a las **09:00**'."""
+    from datetime import datetime as _dt
+    dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    try:
+        d = _dt.strptime(b["date"], "%Y-%m-%d")
+        from tools.nexi_booking import now_local
+        delta = (d.date() - now_local().date()).days
+        etiqueta = {0: "hoy", 1: "mañana"}.get(delta)
+        fecha = f"{dias[d.weekday()]} {d.day:02d}/{d.month:02d}"
+        fecha = f"{etiqueta}, {fecha}," if etiqueta else f"el {fecha}"
+    except (KeyError, ValueError, TypeError):
+        fecha = b.get("date") or ""
+    texto = f"**{b['service_name']}** en **{b['business_name']}**, {fecha} a las **{b['start']}**"
+    if b.get("professional_name"):
+        texto += f" con **{b['professional_name']}**"
+    if b.get("reservation_name"):
+        texto += f", a nombre de **{b['reservation_name']}**"
+    return texto
 
 
 async def _resolve_service_id(business_id: int, service_name: str) -> dict:

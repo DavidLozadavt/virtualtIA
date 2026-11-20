@@ -1,0 +1,101 @@
+# Conversaciones INDEPENDIENTES (fase 3). Escritas al final de la fase, con frases que no se
+# usaron al desarrollar, y corridas UNA sola vez. Mismo formato que dialogos_fase3.yaml.
+
+- id: i01_fiebre_y_dale
+  turns:
+    - say: "muéstrame peluquerías"
+    - say: "uff estoy con fiebre desde ayer"
+      action: none
+      no_booking: true
+    - say: "dale pues"
+      no_booking: true
+      forbid_action: [navigate]
+      biz_name_not: "peluquer|optica|barber"
+
+- id: i02_no_gracias_tras_oferta
+  turns:
+    - say: "me duele el estómago"
+      action: none
+    - say: "no gracias"
+      action: none
+      no_booking: true
+    - say: "listo"
+      no_booking: true
+      forbid_action: [navigate]
+
+- id: i03_ok_sin_propuesta
+  turns:
+    - say: "busca talleres de mecánica"
+    - say: "recomiéndame el mejor"
+      no_booking: true
+    - say: "ok"
+      no_booking: true
+      forbid_action: [navigate]
+
+- id: i04_cambio_de_rubro_y_regreso
+  turns:
+    - say: "quiero ver spa"
+    - say: "y gimnasios?"
+      no_booking: true
+    - say: "regresa a lo de antes"
+      no_booking: true
+      reply_re: "volvemos"
+
+- id: i05_tercero_inexistente
+  turns:
+    - say: "Fogón Criollo Oeste"
+    - say: "llévame al tercero"
+      clarify: true
+      no_booking: true
+
+- id: i06_reserva_explicita_y_cambio
+  turns:
+    - say: "quiero agendar una cita en Consultorio Médico Vida Sana"
+    - say: "mejor muéstrame restaurantes"
+      biz_cat: "restaurantes"
+      no_booking: true
+    - say: "sí"
+      no_booking: true
+      forbid_action: [navigate]
+
+- id: i07_hospital_exigido
+  turns:
+    - say: "necesito un hospital"
+      no_booking: true
+      biz_name_not: "optica|fisioterapia|fogon"
+
+- id: i08_alarma_pecho
+  turns:
+    - say: "tengo dolor en el pecho y me falta el aire"
+      action: none
+      no_booking: true
+      reply_re: "123|urgencias"
+
+- id: i09_por_favor_tras_oferta
+  turns:
+    - say: "me siento muy mal"
+      action: none
+    - say: "porfa"
+      no_booking: true
+      biz_name_not: "optica|fisioterapia"
+
+- id: i10_hola_con_nombre
+  turns:
+    - say: "hola sana"
+      no_booking: true
+      action: none
+
+- id: i11_retomar_cita
+  turns:
+    - say: "quiero agendar una cita en Consultorio Médico Vida Sana"
+    - say: "antes busca restaurantes"
+      biz_cat: "restaurantes"
+      no_booking: true
+    - say: "retomemos la cita"
+      reply_re: "vida sana"
+
+- id: i12_pescado_y_carne
+  turns:
+    - say: "un restaurante que tenga pescado y carne"
+      reply_not_re: "\\b(\\w+) \\1\\b"
+      no_booking: true

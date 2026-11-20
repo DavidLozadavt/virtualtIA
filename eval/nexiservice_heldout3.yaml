@@ -1,0 +1,68 @@
+# Tercer conjunto INDEPENDIENTE de NexiService (fase 2). Mensajes reales de lyra_db
+# anteriores al 2026-11-16, 3.º de cada 4 mensajes distintos. Etiquetado el
+# 2026-11-17 ANTES de analizar ningún fallo de la fase 2; se corre a ciegas al
+# inicio y una sola vez al final. Se omiten los que sólo tienen sentido dentro
+# de su conversación (horas, nombres de personas, "el primero").
+# SOCIAL = cualquier respuesta social (greeting / conversation / farewell).
+
+- {id: k001, turns: [{say: "que puedo hacer en nexiservice", expect: [capabilities, get_general_info]}]}
+- {id: k002, turns: [{say: "dame la arquitectura de nexiservice", expect: [out_of_scope, conversation, capabilities, guard]}]}
+- {id: k003, turns: [{say: "quiero saber que negocios tiene nexiservice", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k004, turns: [{say: "que negocios puedo encontrar en la plataforma?", expect: [search_businesses, fit_all_businesses, clarify, capabilities]}]}
+- {id: k005, turns: [{say: "que negocios tienes activos", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k006, turns: [{say: "¿cómo puedo contactar a un negocio?", expect: [capabilities, get_general_info]}]}
+- {id: k007, turns: [{say: "¿qué negocios hay activos?", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k008, turns: [{say: "little lari lari lara", expect: [SOCIAL, spam, clarify, out_of_scope]}]}
+- {id: k009, turns: [{say: "hola hola hola hola hola hola", expect: [SOCIAL]}]}
+- {id: k010, turns: [{say: "quisiera buscar un negocio", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k011, turns: [{say: "quiero ver negocios", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k012, turns: [{say: "estoy buscando un negocio", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: k013, turns: [{say: "hola nequi service", expect: [SOCIAL]}]}
+- {id: k014, turns: [{say: "barberia", expect: [search_businesses]}]}
+- {id: k015, turns: [{say: "que mas haces tu?", expect: [capabilities, identity]}]}
+- {id: k016, turns: [{say: "adsada", expect: [spam, clarify, SOCIAL, out_of_scope]}]}
+- {id: k017, turns: [{say: "¿dónde hay peluquerías en el mapa?", expect: [search_businesses, show_map]}]}
+- {id: k018, turns: [{say: "hacer zoom", expect: [zoom_in]}]}
+- {id: k019, turns: [{say: "quiero ver barbería vip en el mapa", expect: [fly_to_business, navigate_to_company]}]}
+- {id: k020, turns: [{say: "quiero ver negocios en el mapa", expect: [show_map, fit_all_businesses, search_businesses]}]}
+- {id: k021, turns: [{say: "ver mi ubicación actual", expect: [locate_me]}]}
+- {id: k022, turns: [{say: "neogcios mapa", expect: [show_map, fit_all_businesses, search_businesses]}]}
+- {id: k023, turns: [{say: "quiero ver los negocios más cerca a mí", expect: [search_businesses, recommend_businesses, locate_me]}]}
+- {id: k024, turns: [{say: "tu que haces", expect: [capabilities, identity]}]}
+- {id: k025, turns: [{say: "hola, ¿como estas?", expect: [SOCIAL]}]}
+- {id: k026, turns: [{say: "que es nexiservice", expect: [capabilities, get_general_info, identity]}]}
+- {id: k027, turns: [{say: "asdfkjasldkfj", expect: [spam, clarify, SOCIAL, out_of_scope]}]}
+- {id: k028, turns: [{say: "acercar", expect: [zoom_in]}]}
+- {id: k029, turns: [{say: "quiero ver servicios", expect: [search_businesses, clarify, capabilities]}]}
+- {id: k030, turns: [{say: "quiero ver barberias", expect: [search_businesses]}]}
+- {id: k031, turns: [{say: "hola vida", expect: [SOCIAL]}]}
+- {id: k032, turns: [{say: "y tú qué haces", expect: [capabilities, identity]}]}
+- {id: k033, turns: [{say: "por qué eres tan perra", expect: [SOCIAL, clarify, out_of_scope]}]}
+- {id: k034, turns: [{say: "quiero agendar para reparación de pc", expect: [request_appointment, search_businesses, clarify]}]}
+- {id: k035, turns: [{say: "quiero ver negocios en popayan", expect: [search_businesses]}]}
+- {id: k036, turns: [{say: "alguna barbería cerca", expect: [search_businesses]}]}
+- {id: k037, turns: [{say: "restaurantes", expect: [search_businesses]}]}
+- {id: k038, turns: [{say: "quiero hacer un reserva", expect: [request_appointment, clarify]}]}
+- {id: k039, turns: [{say: "¿como estas?", expect: [SOCIAL]}]}
+- {id: k040, turns: [{say: "que barbebrias tienes", expect: [search_businesses]}]}
+- {id: k041, turns: [{say: "holas", expect: [SOCIAL]}]}
+- {id: k042, turns: [{say: "fogon criollo que servicios ofrece", expect: [get_business_services, clarify]}]}
+- {id: k043, turns: [{say: "tengo una duda", expect: [SOCIAL, clarify, capabilities]}]}
+- {id: k044, turns: [{say: "chao", expect: [farewell]}]}
+- {id: k045, turns: [{say: "necesito un hospital", expect: [search_businesses, clarify]}]}
+- {id: k046, turns: [{say: "busca escuelas de astronautas en medellín", expect: [search_businesses, clarify]}]}
+- {id: k047, turns: [{say: "busco veterinarias", expect: [search_businesses]}]}
+- {id: k048, turns: [{say: "quiero un colegio", expect: [search_businesses]}]}
+- {id: k049, turns: [{say: "negocios cerca de mi", expect: [search_businesses, recommend_businesses]}]}
+- id: k050
+  turns:
+    - {say: "restaurantes", expect: [search_businesses]}
+    - {say: "qué comida típica ofrece", expect: [get_business_services, clarify]}
+- id: k051
+  turns:
+    - {say: "busco veterinarias", expect: [search_businesses]}
+    - {say: "cuál me recomiendas?", expect: [recommend_businesses]}
+- id: k052
+  turns:
+    - {say: "restaurantes", expect: [search_businesses]}
+    - {say: "llévame al segundo", expect: [navigate_to_company, fly_to_business]}

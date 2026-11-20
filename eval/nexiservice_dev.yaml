@@ -1,0 +1,35 @@
+# Conjunto de DESARROLLO de NexiService: ejemplos del encargo (precio con
+# contexto, referencias, correcciones, voz desordenada) y capacidades reales.
+
+- id: p001
+  turns:
+    - {say: "quiero ver restaurantes en popayan", expect: [search_businesses]}
+    - {say: "y cuanto cuesta el segundo", expect: [get_business_services]}
+    - {say: "no, mejor explicame el primero", expect: [navigate_to_company, get_business_services, fly_to_business, get_business_mission_vision, get_service_info]}
+    - {say: "y como lo contrato?", expect: [request_appointment]}
+- id: p002
+  turns:
+    - {say: "restaurantes en popayan", expect: [search_businesses]}
+    - {say: "oe y el tercero cuanto vale", expect: [get_business_services]}
+- id: p003
+  turns:
+    - {say: "restaurantes en popayan", expect: [search_businesses]}
+    - {say: "el segundo porfa", expect: [navigate_to_company, fly_to_business]}
+- id: p004
+  turns:
+    - {say: "restaurantes en popayan", expect: [search_businesses]}
+    - {say: "cuanto vale... bueno no, espera, mejor dime como funciona el primero", expect: [navigate_to_company, get_business_services, fly_to_business]}
+- {id: p005, turns: [{say: "hola mira es que queria preguntarte algo, lo que pasa es que necesito un restaurante en popayan", expect: [search_businesses]}]}
+- {id: p006, turns: [{say: "eh pues busco una barberia en cali", expect: [search_businesses]}]}
+- {id: p007, turns: [{say: "me dices el precio", expect: [clarify, get_business_services]}]}
+- {id: p008, turns: [{say: "cuanto me cobran x eso", expect: [clarify, get_business_services]}]}
+- {id: p009, turns: [{say: "y eso en cuanto sale", expect: [clarify, get_business_services]}]}
+- {id: p010, turns: [{say: "quiero saber cuanto cuesta el servicio", expect: [clarify, get_business_services]}]}
+- id: p011
+  turns:
+    - {say: "qué servicios ofrece fogón criollo oeste popayán", expect: [get_business_services]}
+    - {say: "cuanto vale eso", expect: [get_business_services, get_service_info]}
+- {id: p012, turns: [{say: "hola", expect: [greeting]}]}
+- {id: p013, turns: [{say: "muchas gracias", expect: [farewell, conversation, greeting]}]}
+- {id: p014, turns: [{say: "quien eres", expect: [identity, capabilities]}]}
+- {id: p015, turns: [{say: "escribeme un poema de amor", expect: [conversation, out_of_scope]}]}

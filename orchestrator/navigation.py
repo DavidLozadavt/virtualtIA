@@ -23,7 +23,7 @@ _SAFE_PATH_RE = re.compile(r"^/(?!/)[A-Za-z0-9\-_/.~%:=&?#]*$")
 _NAV_VERBS = re.compile(
     r"\b(llevame|lleva me|ll[eé]vame|llevarme|ir a|ir al|ire a|vamos a|vamos al|abre|abrir|abreme|entrar a|entrar al|"
     r"entra a|ingresar a|ingresa a|navega a|navegar a|redirige|redirigeme|regresa|regresar|regresame|regreso|volver|vuelve|vuelvo|"
-    r"devuelveme|como llego|como regreso|como vuelvo|como entro|como ingreso|como accedo|como abro|donde encuentro|donde esta el modulo|"
+    r"devuelveme|como llego|como regreso|como vuelvo|como entro|como ingreso|como accedo|como abro|donde encuentro|donde gestiono|donde administro|donde configuro|donde creo|donde edito|donde registro|donde esta el modulo|"
     r"donde esta la seccion|donde estan|donde queda el modulo|donde queda la seccion|donde veo|muestrame la seccion|"
     r"muestrame el modulo|quiero ir|quiero entrar|quiero ver la seccion|quiero ver el modulo|ensename donde|"
     r"en que parte|por donde)\b"
@@ -180,8 +180,10 @@ def match_section(text: str, catalog: list[dict]) -> dict:
     rivals = [s for s in scored[1:] if s[1] >= best[1] and s[0] >= best[0] * 0.75]
     if rivals:
         options = [best[2]] + [r[2] for r in rivals[:3]]
-        return {"status": "ambiguous", "item": None, "options": options, "terms": terms}
-    return {"status": "match", "item": best[2], "options": [], "terms": terms}
+        return {"status": "ambiguous", "item": None, "options": options, "terms": terms,
+                "coverage": best[1] / max(1, len(set(terms)))}
+    return {"status": "match", "item": best[2], "options": [], "terms": terms,
+            "coverage": best[1] / max(1, len(set(terms)))}
 
 
 def navigation_reply(text: str, catalog: list[dict], current_path: Optional[str] = None) -> dict:

@@ -1,0 +1,64 @@
+# FASE 2: este conjunto pasó a ser de DESARROLLO al analizar sus fallos (2026-11-17).
+# Etiquetas corregidas: greeting/conversation → SOCIAL (equivalentes). Original estricto: 71,2 %.
+# Segundo conjunto INDEPENDIENTE de NexiService (mensajes reales de lyra_db, otra
+# muestra sistemática: el 2.º de cada 4 mensajes distintos). Etiquetado el
+# 2026-11-16 DESPUÉS de todos los cambios del NLU y ANTES de correrlo por
+# primera vez: ninguna regla se escribió mirándolo. Se omiten los mensajes que
+# sólo tienen sentido dentro de su conversación (horas sueltas, nombres de personas).
+
+- {id: m001, turns: [{say: "necesito saber que puede hacer en nexiservice", expect: [capabilities, get_general_info]}]}
+- {id: m002, turns: [{say: "para que funcionar esta app", expect: [capabilities, get_general_info]}]}
+- {id: m003, turns: [{say: "que negocios tiene activos esta web", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: m004, turns: [{say: "hola lyra", expect: [SOCIAL]}]}
+- {id: m005, turns: [{say: "que negocios tienes disponible lyra", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: m006, turns: [{say: "holaaaaaaa", expect: [SOCIAL]}]}
+- {id: m007, turns: [{say: "¿cómo agendo una cita?", expect: [capabilities, get_general_info, request_appointment]}]}
+- {id: m008, turns: [{say: "busco una barbería", expect: [search_businesses]}]}
+- {id: m009, turns: [{say: "necesito un negocio", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: m010, turns: [{say: "lyra no sirve para nada", expect: [conversation, clarify]}]}
+- {id: m011, turns: [{say: "hola lyra hola hola hola", expect: [SOCIAL]}]}
+- {id: m012, turns: [{say: "hola nexo", expect: [SOCIAL]}]}
+- {id: m013, turns: [{say: "qué haces", expect: [capabilities, identity, conversation]}]}
+- {id: m014, turns: [{say: "asdasdad", expect: [spam, clarify, conversation, out_of_scope]}]}
+- {id: m015, turns: [{say: "busca en la web que es inteligencia artificial", expect: [conversation, out_of_scope, clarify]}]}
+- {id: m016, turns: [{say: "muéstrame barberías cerca", expect: [search_businesses]}]}
+- {id: m017, turns: [{say: "quiero ver hotel paraíso en el mar", expect: [navigate_to_company, fly_to_business, search_businesses, clarify]}]}  # fase 2: "Hotel Paraíso" no existe en la base local
+- {id: m018, turns: [{say: "quiero ver negocios cerca de mí", expect: [search_businesses, recommend_businesses, locate_me]}]}
+- {id: m019, turns: [{say: "ver hotel paraíso en el mapa", expect: [fly_to_business, navigate_to_company]}]}
+- {id: m020, turns: [{say: "hola lyra, ¿como estas?", expect: [SOCIAL]}]}
+- {id: m021, turns: [{say: "hola que tal", expect: [SOCIAL]}]}
+- {id: m022, turns: [{say: "aleja el mapa", expect: [zoom_out]}]}
+- {id: m023, turns: [{say: "adios", expect: [farewell]}]}
+- {id: m024, turns: [{say: "quiero ver negocios en cali", expect: [search_businesses]}]}
+- {id: m025, turns: [{say: "quiero ver la drogueria maria oriente", expect: [navigate_to_company, search_businesses]}]}
+- {id: m026, turns: [{say: "ver negocios casanare", expect: [search_businesses]}]}
+- {id: m027, turns: [{say: "qué puedes hacer", expect: [capabilities]}]}
+- {id: m028, turns: [{say: "por qué sos tan perra", expect: [conversation, clarify, out_of_scope]}]}
+- {id: m029, turns: [{say: "déjame ver negocios en popayán", expect: [search_businesses]}]}
+- {id: m030, turns: [{say: "fogon criollo norte que ofrece", expect: [get_business_services, search_businesses, clarify]}]}  # fase 2: hay dos "Fogón Criollo Norte" (Popayán y Cali): ambiguo
+- {id: m031, turns: [{say: "restaurante de popayán", expect: [search_businesses]}]}
+- {id: m032, turns: [{say: "que barberias tienes", expect: [search_businesses]}]}
+- {id: m033, turns: [{say: "quien eres", expect: [identity, capabilities]}]}
+- {id: m034, turns: [{say: "quiero restaurantes", expect: [search_businesses]}]}
+- {id: m035, turns: [{say: "que restaurantes tienes en popayan", expect: [search_businesses]}]}
+- {id: m036, turns: [{say: "resturantes", expect: [search_businesses]}]}
+- {id: m037, turns: [{say: "alguna medicina", expect: [search_businesses]}]}
+- {id: m038, turns: [{say: "no entiendo", expect: [conversation, capabilities, clarify]}]}
+- {id: m039, turns: [{say: "gracias", expect: [conversation, farewell, greeting]}]}
+- {id: m040, turns: [{say: "quiero agendar una consulta de medcina", expect: [request_appointment, search_businesses, clarify]}]}
+- {id: m041, turns: [{say: "¿qué negocios tienes?", expect: [search_businesses, fit_all_businesses, clarify]}]}
+- {id: m042, turns: [{say: "quiero buscar un colegio", expect: [search_businesses]}]}
+- {id: m043, turns: [{say: "busco colejios en bogota", expect: [search_businesses]}]}
+- {id: m044, turns: [{say: "¿qué puedo hacer en nexiservice?", expect: [capabilities, get_general_info]}]}
+- {id: m045, turns: [{say: "cuál es la capital de francia?", expect: [out_of_scope, conversation]}]}
+- {id: m046, turns: [{say: "recomiéndame un restaurante en popayán", expect: [recommend_businesses, search_businesses]}]}
+- {id: m047, turns: [{say: "muéstrame el mapa", expect: [show_map]}]}
+- {id: m048, turns: [{say: "busca hoteles", expect: [search_businesses]}]}
+- id: m049
+  turns:
+    - {say: "fogon criollo norte", expect: [navigate_to_company, search_businesses]}  # ambiguo (dos sucursales)
+    - {say: "cual es su menu de postres", expect: [get_business_services, get_service_info]}
+- id: m050
+  turns:
+    - {say: "que restaurantes tienes en popayan", expect: [search_businesses]}
+    - {say: "¿cuál me recomiendas?", expect: [recommend_businesses]}

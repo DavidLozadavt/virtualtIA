@@ -5,22 +5,44 @@ from orchestrator.interceptors import schoolsena
 
 logger = logging.getLogger("lyra.interceptors.manager")
 
+#: Interceptor de cada proyecto. Una petición sólo pasa por el de SU proyecto:
+#: antes se probaban todos en cadena y cada uno debía acordarse de comprobar el
+#: project_id; un olvido bastaba para que NexiService contestara en SchoolSena.
+_PRE_LLM = {
+    "nexiservice": nexiservice,
+    "schoolsena": schoolsena,
+}
+_POST_EXEC = {
+    "nexiservice": nexiservice.post_execution_interceptor,
+    "schoolsena": schoolsena.post_execution_interceptor,
+}
+
+#: Clave con la que cada respuesta declara qué proyecto la produjo. ChatService
+#: la contrasta con el proyecto de la petición (ver `project_scope`).
+SOURCE_KEY = "_source_project"
+
+
+def tag_source(result: Dict[str, Any], project_id: str) -> Dict[str, Any]:
+    """Marca la respuesta con el proyecto que la produjo."""
+    fd = result.get("final_data")
+    if not isinstance(fd, dict):
+        fd = {}
+        result["final_data"] = fd
+    fd[SOURCE_KEY] = project_id
+    return result
+
+
 async def run_pre_llm_interceptors(project_id: str, intent_name: str, args: Dict[str, Any], context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Runs all registered pre-LLM interceptors. Returns a response dict if intercepted, else None.
+    Runs the pre-LLM interceptor of THIS project. Returns a response dict if intercepted, else None.
     """
-    # NexiService Interceptor
-    res = await nexiservice.pre_llm_interceptor(project_id, intent_name, args, context)
+    module = _PRE_LLM.get(project_id)
+    if module is None:
+        return None
+    res = await module.pre_llm_interceptor(project_id, intent_name, args, context)
     if res:
-        logger.info(f"Interceptor caught intent '{intent_name}' for project '{project_id}'")
-        return _with_text(res, intent_name)
-
-    # SchoolSena Interceptor
-    res = await schoolsena.pre_llm_interceptor(project_id, intent_name, args, context)
-    if res:
-        logger.info(f"SchoolSena interceptor caught intent for project '{project_id}'")
-        return _with_text(res, intent_name)
-
+        logger.info(f"Interceptor de '{module.PROJECT}' resolvió el intent '{intent_name}' (petición de '{project_id}')")
+        return tag_source(_with_text(res, intent_name), module.PROJECT)
     return None
 
 
@@ -56,14 +78,12 @@ async def run_post_execution_interceptors(tool_name: str, tool_args: Dict[str, A
     """
     final_data = context.get("final_data", {})
     
-    # NexiService post-execution
-    await nexiservice.post_execution_interceptor(tool_name, tool_args, tool_output, context)
-    
-    # SchoolSena post-execution
-    await schoolsena.post_execution_interceptor(tool_name, tool_args, tool_output, context)
-    
+    handler = _POST_EXEC.get(context.get("project_id"))
+    if handler is not None:
+        await handler(tool_name, tool_args, tool_output, context)
+
     # Common UI state injection logic
-    if tool_name == "search_businesses" and tool_output.get("success"):
+    if context.get("project_id") == "nexiservice" and tool_name == "search_businesses" and tool_output.get("success"):
         businesses = tool_output.get("businesses", [])
         if businesses:
             final_data["_last_businesses"] = businesses
