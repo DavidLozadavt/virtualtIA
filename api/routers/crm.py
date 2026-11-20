@@ -119,3 +119,32 @@ async def crm_assist(body: CrmAssistRequest, request: Request,
             pass
 
     return {"ok": True, "task": body.task, "data": data}
+
+
+class CrmLlamadaRequest(BaseModel):
+    mensaje_id: int
+    asesor: str
+    cliente: str
+    caller_id: Optional[str] = None
+    callback_url: str
+
+
+@crm_router.post("/llamadas", status_code=202)
+async def crm_llamada(body: CrmLlamadaRequest, x_lyra_key: Optional[str] = Header(None)):
+    """Llamada grabada asesor → cliente por FreeSWITCH. El resultado llega al ERP por callback_url."""
+    _check_key(x_lyra_key)
+    from services.telephony import crm_calls
+
+    if not settings.CRM_SIP_GATEWAY or not settings.FREESWITCH_ESL_ENABLED:
+        raise HTTPException(status_code=503, detail="La central de llamadas no está configurada")
+    if not crm_calls.numero_valido(body.asesor) or not crm_calls.numero_valido(body.cliente):
+        raise HTTPException(status_code=422, detail="Teléfono inválido")
+    if not body.callback_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="callback_url inválida")
+
+    call_uuid = crm_calls.iniciar_llamada(
+        body.mensaje_id, body.asesor, body.cliente,
+        body.caller_id or "", body.callback_url,
+    )
+    logger.info("crm/llamadas m=%s uuid=%s", body.mensaje_id, call_uuid)
+    return {"ok": True, "uuid": call_uuid}

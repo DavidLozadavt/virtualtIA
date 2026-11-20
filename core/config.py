@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     # X-Lyra-Key). Vacía = el endpoint no atiende a nadie.
     CRM_API_KEY: str = ""
 
+    # Llamadas grabadas del CRM por FreeSWITCH (/crm/llamadas). Gateway SIP del troncal
+    # (sofia/gateway/<nombre>), prefijo de marcación, y dónde quedan las grabaciones:
+    # ruta vista por FreeSWITCH y ruta vista por este proceso (iguales sin contenedores).
+    # ERP donde vive el CRM (base, sin /api): las llamadas que atiende Lyra se reportan ahí.
+    CRM_ERP_URL: str = ""
+    CRM_SIP_GATEWAY: str = ""
+    CRM_SIP_PREFIX: str = ""
+    CRM_RECORDINGS_DIR: str = "data/crm_recordings"
+    CRM_RECORDINGS_FS_DIR: str = "data/crm_recordings"
+    CRM_CALL_ANSWER_TIMEOUT: int = 30
+    CRM_CALL_MAX_SECONDS: int = 7200
+
     # Control de gasto (core/llm_usage.py). Un turno no llama al modelo más de
     # LLM_MAX_CALLS_PER_TURN veces; con el gasto estimado del día por encima de
     # LLM_DAILY_BUDGET_USD (0 = sin límite) Lyra pasa a modo local.
