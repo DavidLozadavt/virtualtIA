@@ -100,6 +100,8 @@ class TurnUsage:
     started: float = field(default_factory=time.time)
     calls: list = field(default_factory=list)
     tools: list = field(default_factory=list)
+    #: Motivo con el que la compuerta de escalamiento decidió este turno.
+    gate: Optional[str] = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -151,6 +153,13 @@ def begin_turn(project_id: str, conversation_id: str) -> TurnUsage:
 
 def current_turn() -> Optional[TurnUsage]:
     return _current.get()
+
+
+def note_gate(reason: str) -> None:
+    """Registra por qué el turno fue (o no) al modelo externo."""
+    turn = _current.get()
+    if turn is not None:
+        turn.gate = reason
 
 
 def note_tool(name: str) -> None:
@@ -230,25 +239,32 @@ def end_turn(latency_ms: int, path: str) -> Optional[dict]:
     if turn is None:
         return None
     _current.set(None)
-    summary = {**turn.summary(), "path": path, "latency_ms": latency_ms}
+    summary = {**turn.summary(), "path": path, "gate_reason": turn.gate, "latency_ms": latency_ms}
     logger.info("LLM_TURN project=%s %s", turn.project_id, json.dumps(summary, ensure_ascii=False))
     try:
         from core.database import get_connection
 
+        values = (
+            turn.project_id[:50], turn.conversation_id[:36], path[:20],
+            summary["llm_calls"], summary["prompt_tokens"], summary["cached_tokens"],
+            summary["completion_tokens"], summary["cost_usd"],
+            ",".join(summary["models"])[:120], ",".join(summary["tools"])[:255],
+            ",".join(summary["errors"])[:255], latency_ms,
+        )
+        columns = ("project_slug, conversation_id, path, llm_calls, prompt_tokens, cached_tokens, "
+                   "completion_tokens, cost_usd, models, tools, errors, latency_ms")
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO lyra_llm_usage (project_slug, conversation_id, path, llm_calls, "
-                    "prompt_tokens, cached_tokens, completion_tokens, cost_usd, models, tools, "
-                    "errors, latency_ms) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (
-                        turn.project_id[:50], turn.conversation_id[:36], path[:20],
-                        summary["llm_calls"], summary["prompt_tokens"], summary["cached_tokens"],
-                        summary["completion_tokens"], summary["cost_usd"],
-                        ",".join(summary["models"])[:120], ",".join(summary["tools"])[:255],
-                        ",".join(summary["errors"])[:255], latency_ms,
-                    ),
-                )
+                try:
+                    cur.execute(
+                        f"INSERT INTO lyra_llm_usage ({columns}, gate_reason) VALUES ({','.join(['%s'] * 13)})",
+                        values + ((turn.gate or None) and turn.gate[:40],),
+                    )
+                except Exception as exc:
+                    # Sin la migración 006 la columna no existe: se guarda igual, sin motivo.
+                    if "gate_reason" not in str(exc):
+                        raise
+                    cur.execute(f"INSERT INTO lyra_llm_usage ({columns}) VALUES ({','.join(['%s'] * 12)})", values)
     except Exception as exc:
         logger.warning("No se pudo guardar el uso del turno: %s", exc)
     return summary

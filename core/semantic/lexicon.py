@@ -262,6 +262,39 @@ AFFIRMATIVE_FORMS = _S("si", "sip", "claro", "obvio", "correcto", "exacto",
 
 NEGATIVE_FORMS = _S("no", "nop", "nunca", "jamas", "negativo", "para nada", "mejor no")
 
+#: Lo que acompaña a un "no" sin cambiarlo de función: "mejor no", "no
+#: gracias", "ahora no", "todavía no". Con estas palabras alrededor el mensaje
+#: sigue siendo una negativa y nada más.
+NEGATION_COMPANIONS = _S("mejor", "gracias", "ahora", "todavia", "aun", "por", "asi", "entonces",
+                         "dejalo", "deja", "tranquilo", "tranquila", "momento", "ese", "eso")
+
+#: Marcadores de discurso: ordenan la conversación, no nombran nada. "AHORA
+#: busca veterinarias" no pide un negocio llamado "ahora".
+DISCOURSE_MARKERS = _S("ahora", "entonces", "luego", "bueno", "oye", "mira", "vea", "ojo", "antes", "primero", "mientras")
+
+#: Verbos de hallar: "¿qué puedo ENCONTRAR?". Piden buscar, no nombran qué.
+FIND_VERBS = _S("encontrar", "encuentro", "encuentra", "encuentran", "encontre", "hallar", "hallo",
+                "conseguir", "consigo", "consigue", "localizar")
+
+#: Posesivos de primera persona: "MI empresa" es la del usuario, no una que buscar.
+FIRST_PERSON_POSSESSIVES = _S("mi", "mis", "nuestra", "nuestro", "nuestras", "nuestros")
+
+#: Volver a algo anterior: "volvamos a los restaurantes", "regresa a lo de
+#: antes", "retomemos la cita". Recuperan un contexto; no repiten una acción.
+RETURN_FORMS = _S("volvamos", "volver", "vuelve", "volvemos", "regresemos", "regresar", "regresa",
+                  "regresamos", "retomemos", "retomar", "retoma", "retomamos", "devuelveme", "devuelvete")
+RETURN_PHRASES = ("lo anterior", "lo de antes", "lo que estabamos", "lo que veiamos", "como antes",
+                  "la lista anterior", "los anteriores", "las anteriores")
+
+#: Aceptaciones que no son "sí" pero lo valen cuando hay algo propuesto.
+ACCEPT_FORMS = _S("ok", "oka", "okay", "vale", "listo", "bueno", "perfecto", "genial", "excelente",
+                  "de una", "hagale", "hazlo", "adelante", "por favor", "porfa", "porfis", "please",
+                  "eso", "eso es", "esa", "ese", "andale", "sale", "va", "me parece", "me parece bien",
+                  "esta bien", "bien", "busca", "buscalos", "buscalas", "muestramelos", "muestramelas",
+                  # Imperativo + clítico sobre lo propuesto: "confírmala" acepta ESA reserva.
+                  "confirmala", "confirmalo", "confirmalas", "agendala", "agendalo", "reservala",
+                  "reservalo", "apartala", "apartalo", "hazla", "procede", "confirmo", "confirmado")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # § 7. DETERMINANTES, CUANTIFICADORES Y APROXIMADORES
@@ -313,7 +346,7 @@ FUNCTION_WORDS = (
     | BACKCHANNEL_FORMS | AFFIRMATIVE_FORMS | NEGATIVE_FORMS
     | GREETING_FORMS | FAREWELL_FORMS | THANKS_FORMS | POLITENESS
     | frozenset(ORDINALS.keys()) | EDGE_SELECTORS | LOCATIVE_ADVERBS
-    | MERIDIEM_FORMS
+    | MERIDIEM_FORMS | DISCOURSE_MARKERS | RETURN_FORMS | FIND_VERBS
 )
 
 #: Raíces de todos los verbos de clase cerrada registrados arriba.
@@ -335,6 +368,8 @@ APPOINTMENT_FRAME_STEMS = frozenset({
         "turno", "turnos", "separar", "apartar", "aparta",
         "atiendan", "atender", "atenderme", "atienden",
         "disponibilidad", "disponible", "cupo", "hueco", "espacio",
+        # "¿Cómo lo contrato?": tomar el servicio que se está mirando.
+        "contratar", "contrato", "contratarlo", "contratarla", "contrata",
     )
 })
 
@@ -443,6 +478,8 @@ IDENTITY_FRAME_STEMS = frozenset({
         # pedir que te presenten un negocio, y sin ella caía en la rama de
         # agendar: el usuario preguntaba quiénes son y le ofrecían una cita.
         "hablame", "hablanos", "cuentame", "cuentanos", "presentame",
+        # "Explícame el primero", "descríbeme ese": misma petición de presentarlo.
+        "explicame", "explicanos", "describeme", "describenos",
     )
 })
 

@@ -1,0 +1,89 @@
+# Conjunto de DESARROLLO de SchoolSena: escrito a partir del inventario de
+# capacidades (tools × roles, navegación, fuera de alcance, permisos) y de los
+# fenómenos del habla pedidos (errores, coloquial, seguimientos, correcciones).
+# Es el que se usa mientras se construye; el held-out es el que mide.
+
+# ── Horario / clases, con variación lingüística ──────────────────────────────
+- {id: d001, role: aprendiz, turns: [{say: "oe q clases tngo hoy", expect: "schedule:today"}]}
+- {id: d002, role: aprendiz, turns: [{say: "me dices mi horario de esta semana porfa", expect: "schedule:week"}]}
+- {id: d003, role: aprendiz, turns: [{say: "a q hora entro mañana", expect: "schedule:tomorrow"}]}
+- {id: d004, role: aprendiz, turns: [{say: "cual es el horario de todo el mes", expect: "schedule:month"}]}
+- {id: d005, role: aprendiz, turns: [{say: "tengo clase ahorita?", expect: "schedule:today"}]}
+- {id: d006, role: aprendiz, turns: [{say: "que me toca hoy", expect: "schedule:today"}]}
+- {id: d007, role: aprendiz, turns: [{say: "en que salon me toca mañana", expect: "schedule:tomorrow"}]}
+- {id: d008, role: instructor, turns: [{say: "a que fichas les doy clase hoy", expect: "schedule:today"}]}
+- {id: d009, role: aprendiz, turns: [{say: "cuanto vale... bueno no, espera, mejor dime mis clases de mañana", expect: "schedule:tomorrow"}]}
+- {id: d010, role: aprendiz, turns: [{say: "hola mira es que queria preguntarte algo, lo que pasa es que no se que clases tengo hoy", expect: "schedule:today"}]}
+
+# ── Actividades / notas ──────────────────────────────────────────────────────
+- {id: d011, role: aprendiz, turns: [{say: "tengo tareas sin entregar?", expect: activities}]}
+- {id: d012, role: aprendiz, turns: [{say: "que trabajos me faltan", expect: activities}]}
+- {id: d013, role: aprendiz, turns: [{say: "como voy en las materias", expect: grades}]}
+- {id: d014, role: aprendiz, turns: [{say: "pase programacion?", expect: grades}]}
+- {id: d015, role: aprendiz, turns: [{say: "mis calificasiones", expect: grades}]}
+- {id: d016, role: aprendiz, turns: [{say: "evidencias pendientes para esta semana", expect: activities}]}
+
+# ── Instructor ───────────────────────────────────────────────────────────────
+- {id: d017, role: instructor, turns: [{say: "cuales son mis grupos", expect: fichas_mine}]}
+- {id: d018, role: instructor, turns: [{say: "quienes estan en la ficha 2558", expect: students}]}
+- {id: d019, role: instructor, turns: [{say: "quien entrego la actividad 12", expect: deliveries}]}
+- {id: d020, role: instructor, turns: [{say: "dame los aprendices de la ficha", expect: clarify}]}
+- id: d021
+  role: instructor
+  turns:
+    - {say: "estudiantes de la ficha 2558", expect: students}
+    - {say: "y de la 2601?", expect: students}
+- id: d022
+  role: instructor
+  turns:
+    - {say: "cuales son mis grupos", expect: fichas_mine}
+    - {say: "y los estudiantes del primero", expect: students}
+
+# ── Coordinación ─────────────────────────────────────────────────────────────
+- {id: d023, role: coordinador, turns: [{say: "cuanto se paga de nomina este mes", expect: payroll}]}
+- {id: d024, role: coordinador, turns: [{say: "que contratos se vencen pronto", expect: contracts}]}
+- {id: d025, role: coordinador, turns: [{say: "cuantos instructores tenemos", expect: instructors}]}
+- {id: d026, role: coordinador, turns: [{say: "como va el centro en general", expect: dashboard}]}
+- {id: d027, role: coordinador, turns: [{say: "grupos activos del centro", expect: fichas_active}]}
+
+# ── Permisos ─────────────────────────────────────────────────────────────────
+- {id: d028, role: aprendiz, turns: [{say: "cuanto gana un instructor", expect: denied}]}
+- {id: d029, role: instructor, turns: [{say: "muestrame la nomina", expect: denied}]}
+- {id: d030, role: aprendiz, turns: [{say: "quien entrego la actividad 12", expect: denied}]}
+- {id: d031, role: invitado, turns: [{say: "que clases tengo hoy", expect: [denied, clarify]}]}
+
+# ── Seguimientos y correcciones ──────────────────────────────────────────────
+- id: d032
+  role: aprendiz
+  turns:
+    - {say: "mis clases de hoy", expect: "schedule:today"}
+    - {say: "y el viernes?", expect: ["schedule:day", "schedule:week"]}
+    - {say: "no, mejor las actividades", expect: activities}
+- id: d033
+  role: aprendiz
+  turns:
+    - {say: "actividades pendientes", expect: activities}
+    - {say: "y las notas", expect: grades}
+    - {say: "y hoy que clases tengo", expect: "schedule:today"}
+- id: d034
+  role: aprendiz
+  turns:
+    - {say: "mi horario", expect: ["schedule:week", clarify]}
+    - {say: "solo hoy", expect: "schedule:today"}
+    - {say: "y pasado mañana", expect: ["schedule:day", "schedule:week"]}
+
+# ── Navegación ───────────────────────────────────────────────────────────────
+- {id: d035, role: coordinador, turns: [{say: "abreme lo de videoconferencias", expect: nav}]}
+- {id: d036, role: coordinador, turns: [{say: "donde gestiono los usuarios", expect: nav}]}
+- {id: d037, role: aprendiz, turns: [{say: "volver al inicio", expect: nav}]}
+
+# ── Fuera de alcance / basura / social ───────────────────────────────────────
+- {id: d038, role: aprendiz, turns: [{say: "quien gano el partido ayer", expect: out_of_scope}]}
+- {id: d039, role: aprendiz, turns: [{say: "escribeme un poema", expect: out_of_scope}]}
+- {id: d040, role: aprendiz, turns: [{say: "jajaja", expect: [greeting, out_of_scope, clarify]}]}
+- {id: d041, role: aprendiz, turns: [{say: "gracias", expect: [greeting, out_of_scope]}]}
+- {id: d042, role: aprendiz, turns: [{say: "cuanto cuesta el servicio", expect: [out_of_scope, clarify]}]}
+- {id: d043, role: aprendiz, turns: [{say: "que hora es en general", expect: [out_of_scope, clarify]}]}
+- {id: d044, role: coordinador, turns: [{say: "busco trabajo", expect: [out_of_scope, clarify]}]}
+- {id: d045, role: aprendiz, turns: [{say: "que tal", expect: greeting}]}
+- {id: d046, role: aprendiz, turns: [{say: "buenas", expect: greeting}]}

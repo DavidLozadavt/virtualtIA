@@ -136,7 +136,7 @@ CANDIDATOS = [
 ]
 
 
-def _recomendar(candidatos, monkeypatch, final_data=None):
+def _recomendar(candidatos, monkeypatch, final_data=None, user_text=""):
     async def fake_rank(term, city=None, **kwargs):
         return {"success": True, "city": "Popayán", "category": term,
                 "businesses": candidatos}
@@ -145,7 +145,7 @@ def _recomendar(candidatos, monkeypatch, final_data=None):
     final_data = final_data if final_data is not None else {}
     salida = asyncio.run(_handle_recommend_businesses(
         {"category": "Consulta de Medicina General", "city": "Popayán"},
-        {"active_city": "Popayán"}, final_data,
+        {"active_city": "Popayán", "user_text": user_text}, final_data,
     ))
     return salida
 
@@ -158,8 +158,9 @@ def test_la_recomendacion_nombra_al_elegido_y_da_la_razon(monkeypatch):
     assert "4.6" in reply and "3 reseñas" in reply
     # El porqué, con palabras de un cliente real.
     assert "joya escondida" in reply
-    # Y una salida hacia la acción siguiente.
-    assert "¿Te agendo" in reply
+    # Recomendar es informar: no se empuja a reservar si nadie lo pidió
+    # (fase 2: antes toda recomendación cerraba con "¿Te agendo?").
+    assert "¿Te agendo" not in reply
     assert "[BIZ:12]" in reply
 
 
@@ -169,14 +170,20 @@ def test_las_alternativas_van_detras_no_desaparecen(monkeypatch):
     assert "Fisioterapia Total Norte Popayán" in reply
 
 
-def test_el_recomendado_queda_en_foco_para_el_si_que_viene_despues(monkeypatch):
+def test_el_recomendado_queda_en_foco_pero_no_abre_una_reserva(monkeypatch):
+    """
+    Fase 3: recomendar no ofrece agendar, así que no deja nada en la reserva.
+    Antes el recomendado se escribía en `booking`, y un "sí" posterior que
+    respondía a OTRA cosa ("¿te busco centros médicos?") agendaba ahí.
+    """
     final_data = {}
     salida = _recomendar(CANDIDATOS, monkeypatch, final_data)
     fd = salida["final_data"]
 
     assert fd["selected_business_id"] == 12
     estado = ConversationState.load(fd)
-    assert estado.booking["business_id"] == 12
+    assert estado.focus_id == 12
+    assert not estado.booking.get("business_id")
     # Y las fichas de los candidatos acompañan a ESTA respuesta.
     assert fd["properties"] == [{"businesses": CANDIDATOS}]
 
@@ -299,11 +306,14 @@ def test_el_servicio_recomendado_viaja_con_la_reserva(monkeypatch):
     dado en su primer mensaje.
     """
     final_data = {}
-    salida = _recomendar(CANDIDATOS, monkeypatch, final_data)
+    # Sólo cuando la persona habla de reservar: entonces sí se anota el servicio.
+    salida = _recomendar(CANDIDATOS, monkeypatch, final_data,
+                         user_text="quiero agendar con el mejor para medicina general")
     fd = salida["final_data"]
 
     estado = ConversationState.load(fd)
     assert estado.booking["service_name"] == "Consulta Médica General"
+    assert "¿Te agendo" in salida["reply"]
     assert fd["_pending_service"] == "Consulta Médica General"
     # Y se dice en voz alta, para que el usuario pueda corregirlo si no era eso.
     assert "Consulta Médica General" in salida["reply"]
@@ -320,4 +330,12 @@ def test_recomendar_un_rubro_no_inventa_un_servicio(monkeypatch):
 
     estado = ConversationState.load(salida["final_data"])
     assert "service_name" not in estado.booking
-    assert "¿Te agendo en **Fogón Criollo Oeste Popayán**?" in salida["reply"]
+    assert "¿Te agendo" not in salida["reply"]
+
+
+def test_recomendar_sin_pedir_reserva_no_prepara_una(monkeypatch):
+    """Explorar no es reservar: ni se anota el servicio ni se propone la cita."""
+    salida = _recomendar(CANDIDATOS, monkeypatch, {}, user_text="cuál me recomiendas para medicina general")
+    estado = ConversationState.load(salida["final_data"])
+    assert "service_name" not in estado.booking
+    assert "¿Te agendo" not in salida["reply"]

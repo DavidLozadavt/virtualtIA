@@ -148,6 +148,12 @@ def resolve(
     if not key:
         return []
 
+    # Teclazos o una palabra repetida no se le mandan al modelo: no hay
+    # necesidad que traducir (misma regla que la compuerta del agente).
+    from orchestrator.escalation import _looks_like_noise
+    if _looks_like_noise(message) or len(set(normalize(message).split())) == 1 and len(normalize(message).split()) > 2:
+        return []
+
     with _cache_lock:
         if key in _cache:
             return [_clone(c) for c in _cache[key]]
@@ -158,6 +164,10 @@ def resolve(
     )
 
     fn = _completion_fn or _default_completion
+    # Este turno sale al modelo antes de la compuerta del agente: queda anotado
+    # con su propio motivo en lyra_llm_usage.gate_reason.
+    from core import llm_usage
+    llm_usage.note_gate("semantic_c")
     try:
         raw = fn(prompt)
     except Exception as exc:

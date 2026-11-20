@@ -165,8 +165,14 @@ def test_el_modo_local_responde_saludos_con_contexto():
     final_data = {}
     state.save(final_data)
 
-    out = run(ExplodingEngine(), "hola", final_data=final_data)
+    # Tras un "gracias" se retoma el hilo; un saludo o un tema nuevo no
+    # arrastran lo anterior (fase 2: insistía con el negocio de antes).
+    out = run(ExplodingEngine(), "gracias", final_data=final_data)
     assert "2 opciones" in out["reply"]
+    final_data2 = {}
+    state.save(final_data2)
+    out = run(ExplodingEngine(), "hola", final_data=final_data2)
+    assert "2 opciones" not in out["reply"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

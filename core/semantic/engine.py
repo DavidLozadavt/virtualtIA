@@ -16,6 +16,7 @@ maneja, para que esta capa mejore la comprensión sin obligar a reescribir los
 interceptores ni las herramientas.
 """
 
+import re
 import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence
@@ -133,6 +134,47 @@ def build_understanding(
         answered.trace = u.trace + answered.trace
         return answered
 
+    # ── 0.2. ¿Responde a lo que Lyra PROPUSO en su última respuesta? ─────────
+    #
+    # "Sí", "por favor", "eso", "mejor no" no significan nada por sí mismos:
+    # significan aceptar o rechazar la propuesta inmediatamente anterior. Sólo
+    # ésa: una propuesta de hace dos turnos, una reserva que quedó en memoria o
+    # un negocio que sigue en foco NO son algo que se acepte con una palabra.
+    offer = state.live_offer()
+    reply_kind = offer_reply(message, analysis)
+    if offer and reply_kind:
+        return _answer_offer(u, offer, reply_kind)
+
+    # ── 0.3. Volver a algo anterior ──────────────────────────────────────────
+    #
+    # "Volvamos a los restaurantes" recupera una lista ya vista; "retomemos la
+    # cita" pone otra vez en curso la reserva que quedó a medias. Las dos cosas
+    # RECUPERAN contexto: ninguna repite una acción.
+    if "return" in analysis.frames:
+        u.args = {
+            "target": [t for t in analysis.content_terms if t not in _RETURN_FILLER],
+            "booking": "appointment" in analysis.frames,
+        }
+        u.note(f"volver a un contexto anterior → {u.args}")
+        return _finish(u, Disposition.ACT, "restore_context")
+
+    # ── 0.4. Refinar lo ya mostrado ─────────────────────────────────────────
+    #
+    # "De esos cuatro, ¿cuál tiene pescado?", "entre esos, el más barato", "el
+    # segundo, pero que tenga domicilio". El alcance ("de esos", "los
+    # anteriores", "los que me mostraste") apunta al conjunto en pantalla: no es
+    # contenido que buscar. Sin este paso "de esos cuatros ... pescado" se leía
+    # como una búsqueda de "cuatros pescado".
+    from core.semantic.refinement import read_set_request
+    _hay_lista = any(p.kind == ConceptKind.BUSINESS for p in state.presented)
+    pedido = read_set_request(message, ordinal=analysis.ordinal, has_presented=_hay_lista)
+    if pedido:
+        u.args = {"operation": pedido.operation, "requirements": pedido.requirements,
+                  "count": pedido.count, "ordinal": pedido.ordinal}
+        u.note(f"refina lo mostrado ({pedido.scope_text or 'sin alcance explícito'}) → {u.args}")
+        u.confidence = max(u.confidence, 0.9)
+        return _finish(u, Disposition.ACT, "refine_presented")
+
     # ── 0a. "Sí" seguido de ruido sigue siendo un sí ────────────────────────
     #
     # "Sí por favot". La errata convierte una palabra en contenido desconocido,
@@ -150,7 +192,7 @@ def build_understanding(
         and act not in (Act.AFFIRM, Act.DENY)
         and not analysis.frames
         and analysis.content_terms
-        and (state.pending_slot or state.booking or state.focus_id)
+        and (state.is_collecting or state.live_offer())
     ):
         if not _resolve_domain(
             analysis, message, mentioned_city=mentioned_city,
@@ -198,6 +240,32 @@ def build_understanding(
         act = Act.ATTRIBUTE
         u.act = act
         u.note("pregunta por la oferta con un negocio delante → atributo del negocio")
+
+    # ── 0c'. "¿Qué negocios hay?", "negocios": el directorio ─────────────────
+    #
+    # Sólo el marco de lugar genérico, sin rubro: pide ver qué hay. Si el
+    # negocio es "MI empresa", habla del suyo propio y no pide buscar nada.
+    if ("generic_place" in analysis.frames and not analysis.content_terms
+            and act in (Act.UNPARSEABLE, Act.BARE_NOMINAL, Act.NEED, Act.EXISTENTIAL)):
+        # "Mi" posesivo va delante de un sustantivo ("MI empresa"); "cerca de mí"
+        # es un pronombre y pide cercanía, no habla de un negocio propio.
+        if re.search(r"\b(mi|mis|nuestr[oa]s?)\s+(empresa|negocio|local|tienda|emprendimiento|marca|establecimiento)",
+                     normalize(message)):
+            u.clarification = ("¿Qué necesitas con tu empresa? Si la administras, entra con tu cuenta y te llevo "
+                               "a su panel; si es otra cosa, cuéntame y te oriento.")
+            u.final = True
+            u.note("habla de su propia empresa → se pregunta qué necesita")
+            return u
+        u.args = {"category": "", "city": mentioned_city}
+        u.note("lugar genérico sin rubro → directorio")
+        return _finish(u, Disposition.ACT, "search_businesses")
+
+    # ── 0d. Pide buscar sin decir qué ("ahora busca otra cosa") ─────────────
+    if act == Act.NEED and not analysis.content_terms and not analysis.frames:
+        u.clarification = "Claro. ¿Qué quieres que busque?"
+        u.final = True
+        u.note("petición de búsqueda sin objeto → se pregunta qué")
+        return u
 
     # ── 1. Actos sociales y dirigidos al asistente ──────────────────────────
     if act in Act.CONVERSATIONAL:
@@ -421,12 +489,26 @@ def _contextual(
             return _finish(u, Disposition.ACT, "compare_businesses")
 
         if not target:
+            mostrados = [p for p in state.presented if p.kind == ConceptKind.BUSINESS] or state.presented
             if not reference.has_resolvable_context(state):
                 u.clarification = "Todavía no te he mostrado opciones. ¿Qué estás buscando?"
+            elif analysis.ordinal and mostrados and analysis.ordinal > len(mostrados):
+                n = len(mostrados)
+                u.clarification = (f"Solo te mostré {'una opción' if n == 1 else f'{n} opciones'}. "
+                                   "¿Cuál quieres ver?")
             else:
                 u.clarification = "¿Cuál de las opciones te interesa?"
+            # Una referencia que no apunta a nada se pregunta; no se le busca un
+            # sentido con las reglas por palabras clave.
+            u.final = True
             u.note("referencia sin antecedente resoluble")
             return u
+
+        # "Quiero reservar en el segundo": la selección dice además qué hacer.
+        if target.kind == ConceptKind.BUSINESS and "appointment" in analysis.frames:
+            u.args = _booking_args(state, business_id=target.entity_id, business_name=target.label, **temporal)
+            u.note(f"reserva sobre el elemento #{target.position} de la lista actual")
+            return _finish(u, Disposition.ACT, "request_appointment")
 
         # Una referencia CON marco dice qué hacer con lo referido: "háblame de
         # ese lugar", "muéstrame ese en el mapa", "¿qué ofrece ése?". Va por
@@ -442,6 +524,13 @@ def _contextual(
             u.args = _booking_args(state, professional_name=target.label)
             return _finish(u, Disposition.ACT, "request_appointment")
         if target.kind == ConceptKind.SERVICE:
+            # "Explícame el primero" sobre una lista de servicios pide conocer
+            # ese servicio, no reservarlo: sólo la selección pelada agenda.
+            if analysis.frames & {"identity", "offering", "review"}:
+                u.args = {"service_name": target.label,
+                          "business_id": _business_id_from(None, state)}
+                u.note("pregunta sobre un servicio mostrado → información del servicio")
+                return _finish(u, Disposition.ACT, "get_service_info")
             u.args = _booking_args(state, service_name=target.label)
             return _finish(u, Disposition.ACT, "request_appointment")
 
@@ -460,10 +549,21 @@ def _contextual(
 
     # — Complemento temporal suelto: "mañana en la tarde" —
     if analysis.act == Act.TEMPORAL:
-        if state.booking or state.focus_id:
+        if state.goal == dialogue.GOAL_BOOKING and state.booking:
             u.args = _booking_args(state, **temporal)
             u.note(f"complemento temporal continúa la reserva en curso: {temporal}")
             return _finish(u, Disposition.ACT, "request_appointment")
+        # Una hora con un negocio delante pero sin reserva en curso no es una
+        # orden de agendar: se propone, y el "sí" siguiente la acepta.
+        if state.focus_id and state.focus_kind == ConceptKind.BUSINESS and state.focus_label:
+            args = _booking_args(state, **temporal)
+            cuando = " ".join(str(v) for v in (temporal.get("date"), temporal.get("time")) if v)
+            u.clarification = f"¿Quieres que te agende en **{state.focus_label}**{' para ' + cuando if cuando else ''}?"
+            u.propose = {"intent": "request_appointment", "args": args,
+                         "label": f"agendar en {state.focus_label}"}
+            u.final = True
+            u.note("hora con un negocio en foco y sin reserva en curso → se propone agendar")
+            return u
         # Un "a las 8" sin nada en marcha no es conversación: es un dato que no
         # tiene dónde ir. Devolverlo como charla hacía que Lyra saludara a quien
         # acababa de darle una hora.
@@ -476,13 +576,23 @@ def _contextual(
 
     # — Confirmación / negación —
     if analysis.act == Act.AFFIRM:
-        if state.booking:
+        offer = state.live_offer()
+        if offer:
+            return _answer_offer(u, offer, "accept")
+        if state.goal == dialogue.GOAL_BOOKING and state.booking and state.is_collecting:
             u.args = _booking_args(state, **temporal)
             return _finish(u, Disposition.ACT, "request_appointment")
-        u.note("confirmación sin proceso abierto")
-        return _finish(u, Disposition.CONVERSE, None)
+        # Un "sí" sin nada propuesto no se adivina. Antes se aplicaba a lo que
+        # hubiera en memoria —una reserva vieja, el negocio en foco— y así un
+        # "sí, por favor" a "¿te busco centros médicos?" agendaba en el
+        # restaurante recomendado dos turnos antes.
+        u.note("confirmación sin propuesta vigente → aclaración breve")
+        return _ask_what_for(u, state)
 
     if analysis.act == Act.DENY:
+        offer = state.live_offer()
+        if offer:
+            return _answer_offer(u, offer, "decline")
         u.note("negación")
         return _finish(u, Disposition.CONVERSE, None)
 
@@ -879,9 +989,14 @@ def _discovery(
         u.note("situar en el mapa el negocio identificado")
         return _finish(u, Disposition.ACT, "fly_to_business")
 
+    # "¿Qué servicios ofrece Fogón Criollo?" nombra el negocio Y lo que se
+    # quiere saber de él: abrir su perfil sin listar la oferta ignoraba la
+    # pregunta.
     for frame, intent in (
         ("identity", "get_business_mission_vision"),
         ("web", "open_business_web"),
+        ("review", "get_business_reviews"),
+        ("offering", "get_business_services"),
     ):
         if frame in analysis.frames and best.kind == ConceptKind.BUSINESS:
             u.args = {"business_id": best.entity_id, "business_name": best.label}
@@ -899,6 +1014,7 @@ def _discovery(
         and not best.ambiguous
         and not pide_lista
         and best.score >= _BUSINESS_NAV_THRESHOLD
+        and _names_the_business(message, best.label)
     ):
         u.args = {"business_id": best.entity_id, "business_name": best.label, "city": mentioned_city}
         u.note("nombre de negocio identificado")
@@ -922,6 +1038,96 @@ def _discovery(
 # ═══════════════════════════════════════════════════════════════════════════════
 # § 3. AUXILIARES
 # ═══════════════════════════════════════════════════════════════════════════════
+
+#: Palabras que acompañan a "volver" sin nombrar a qué.
+_RETURN_FILLER = frozenset({"antes", "anterior", "anteriores", "lista", "estabamos", "veiamos", "tema"})
+
+
+def offer_reply(message: str, analysis: Analysis) -> Optional[str]:
+    """
+    'accept' | 'decline' si el mensaje sólo acepta o rechaza; None si dice algo más.
+
+    "Sí, un restaurante" nombra algo y no es una simple aceptación: sigue su
+    camino normal. "Por favor", "eso", "dale", "listo" sí lo son cuando hay
+    algo propuesto.
+    """
+    if analysis.act == Act.DENY:
+        return "decline"
+    permitidas = set()
+    for forma in lx.ACCEPT_FORMS | lx.AFFIRMATIVE_FORMS | lx.POLITENESS:
+        permitidas.update(forma.split())
+    # "Confírmala" llega como contenido (no es palabra gramatical), pero es una
+    # forma de aceptar: no cuenta como algo nuevo que el usuario nombre.
+    if [t for t in analysis.content_terms if t not in permitidas] or analysis.ordinal is not None:
+        return None
+    if analysis.act == Act.AFFIRM:
+        return "accept"
+    toks = [t for t in normalize(message).split() if t]
+    if not toks or len(toks) > 5:
+        return None
+    permitidas |= {"que", "pues", "y", "si", "claro", "ahora", "entonces", "hombre", "mujer", "amigo"}
+    if all(t in permitidas for t in toks) and any(t not in {"que", "pues", "y"} for t in toks):
+        return "accept"
+    return None
+
+
+def _answer_offer(u: Understanding, offer: Dict[str, Any], kind: str) -> Understanding:
+    """Aplica un sí / no a la propuesta vigente."""
+    if kind == "decline":
+        u.args = {"label": offer.get("label") or ""}
+        u.note(f"rechaza la propuesta del turno anterior: {offer.get('intent')}")
+        return _finish(u, Disposition.ACT, "decline_offer")
+    opciones = offer.get("options") or []
+    if len(opciones) > 1:
+        # "¿Ver sus servicios o agendar?" — "sí" no elige ninguna.
+        nombres = [o.get("label") for o in opciones if o.get("label")]
+        u.clarification = "¿Qué prefieres: " + ", ".join(nombres[:-1]) + f" o {nombres[-1]}?"
+        u.propose = dict(offer)
+        u.final = True
+        u.note("sí a una pregunta con alternativas → se pregunta cuál")
+        return u
+    u.args = dict(offer.get("args") or {})
+    u.note(f"acepta la propuesta del turno anterior: {offer.get('intent')} {u.args}")
+    u.confidence = max(u.confidence, 0.95)
+    return _finish(u, Disposition.ACT, offer.get("intent"))
+
+
+def _ask_what_for(u: Understanding, state: ConversationState) -> Understanding:
+    """Aclaración breve cuando una respuesta corta no tiene a qué referirse."""
+    if any(p.kind == ConceptKind.BUSINESS for p in state.presented):
+        u.clarification = "¿Con cuál de las opciones seguimos? Dime el número o el nombre."
+    else:
+        u.clarification = ("¿A qué te refieres? Dime qué necesitas: puedo buscar negocios, "
+                           "mostrarte sus servicios o ayudarte a agendar una cita.")
+    u.final = True
+    u.disposition = Disposition.CLARIFY
+    return u
+
+
+#: Palabras de un nombre de negocio que no lo distinguen de otros.
+_NON_DISTINCTIVE = frozenset({"de", "del", "la", "el", "los", "las", "y", "e", "en",
+                              "norte", "sur", "este", "oeste", "centro"})
+
+
+def _names_the_business(message: str, label: str) -> bool:
+    """
+    ¿El usuario dijo lo que DISTINGUE a ese negocio, o sólo una palabra que se le parece?
+
+    "Fogón Criollo Norte" nombra a Fogón Criollo; "busco un lugar para cortarme
+    el pelo" no nombra a "Corte de Clase" aunque "cortarme" se le parezca. Se
+    exige cubrir dos palabras distintivas del nombre (o la única que tenga).
+    """
+    from core.semantic.morphology import strict_closeness
+    try:
+        from tools.popayan_geodata import CITY_NAMES as _CIUDADES  # noqa
+        ciudades = {normalize(c) for c in _CIUDADES}
+    except Exception:
+        ciudades = {"popayan", "cali", "bogota", "medellin"}
+    nombre = [w for w in normalize(label or "").split() if w not in _NON_DISTINCTIVE and w not in ciudades]
+    dichas = normalize(message).split()
+    cubiertas = sum(1 for w in nombre if any(w == d or strict_closeness(w, d) for d in dichas))
+    return cubiertas >= min(2, len(nombre)) if nombre else False
+
 
 def _finish(u: Understanding, disposition: str, intent: Optional[str]) -> Understanding:
     u.disposition = disposition

@@ -1,0 +1,100 @@
+# SchoolSena — conjunto INDEPENDIENTE de la fase 7 (formularios y eventos, varios turnos).
+# Frases que NO se usaron al desarrollar. Se corre contra los servicios locales reales
+# (scripts/eval_school_fase7.py). `expect` = resultado(s) aceptables del turno (school_outcome).
+# Fixtures que crea el runner: eventos "Congreso F7IND", "Expo F7IND" (dos, distinta fecha),
+# "Cine foro F7IND" (mañana) y el formulario "Registro congreso F7IND" (borrador, 2 preguntas).
+
+- id: i01
+  role: admin
+  turns:
+    - {say: "necesito crear un formulario nuevo", expect: create_flow}
+    - {say: "ponle de nombre Inscripción Feria F7IND", expect: form_prepared}
+    - {say: "va a pedir nombres, apellidos, cédula y celular", expect: form_edit}
+    - {say: "todas obligatorias", expect: form_edit}
+    - {say: "cómo va quedando?", expect: form_preview}
+    - {say: "grábalo", expect: form_saved}
+- id: i02
+  role: admin
+  turns:
+    - {say: "quiero crear un formulario", expect: create_flow}
+    - {say: "Encuesta cafetería F7IND", expect: form_prepared}
+    - {say: "agrega una pregunta: ¿Qué tan rico estuvo el almuerzo? de tipo escala", expect: form_edit}
+    - {say: "y otra abierta para sugerencias", expect: form_edit}
+    - {say: "elimina la primera", expect: form_edit}
+    - {say: "no, mejor devuélvelo como estaba", expect: form_edit}
+    - {say: "listo, guárdalo", expect: form_saved}
+- id: i03
+  role: admin
+  turns:
+    - {say: "conecta el formulario Registro congreso F7IND al evento Congreso F7IND", expect: link_confirm}
+    - {say: "sí, hazlo", expect: link_done}
+    - {say: "cuántos inscritos lleva?", expect: event_info}
+    - {say: "y ya está publicado?", expect: form_info}
+- id: i04
+  role: admin
+  turns:
+    - {say: "asocia el formulario Registro congreso F7IND con el evento Congreso F7IND", expect: [link_confirm, link_done]}
+    - {say: "no, déjalo así", expect: [action_declined, link_done, none]}
+- id: i05
+  role: admin
+  turns:
+    - {say: "qué formulario tiene el evento Expo F7IND?", expect: clarify}
+    - {say: "el primero", expect: event_info}
+- id: i06
+  role: admin
+  turns:
+    - {say: "muéstrame el evento Cine foro F7IND", expect: event_info}
+    - {say: "ponle el formulario Registro congreso F7IND", expect: link_confirm}
+    - {say: "mejor no", expect: action_declined}
+- id: i07
+  role: admin
+  turns:
+    - {say: "abre el formulario Registro congreso F7IND para editarlo", expect: form_edit}
+    - {say: "agrégale una pregunta para el correo", expect: form_edit}
+    - {say: "que la última sea obligatoria", expect: form_edit}
+    - {say: "guarda los cambios", expect: form_saved}
+    - {say: "ahora publícalo", expect: form_confirm}
+    - {say: "sí", expect: form_published}
+- id: i08
+  role: basico
+  turns:
+    - {say: "agrégale una pregunta al formulario Registro congreso F7IND", expect: [denied, error]}
+- id: i09
+  role: admin
+  turns:
+    - {say: "ayúdame a diseñar una encuesta de satisfacción del taller de Excel", expect: form_proposal}
+    - {say: "hazlo más corto", expect: form_edit}
+    - {say: "que ninguna sea obligatoria", expect: form_edit}
+- id: i10
+  role: admin
+  turns:
+    - {say: "crea un formulario", expect: create_flow}
+    - {say: "un momento, qué eventos tenemos?", expect: "module_query:eventos"}
+    - {say: "sigamos con el formulario", expect: create_flow}
+- id: i11
+  role: admin
+  turns:
+    - {say: "quiero crear un formulario", expect: create_flow}
+    - {say: "Preferencias F7IND", expect: form_prepared}
+    - {say: "agrega una pregunta de jornada como desplegable", expect: form_edit}
+    - {say: "mañana, tarde y noche", expect: form_edit}
+    - {say: "guardar", expect: form_saved}
+- id: i12
+  role: admin
+  turns:
+    - {say: "quiero crear un formulario", expect: create_flow}
+    - {say: "Datos básicos F7IND", expect: form_prepared}
+    - {say: "incluye nombre, documento, correo y teléfono", expect: form_edit}
+    - {say: "la tercera y la cuarta que sean opcionales", expect: form_edit}
+    - {say: "pasa el correo de primero", expect: form_edit}
+- id: i13
+  role: admin
+  turns:
+    - {say: "vincula el formulario Registro congreso F7IND con el evento Cine foro F7IND", expect: link_confirm}
+    - {say: "qué sedes hay?", expect: [module_query:sedes, capability, none]}
+    - {say: "sí", expect: [none, clarify, out_of_scope, nav, offer_declined, not_integrated]}
+- id: i14
+  role: admin
+  turns:
+    - {say: "quítale el formulario al evento Congreso F7IND", expect: [link_confirm, link_done]}
+    - {say: "sí", expect: [link_done, none]}

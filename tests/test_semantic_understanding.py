@@ -422,7 +422,9 @@ def test_reserva_se_completa_entre_varios_mensajes():
     assert first.intent == "request_appointment"
     assert first.args.get("business_id") == 105
 
-    # El turno siguiente sólo aporta el momento.
+    # El turno siguiente sólo aporta el momento. El interceptor deja la reserva
+    # EN CURSO al atender "quiero una cita" (goal), como en el flujo real.
+    state.goal = "booking"
     state.booking["service_name"] = "Bandeja Paisa"
     later = u("mañana en la tarde", state=state)
     assert later.intent == "request_appointment"
@@ -664,6 +666,7 @@ def test_conversacion_completa_de_descubrimiento_a_reserva():
     assert eleccion.args.get("professional_name") == "Luis Peña"
 
     state.booking["professional_name"] = "Luis Peña"
+    state.goal = "booking"  # lo deja el interceptor al atender la reserva
     momento = u("mañana en la tarde", state=state)
     assert momento.intent == "request_appointment"
     # El negocio y la persona siguen ahí: no hubo que repetirlos.

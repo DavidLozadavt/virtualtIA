@@ -812,14 +812,16 @@ class VoiceCallRuntime:
         if self.recorder is not None:
             self.recorder.write_wav()
         # CRM del ERP: si el número es de un contacto, la llamada queda en su conversación.
-        if self._inicio is not None and self.transport.caller_number:
+        # getattr: _shutdown corre también si el constructor no llegó a terminar.
+        inicio = getattr(self, "_inicio", None)
+        if inicio is not None and self.transport.caller_number:
             try:
                 from services.telephony import crm_calls
                 crm_calls.avisar_llamada_ia(
                     self.transport.call_uuid or "",
                     self.transport.caller_number,
-                    int(time.monotonic() - self._inicio),
-                    self._dialogo,
+                    int(time.monotonic() - inicio),
+                    getattr(self, "_dialogo", []),
                 )
             except Exception as e:  # noqa: BLE001 — el cierre nunca se rompe por el CRM
                 logger.warning("[runtime] aviso CRM falló: %s", e)
